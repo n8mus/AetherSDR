@@ -10949,6 +10949,9 @@ void MainWindow::updateKeyerAvailability()
                                       : Qt::ArrowCursor);
     }
 #endif
+    // Commands invoked while Tools is closed must follow the same selection
+    // and mode edge as their status indicators.
+    updateToolsMenuState();
 }
 
 void MainWindow::centerActiveSliceInPanadapter(bool forceRadioCenter, double centerMhz)

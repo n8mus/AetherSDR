@@ -51,7 +51,7 @@ struct RtlCaptureBackendTestAccess {
         // replace only the USB entry point. In particular, do not inject a
         // different WFM graph or discard the provisional monitor mute here.
         backend.m_requested.receivers = {backend.initialReceiver()};
-        if (capacity > 1) {
+        if (capacity > 1 && backend.m_savedSettings.document.slices.isEmpty()) {
             // The separate membership fixture deliberately admits several FM
             // receivers; it has no saved receiver state or production capacity.
             backend.m_requested.hardware = {100'000'000, 2'400'000, 0, 0, 0, 240};
