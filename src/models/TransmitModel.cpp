@@ -19,6 +19,7 @@ TransmitModel::~TransmitModel()
 
 void TransmitModel::resetState()
 {
+    m_confirmReceiveCwPitch = false;
     cancelPttRelease();
     m_apdEnabled = false;
     m_apdConfigurable = false;
@@ -907,6 +908,10 @@ void TransmitModel::setCwSpeed(int wpm)
 void TransmitModel::setCwPitch(int hz)
 {
     hz = qBound(100, hz, 6000);
+    if (m_confirmReceiveCwPitch) {
+        emit cwPitchCommandIssued(hz);
+        return;
+    }
     if (m_cwPitch != hz) {
         m_cwPitch = hz;  // update local cache so rapid steppers accumulate
         emit phoneStateChanged();

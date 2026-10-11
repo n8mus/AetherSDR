@@ -98,7 +98,9 @@ reference results and remaining validation boundaries are documented in
 reason; WDSP's internal automatic squelch remains in use. Saved sessions use a
 muted legacy bootstrap before adopting the original receiver recipe and ID.
 
-The other non-FM modes retain their exclusive legacy DDC and 24 kHz format.
+USB, LSB, CW and CWR use native independent 48 kHz receiver recipes, with
+carrier-relative filtering and CW BFO translation described in
+[SSB/CW reception](rtl-ssb-cw.md). AM/SAM retain their exclusive legacy DDC and 24 kHz format.
 Monitor mute continues to clock an independent pre-monitor tap. Production
 admission remains one receiver. Selecting FM with an incompatible inherited
 wide/sideband filter chooses a 16 kHz passband; ordinary filter requests and
@@ -134,8 +136,8 @@ recipe remain subject to maintainer review under RFC #5468.
 
 ## Capture placement and display geometry
 
-FM/FM-N establishment and necessary capture recentering prefer a hardware
-center one quarter of the capture rate above the selected FM carrier. The existing
+FM/FM-N and CW/CWR establishment and necessary capture recentering prefer a hardware
+center one quarter of the capture rate above the selected carrier. The existing
 receiver NCO translates the unchanged absolute RF to baseband. The requested
 viewport is fitted to the confirmed usable capture. For each slice that
 will be DSP-active, its complete passband and guards must fit; a configured
@@ -148,7 +150,7 @@ direct-sampling boundary still constrain capture movement. DC overlap is
 reported truthfully rather than silently moving a slice or refusing browsing
 solely to keep another slice active. This does not enable librtlsdr offset
 tuning, alter the R82xx guard, erase FFT bins, subtract a signal mean, or notch
-demodulated audio. This FM-specific DC preference does not alter WFM or other
+demodulated audio. This DC preference does not alter WFM, SSB or the remaining
 legacy demodulators. Free-pan membership and parking apply to every configured
 RTL slice.
 

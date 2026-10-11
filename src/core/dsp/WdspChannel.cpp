@@ -1381,6 +1381,28 @@ bool WdspChannel::validateConfig(const Config& config, std::string* error) noexc
         setError(error, "WDSP AGC fixed gain must be finite");
         return false;
     }
+    if (config.analogReceiveDsp) {
+        const auto& receive = *config.analogReceiveDsp;
+        if (receive.trackingNotches.size() > 32
+            || std::ranges::any_of(receive.trackingNotches, [&](const ReceiveNotch& notch) {
+                return !std::isfinite(notch.centerHz) || std::abs(notch.centerHz) > config.dspSampleRate
+                    || !std::isfinite(notch.widthHz) || notch.widthHz < 200 || notch.widthHz > 12000;
+            })) {
+            setError(error, "WDSP tracking notch bank is outside its valid range");
+            return false;
+        }
+        if (config.direction != Direction::Receive
+            || receive.nrLevel < 0 || receive.nrLevel > 100
+            || receive.anfLevel < 0 || receive.anfLevel > 100
+            || !std::isfinite(receive.manualNotchCenterHz)
+            || std::abs(receive.manualNotchCenterHz) >= config.dspSampleRate / 2.0
+            || !std::isfinite(receive.manualNotchWidthHz)
+            || receive.manualNotchWidthHz <= 0
+            || receive.manualNotchWidthHz >= config.dspSampleRate / 2.0) {
+            setError(error, "WDSP analog receive controls are outside their valid range");
+            return false;
+        }
+    }
     if (config.rxPanelGain && (config.direction != Direction::Receive
         || !std::isfinite(*config.rxPanelGain) || *config.rxPanelGain < 0.0)) {
         setError(error, "WDSP RX panel gain must be finite, non-negative and receive-only");
@@ -1574,6 +1596,32 @@ bool WdspChannel::open() noexcept
         SetRXASPCWBandwidth(m_channelId, m_config.apfBandwidthHz);
         SetRXASPCWGain(m_channelId, m_config.apfGain);
         SetRXASPCWRun(m_channelId, m_config.apfEnabled ? 1 : 0);
+        if (m_config.analogReceiveDsp) {
+            const auto& receive = *m_config.analogReceiveDsp;
+            // Bounded adaptation strength; the midpoint is RXA.c's default.
+            const auto gain = [](int level) { return 0.00001 * std::pow(100.0, level / 100.0); };
+            SetRXAANRVals(m_channelId, 64, 16, gain(receive.nrLevel), 0.1);
+            SetRXAANFVals(m_channelId, 64, 16, gain(receive.anfLevel), 0.1);
+            SetRXAANRRun(m_channelId, receive.nrEnabled ? 1 : 0);
+            SetRXAANFRun(m_channelId, receive.anfEnabled ? 1 : 0);
+            RXANBPSetTuneFrequency(m_channelId, 0.0);
+            int notchIndex = 0;
+            for (const auto& notch : receive.trackingNotches) {
+                if (RXANBPAddNotch(m_channelId, notchIndex++, notch.centerHz,
+                                  notch.widthHz, notch.active ? 1 : 0) != 0) {
+                    CloseChannel(m_channelId); return false;
+                }
+            }
+            if (receive.manualNotchEnabled) {
+                if (RXANBPAddNotch(m_channelId, notchIndex, receive.manualNotchCenterHz,
+                                  receive.manualNotchWidthHz, 1) != 0) {
+                    CloseChannel(m_channelId);
+                    return false;
+                }
+            }
+            RXANBPSetNotchesRun(m_channelId,
+                receive.manualNotchEnabled || !receive.trackingNotches.empty() ? 1 : 0);
+        }
     } else {
         SetTXAMode(m_channelId, wdspMode(m_config.mode));
         SetTXABandpassFreqs(m_channelId, m_config.filterLowHz, m_config.filterHighHz);

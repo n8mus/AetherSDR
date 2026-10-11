@@ -52,6 +52,10 @@ void fexchange2(int channel, float* inputI, float* inputQ,
 // must pace a burst of input blocks against the worker.
 int GetChannelOutputReady(int channel);
 void SetRXAMode(int channel, int mode);
+void SetRXAANRRun(int channel, int run);
+void SetRXAANRVals(int channel, int taps, int delay, double gain, double leakage);
+void SetRXAANFRun(int channel, int run);
+void SetRXAANFVals(int channel, int taps, int delay, double gain, double leakage);
 // Broadcast decoder controls, WDSP Guide section 5.3.10. The local patch
 // applies deemphasis to both live filters; indicator readback is an atomic
 // latest-completed-block observation. The caller must own channel lifetime.

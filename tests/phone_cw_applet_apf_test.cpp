@@ -289,6 +289,28 @@ int main(int argc, char** argv)
     check("4.5  the row comes back when a capable radio attaches",
           !apfRow->isHidden() && apfBtn->isEnabled());
 
+    applet.setMode(QStringLiteral("CWR"));
+    applet.setTransmitControlsAvailable(false);
+    check("receive-only CW keeps pitch and APF reachable while disabling keyer controls",
+          pitch->isEnabled() && apfBtn->isEnabled() && !speed->isEnabled()
+              && !speedText->isEnabled() && !speed->accessibleDescription().isEmpty());
+    tx.setReceiveCwPitchConfirmation(true);
+    QSignalSpy receivePitch(&tx, &AetherSDR::TransmitModel::cwPitchCommandIssued);
+    cwCommands.clear();
+    pitch->setText(QStringLiteral("720"));
+    QMetaObject::invokeMethod(pitch, "editingFinished", Qt::DirectConnection);
+    check("receive pitch editor shows accepted pitch until adoption",
+          receivePitch.size() == 1 && receivePitch.last().at(0).toInt() == 720
+              && pitch->text() == QStringLiteral("1500") && cwCommands.isEmpty());
+    AetherSDR::TransmitDelta acceptedPitch;
+    acceptedPitch.cwPitch = 720;
+    tx.applyChanges(acceptedPitch);
+    check("accepted receive pitch reaches the existing CW editor",
+          pitch->text() == QStringLiteral("720") && receivePitch.size() == 1);
+    applet.setTransmitControlsAvailable(true);
+    check("next transmitter session restores the existing keyer controls",
+          speed->isEnabled() && speedText->isEnabled() && pitch->isEnabled());
+
     std::printf("\n%s — %d failure(s)\n", g_failures ? "FAILED" : "PASSED",
                 g_failures);
     return g_failures ? 1 : 0;

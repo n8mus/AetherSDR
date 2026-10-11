@@ -964,18 +964,21 @@ void PhoneCwApplet::buildCwPanel()
             if (!m_model) return;
             int hz = qBound(m_pitchMinHz, m_pitchEdit->text().toInt() - m_pitchStepHz, m_pitchMaxHz);
             m_model->setCwPitch(hz);
-            m_pitchEdit->setText(QString::number(hz));
+            m_pitchEdit->setText(QString::number(
+                m_model->confirmsReceiveCwPitch() ? m_model->cwPitch() : hz));
         });
         connect(m_pitchUp, &QPushButton::clicked, this, [this]() {
             if (!m_model) return;
             int hz = qBound(m_pitchMinHz, m_pitchEdit->text().toInt() + m_pitchStepHz, m_pitchMaxHz);
             m_model->setCwPitch(hz);
-            m_pitchEdit->setText(QString::number(hz));
+            m_pitchEdit->setText(QString::number(
+                m_model->confirmsReceiveCwPitch() ? m_model->cwPitch() : hz));
         });
         connect(m_pitchEdit, &QLineEdit::editingFinished, this, [this]() {
             if (!m_model) return;
             int hz = qBound(m_pitchMinHz, m_pitchEdit->text().toInt(), m_pitchMaxHz);
-            m_pitchEdit->setText(QString::number(hz));
+            m_pitchEdit->setText(QString::number(
+                m_model->confirmsReceiveCwPitch() ? m_model->cwPitch() : hz));
             m_model->setCwPitch(hz);
         });
 
@@ -1072,6 +1075,29 @@ void PhoneCwApplet::buildCwPanel()
 }
 
 // ── Mode switching ───────────────────────────────────────────────────────────
+
+void PhoneCwApplet::setTransmitControlsAvailable(bool available)
+{
+    if (m_transmitControlsAvailable == available) { return; }
+    m_transmitControlsAvailable = available;
+    // Pitch and APF are receive controls too, so their CW face remains usable.
+    const QList<QWidget*> controls{m_phonePanel, m_delaySlider, m_delayEdit,
+        m_speedSlider, m_speedEdit, m_sidetoneBtn, m_sidetoneSlider,
+        m_sidetoneEdit, m_cwPanSlider, m_breakinBtn, m_iambicBtn, m_holdDelayBtn};
+    for (QWidget* control : controls) {
+        if (!available) {
+            control->setProperty("transmitAvailableTooltip", control->toolTip());
+            control->setProperty("transmitAvailableDescription", control->accessibleDescription());
+        }
+        control->setEnabled(available);
+        control->setToolTip(available
+            ? control->property("transmitAvailableTooltip").toString()
+            : tr("Transmit controls are unavailable on this receive-only radio"));
+        control->setAccessibleDescription(available
+            ? control->property("transmitAvailableDescription").toString()
+            : tr("Transmit controls are unavailable on this receive-only radio"));
+    }
+}
 
 void PhoneCwApplet::setMode(const QString& mode)
 {
@@ -1190,6 +1216,9 @@ void PhoneCwApplet::setSlice(SliceModel* slice)
     m_slice = slice;
 
     if (m_slice) {
+        connect(m_slice, &SliceModel::receiveDspRequested, this, [this] {
+            if (m_slice && m_slice->receiveControlsConfirmed()) { syncApfFromSlice(); }
+        }, Qt::QueuedConnection);
         connect(m_slice, &SliceModel::modeChanged,
                 this, &PhoneCwApplet::setMode);
         // Radio-side echo drives the UI; the button below only requests
@@ -1244,7 +1273,7 @@ void PhoneCwApplet::syncApfFromSlice()
     m_apfSlider->setEnabled(bound && on);
     m_apfEdit->setEnabled(bound && on);
     m_apfSlider->setValue(level);
-    if (!m_apfEdit->hasFocus())
+    if (!m_apfEdit->hasFocus() || (m_slice && m_slice->receiveControlsConfirmed()))
         m_apfEdit->setText(QString::number(level));
     m_updatingFromModel = false;
 }
@@ -1317,7 +1346,7 @@ void PhoneCwApplet::syncPhoneFromModel()
 // accessible description carry the same distinction for non-visual use.
 void PhoneCwApplet::updateHoldDelayAffordance()
 {
-    if (!m_holdDelayBtn) return;
+    if (!m_holdDelayBtn || !m_transmitControlsAvailable) return;
     const bool on    = m_model && m_model->holdBreakInDelay();
     const bool armed = m_model && m_model->holdBreakInDelayArmed();
     const bool unarmed = on && !armed;
@@ -1367,7 +1396,7 @@ void PhoneCwApplet::syncCwFromModel()
     m_holdDelayBtn->setChecked(m_model->holdBreakInDelay());
     updateHoldDelayAffordance();
 
-    if (!m_pitchEdit->hasFocus())
+    if (!m_pitchEdit->hasFocus() || m_model->confirmsReceiveCwPitch())
         m_pitchEdit->setText(QString::number(m_model->cwPitch()));
 
     m_updatingFromModel = false;

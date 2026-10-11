@@ -10,6 +10,8 @@
 #include "models/PanadapterModel.h"
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QJsonObject>
+#include <QStringList>
 #include <QPointer>
 #include <cstdio>
 #include <algorithm>
@@ -343,6 +345,245 @@ static void analogBankSelection(int capacity = 4)
     backend.disconnectRadio();
 }
 
+static void invalidLegacySidebandRestore()
+{
+    using Access = rtl::RtlCaptureBackendTestAccess;
+    const RadioSettingsScope scope("rtl", "legacy-sideband-filter");
+    const QJsonObject legacy{{"rfFrequencyHz", 100'000'000.0}, {"mode", "USB"},
+        {"filterLowHz", -3000}, {"filterHighHz", 3000}, {"sampleRateHz", 2'400'000},
+        {"futureLegacy", "preserve"}};
+    check(scope.setFeature("OperatingState", 3, legacy), "invalid legacy USB cuts seeded without normalization");
+    RadioModel model;
+    check(model.rebuildBackendForTest("rtl"), "legacy sideband restore uses real backend");
+    RadioModelSliceLifecycleTestAccess::restore(model, "legacy-sideband-filter");
+    auto& backend = *static_cast<rtl::RtlSdrBackend*>(model.backend());
+    QStringList warnings;
+    QObject::connect(&backend, &IRadioBackend::configurationWarning, &model,
+        [&](const QString& warning) { warnings.push_back(warning); });
+    auto usb = std::make_shared<test::DeviceState>();
+    Access::start(backend, std::make_unique<test::InjectedDevice>(usb));
+    usb->releaseReadback(); CaptureClock clock(usb);
+    check(waitFor([&] { clock.advance(); return Access::idle(backend) && model.slice(0)
+        && !warnings.empty(); }), "invalid legacy cuts connect safely and report restore refusal");
+    if (model.slice(0)) {
+        check(model.slice(0)->mode() == "AM" && model.slice(0)->audioMute(),
+            "invalid legacy USB never becomes an audible or accepted native recipe");
+    }
+    RadioModelSliceLifecycleTestAccess::flush(model);
+    const auto migrated = RtlSliceSettings(scope).load();
+    check(migrated.status == RtlSliceSettings::ReadStatus::Ready
+        && migrated.document.slices.value(0).mode == "USB"
+        && migrated.document.slices.value(0).filterLowHz == -3000
+        && migrated.document.slices.value(0).filterHighHz == 3000,
+        "muted fallback cannot overwrite the migrated original USB settings");
+    const auto retained = scope.featureExact("OperatingState");
+    check(retained.value("mode") == legacy.value("mode")
+        && retained.value("filterLowHz") == legacy.value("filterLowHz")
+        && retained.value("filterHighHz") == legacy.value("filterHighHz")
+        && retained.value("futureLegacy") == legacy.value("futureLegacy"),
+        "legacy downgrade record and unknown data remain intact");
+    check(std::ranges::any_of(warnings, [](const QString& warning) {
+        return warning.contains("Saved SSB/CW") && warning.contains("preserved");
+    }), "restore warning explicitly describes preserved unsupported settings");
+    backend.disconnectRadio();
+    rtl::RtlTrackingNotches preserved;
+    preserved.entries = {{19, 100'000'700, 400, true}};
+    check(RtlSliceSettings(scope).patch(100'000'000, 2'400'000,
+        {migrated.document.slices.value(0)}, {}, preserved), "valid notches coexist with refused saved cuts");
+    RadioModel again;
+    check(again.rebuildBackendForTest("rtl"), "canonical invalid receiver reconnect initializes");
+    RadioModelSliceLifecycleTestAccess::restore(again, "legacy-sideband-filter");
+    auto& next = *static_cast<rtl::RtlSdrBackend*>(again.backend());
+    auto nextUsb = std::make_shared<test::DeviceState>();
+    Access::start(next, std::make_unique<test::InjectedDevice>(nextUsb));
+    nextUsb->releaseReadback(); CaptureClock nextClock(nextUsb);
+    check(waitFor([&] { nextClock.advance(); return Access::idle(next) && again.slice(0); }),
+        "canonical invalid receiver retains safe bootstrap");
+    RadioModelSliceLifecycleTestAccess::flush(again);
+    check(RtlSliceSettings(scope).load().document.trackingNotches == preserved,
+        "refused receiver restore cannot erase the independently valid global notch bank");
+    next.disconnectRadio();
+}
+
+static void sidebandControlsAndPersistence()
+{
+    using Access = rtl::RtlCaptureBackendTestAccess;
+    const RadioSettingsScope scope("rtl", "sideband-controls");
+    RtlSliceSettings::Slice saved;
+    saved.id = 3; saved.frequencyHz = 100'000'000; saved.mode = "CW";
+    saved.filterLowHz = -250; saved.filterHighHz = 250;
+    saved.agcMode = "slow"; saved.agcThreshold = 35;
+    RtlSliceSettings::Slice fm;
+    fm.id = 4; fm.frequencyHz = 100'200'000; fm.mode = "FM";
+    fm.filterLowHz = -8000; fm.filterHighHz = 8000;
+    check(RtlSliceSettings(scope).patch(100'600'000, 2'400'000, {saved, fm}), "CW and FM receiver document seeded");
+    RadioModel model;
+    check(model.rebuildBackendForTest("rtl"), "SSB/CW real model backend initialized");
+    RadioModelSliceLifecycleTestAccess::restore(model, "sideband-controls");
+    auto& backend = *static_cast<rtl::RtlSdrBackend*>(model.backend());
+    auto usb = std::make_shared<test::DeviceState>();
+    check(backend.capabilities().maxNotchFilters == 0, "tracking notches await an adopted sideband receiver");
+    Access::start(backend, std::make_unique<test::InjectedDevice>(usb), 2);
+    usb->releaseReadback();
+    CaptureClock clock(usb);
+    const auto settle = [&] { clock.advance(); return Access::idle(backend); };
+    check(waitFor([&] { return settle() && model.slice(3); }), "CW sparse receiver restored through worker adoption");
+    auto* slice = model.slice(3);
+    if (!slice) { backend.disconnectRadio(); return; }
+    check(slice->mode() == "CW" && slice->agcMode() == "slow" && slice->agcThreshold() == 35,
+        "accepted CW restore reports actual AGC recipe");
+    const auto caps = backend.capabilities();
+    check(caps.maxNotchFilters == 32 && caps.notchMinWidthHz == 200
+        && caps.notchMaxWidthHz == 12000 && !caps.notchHasDepth,
+        "adopted sideband advertises measured tracking-notch capacity and width limits");
+    PcmFrame fmFrame;
+    QObject::connect(&backend, &IRadioBackend::sliceAudioFrameReady, &model,
+        [&](int id, const PcmFrame& frame) { if (id == 4) { fmFrame = frame; } });
+    PcmFrame speakerFrame;
+    int speakerDiscontinuities = 0;
+    QObject::connect(&backend, &IRadioBackend::audioFrameReady, &model, [&](const PcmFrame& frame) {
+        speakerFrame = frame;
+        if (frame.discontinuity()) { ++speakerDiscontinuities; }
+    });
+    check(waitFor([&] { clock.advance(); return speakerFrame.current() && fmFrame.current(); }),
+        "restored CW supplies typed speaker PCM before graph edits");
+    const PcmFrame beforeMonitor = speakerFrame;
+    slice->setAudioGain(23); slice->setAudioMute(true);
+    check(waitFor([&] { return settle() && slice->audioGain() == 23 && slice->audioMute(); }),
+        "monitor edits adopt independently of receiver DSP");
+    check(beforeMonitor.current(), "gain and mute preserve the speaker epoch");
+    const PcmFrame beforeGraph = speakerFrame;
+    const PcmFrame fmBeforeGraph = fmFrame;
+    const int discontinuitiesBeforeGraph = speakerDiscontinuities;
+    RadioModelSliceLifecycleTestAccess::flush(model);
+    const auto before = scope.featureExact("RtlSlices");
+    slice->setAgcMode("fast"); slice->setAgcThreshold(42); slice->setAgcOffLevel(19);
+    slice->setNbKind(NoiseBlankerKind::Advanced); slice->setNbLevel(73);
+    slice->setNbFill(NoiseBlankerFill::Interpolate);
+    slice->setApf(true); slice->setApfLevel(80);
+    slice->setNr(true); slice->setNrLevel(62);
+    slice->setAnf(true); slice->setAnfLevel(57);
+    slice->setMn(true); slice->setMnLevel(30);
+    slice->setRit(true, 120);
+    backend.setCwPitch(800);
+    check(slice->agcMode() == "slow" && slice->agcThreshold() == 35
+        && slice->agcOffLevel() == 10 && !slice->apfOn() && !slice->ritOn(),
+        "pending receive DSP controls cannot publish optimistic model state");
+    RadioModelSliceLifecycleTestAccess::flush(model);
+    check(scope.featureExact("RtlSlices") == before, "pending DSP intent never overwrites accepted saved state");
+    check(waitFor([&] { return settle() && slice->agcMode() == "fast" && slice->agcThreshold() == 42
+        && slice->agcOffLevel() == 19 && slice->apfOn() && slice->apfLevel() == 80
+        && slice->nbKind() == NoiseBlankerKind::Advanced && slice->nbLevel() == 73
+        && slice->nbFill() == NoiseBlankerFill::Interpolate && slice->ritOn() && slice->ritFreq() == 120
+        && model.transmitModel().cwPitch() == 800
+        && slice->nrOn() && slice->nrLevel() == 62 && slice->anfOn() && slice->anfLevel() == 57
+        && slice->mnOn() && slice->mnLevel() == 30; }),
+        "coalesced AGC/NB/NR/ANF/MN/APF/RIT/pitch edits preserve each field through prepared-bank adoption");
+    check(fmBeforeGraph.current(), "CW pitch and sideband DSP changes preserve the FM sibling decoder lease");
+    check(!beforeGraph.current(), "accepted sideband graph edits revoke already queued speaker PCM");
+    check(waitFor([&] { clock.advance(); return speakerFrame.current()
+        && speakerDiscontinuities > discontinuitiesBeforeGraph; }),
+        "rebuilt sideband speaker resumes with an explicit discontinuity");
+    const auto accepted = Access::state(backend).receivers.front();
+    check(accepted.passband.carrierHz == 100'000'000 && accepted.passband.translationHz == 120
+        && accepted.passband.filterLowHz == -250 && accepted.passband.filterHighHz == 250,
+        "RIT changes the RF extraction interval without changing the displayed carrier/filter");
+    RadioModelSliceLifecycleTestAccess::flush(model);
+    const auto persisted = RtlSliceSettings(scope).load().document.slices.value(3);
+    check(persisted.agcMode == "fast" && persisted.agcThreshold == 42 && persisted.agcOffLevel == 19
+        && persisted.cwPitchHz == 800 && persisted.ritEnabled && persisted.ritOffsetHz == 120
+        && persisted.nbKind == NoiseBlankerKind::Advanced && persisted.nbLevel == 73
+        && persisted.nbFill == NoiseBlankerFill::Interpolate && persisted.apfEnabled && persisted.apfLevel == 80,
+        "only adopted complete receiver DSP state reaches RtlSlices");
+    const auto savedAccepted = scope.featureExact("RtlSlices");
+    backend.setCwPitch(0); backend.setSliceRitOffset(3, 100000);
+    backend.setSliceAgc(3, "invalid", 45);
+    check(Access::idle(backend) && model.transmitModel().cwPitch() == 800,
+        "invalid DSP values do not prepare or publish");
+    RadioModelSliceLifecycleTestAccess::flush(model);
+    check(scope.featureExact("RtlSlices") == savedAccepted, "invalid DSP values cannot corrupt persistence");
+    TnfModel& notches = model.tnfModel();
+    check(notches.confirmsControls(), "RTL tracking-notch model uses confirmed policy");
+    RadioModelSliceLifecycleTestAccess::flush(model);
+    const auto beforeNotches = scope.featureExact("RtlSlices");
+    notches.createTnf(100.00015); notches.createTnf(100.00030);
+    check(notches.tnfs().isEmpty(), "pending tracking-notch creates publish no markers");
+    RadioModelSliceLifecycleTestAccess::flush(model);
+    check(scope.featureExact("RtlSlices") == beforeNotches, "pending notch creates do not persist");
+    check(waitFor([&] { return settle() && notches.tnfs().size() == 2; }),
+        "two coalesced tracking notches reach accepted model");
+    if (notches.tnfs().size() != 2) { backend.disconnectRadio(); return; }
+    const int firstNotch = notches.tnfs().firstKey();
+    const int removedNotch = notches.tnfs().lastKey();
+    check(notches.tnf(firstNotch)->widthHz == 200, "adopted notch reports real minimum width");
+    notches.setTnfFreq(firstNotch, 100.00020);
+    notches.setTnfWidth(firstNotch, 800);
+    notches.requestGlobalTnfEnabled(false);
+    check(notches.tnf(firstNotch)->widthHz == 200 && notches.globalEnabled(),
+        "notch move width and bypass remain accepted while pending");
+    check(waitFor([&] { return settle() && notches.tnf(firstNotch)->widthHz == 800
+        && std::abs(notches.tnf(firstNotch)->freqMhz - 100.00020) < 1e-9
+        && !notches.globalEnabled(); }), "coalesced notch edits adopt together");
+    notches.requestRemoveTnf(removedNotch);
+    check(notches.tnf(removedNotch), "pending removal retains accepted notch marker");
+    check(waitFor([&] { return settle() && !notches.tnf(removedNotch); }),
+        "adopted removal removes only selected notch");
+    RadioModelSliceLifecycleTestAccess::flush(model);
+    const auto notchDocument = RtlSliceSettings(scope).load().document.trackingNotches;
+    check(!notchDocument.enabled && notchDocument.entries.size() == 1
+        && notchDocument.entries.front().id == firstNotch
+        && notchDocument.entries.front().widthHz == 800,
+        "accepted global notch bank and bypass persist together");
+    const auto validNotchDocument = scope.featureExact("RtlSlices");
+    notches.setTnfWidth(firstNotch, 13000);
+    check(Access::idle(backend) && notches.tnf(firstNotch)->widthHz == 800,
+        "invalid notch width cannot change accepted model");
+    RadioModelSliceLifecycleTestAccess::flush(model);
+    check(scope.featureExact("RtlSlices") == validNotchDocument,
+        "rejected notch edits cannot change saved bank");
+    auto* pan = model.panadapter(slice->panId());
+    if (pan) {
+        model.requestPanCenter(pan->panId(), 104.0, -1.0, IRadioBackend::PanCenterIntent::Drag);
+        check(waitFor([&] { return settle() && !slice->inCapture(); }), "free-pan parks configured CW receiver");
+        check(backend.capabilities().maxNotchFilters == 32,
+            "configured parked sideband keeps tracking-notch editing available");
+        const auto center = Access::state(backend).hardware.centerHz;
+        const int writes = usb->writes;
+        slice->setAgcThreshold(47); backend.setCwPitch(900);
+        check(waitFor([&] { return settle() && slice->agcThreshold() == 47
+            && model.transmitModel().cwPitch() == 900; }), "parked receiver accepts DSP configuration");
+        notches.setTnfFreq(firstNotch, 100.00025);
+        check(waitFor([&] { return settle() && std::abs(notches.tnf(firstNotch)->freqMhz - 100.00025) < 1e-9; }),
+            "parked receiver retains editable tracking-notch bank");
+        check(!slice->inCapture() && Access::state(backend).hardware.centerHz == center && usb->writes == writes,
+            "parked DSP changes cannot retune USB or revive audio");
+    }
+    RadioModelSliceLifecycleTestAccess::flush(model);
+    const auto finalNotches = RtlSliceSettings(scope).load().document.trackingNotches;
+    backend.disconnectRadio();
+    RadioModel restored;
+    check(restored.rebuildBackendForTest("rtl"), "reconnect model initialized");
+    RadioModelSliceLifecycleTestAccess::restore(restored, "sideband-controls");
+    auto& second = *static_cast<rtl::RtlSdrBackend*>(restored.backend());
+    auto nextUsb = std::make_shared<test::DeviceState>();
+    Access::start(second, std::make_unique<test::InjectedDevice>(nextUsb), 2);
+    nextUsb->releaseReadback(); CaptureClock nextClock(nextUsb);
+    check(waitFor([&] { nextClock.advance(); return Access::idle(second) && restored.slice(3); }),
+        "reconnect restores sparse CW identity");
+    if (auto* resumed = restored.slice(3)) {
+        check(resumed->agcMode() == "fast" && resumed->agcThreshold() == 47
+            && resumed->nbKind() == NoiseBlankerKind::Advanced && resumed->apfOn()
+            && resumed->ritOn() && resumed->ritFreq() == 120 && restored.transmitModel().cwPitch() == 900,
+            "reconnect restores independent accepted DSP controls, including parked configuration");
+    }
+    check(restored.tnfModel().tnfs().size() == 1 && !restored.tnfModel().globalEnabled()
+        && restored.tnfModel().tnf(firstNotch)
+        && restored.tnfModel().tnf(firstNotch)->widthHz == 800
+        && Access::state(second).trackingNotches == finalNotches,
+        "reconnect restores accepted notch identity bank and global bypass");
+    second.disconnectRadio();
+}
+
 int main(int argc, char** argv)
 {
     TestSettingsProfile profile(QStringLiteral("rtl-model-acceptance"));
@@ -351,6 +592,8 @@ int main(int argc, char** argv)
     analogBankSelection();
     analogBankSelection(8);
     analogBankRestoreAndSharedCapture();
+    invalidLegacySidebandRestore();
+    sidebandControlsAndPersistence();
     const RadioSettingsScope scope("rtl", "model-accepted");
     RtlSliceSettings::Slice saved;
     saved.id = 3; saved.frequencyHz = 99'900'000; saved.mode = "FM";

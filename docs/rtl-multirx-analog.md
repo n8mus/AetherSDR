@@ -17,8 +17,10 @@ platform retains one. The automation bridge retains its independent receive
 authorization and TX exclusion. Use a separate `AETHER_SETTINGS_DIR` and
 preserve the normal launcher/profile before hardware testing.
 
-FM, FM-N and native analog WFM can coexist. Each receiver owns its exact RF
-filter, Mono/Stereo choice, deemphasis and monitor gain/pan/mute. AM/SAM/SSB/CW remain singleton legacy configurations, including when a
+FM, FM-N, native analog WFM, USB, LSB, CW and CWR can coexist. Each receiver owns its exact RF
+filter and applicable demodulator controls, plus monitor gain/pan/mute. CW pitch is session-wide.
+See [SSB/CW reception](rtl-ssb-cw.md) for the signed filter, BFO and consumer contracts.
+AM/SAM remain singleton legacy configurations, including when a
 configured sibling is parked. A refusal reports the unsupported combination
 without adopting a partial recipe. Digital FM is outside this branch.
 

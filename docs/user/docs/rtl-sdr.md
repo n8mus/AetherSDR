@@ -28,7 +28,7 @@ Building from source: the `ENABLE_RTL` option is on by default and takes effect 
 
 ## Using an RTL-SDR
 
-- **Modes:** AM, SAM, FM, FM-N, WFM, USB, LSB, CW and CW-R.
+- **Modes:** AM, SAM, FM, FM-N, WFM, USB, LSB, CW and CWR.
 - **Tuning range:** 24 kHz to 1.766 GHz. Below 24 MHz the dongle uses direct sampling; HF reception on particular dongles (for example ones with an upconverter or the RTL-SDR Blog V4) has not been qualified.
 - **Sample rates** up to 3.0 MS/s; 2.4 MS/s is the default.
 - **Browsing the capture:** pan around the captured bandwidth and your slice keeps its frequency and settings. A slice that falls outside the usable capture is parked (silent) and resumes when it fits again.
@@ -39,6 +39,18 @@ Building from source: the `ENABLE_RTL` option is on by default and takes effect 
 - **Tools → Radio Health...** shows the dongle's status.
 
 Normal launches admit **one receiver**, even though the capture is wide.
+
+### SSB and CW
+
+Select **USB** or **LSB** for single-sideband reception, or **CW** / **CWR** for Morse. These modes use independent receive DSP and 48 kHz audio. Filter presets and draggable edges change the actual receive passband. The CW marker remains on the station carrier; **Pitch** changes the audio tone without moving the dial frequency. Pitch is shared by the RTL session's CW receivers.
+
+**AGC** offers Off, Slow, Med and Fast. **AGC-T** sets the local DSP's maximum gain; with AGC Off, **Off Level** controls fixed gain. These are local receiver controls, not a calibrated match for a FlexRadio's AGC-T scale. **NB** operates on receiver IQ; **APF** narrows CW audio around the selected pitch. **RIT** offsets reception while keeping the displayed dial frequency. These settings belong to each slice, except the shared CW pitch, and survive parking and reconnecting.
+
+The [CW decoder](./cw-decoder.md) follows the selected CW or CWR slice. [Copy Assist](./copy-assist.md) follows the selected voice slice's independent audio before speaker volume, mute and client audio effects. A muted slice can still decode; a parked slice cannot. Selecting another slice or parking it discards queued audio from the old source. Copy Assist needs a downloaded speech model.
+
+**NR**, **ANF** and **MN** run independently inside each SSB/CW receiver. NR reduces noise, ANF suppresses sustained tones, and MN places a fixed-width notch within the passband. Their settings use the local WDSP algorithms, so the values are not equivalent to a FlexRadio's settings. [Tracking notch filters](./tnf-tracking-notch-filters.md) stay at an RF frequency as receivers tune past them.
+
+Client **AetherDSP** voice processing applies to the speaker stream; it is not independent per-slice processing and is not included in the native Copy Assist feed.
 
 ### Broadcast FM
 
@@ -58,7 +70,7 @@ Use the [TCI Server](./tci-server.md) on Linux, macOS or Windows. On Linux and m
 
 The process-only evaluation setting admits 2, 4 or 8 receivers on Linux x86-64, Windows x64 and macOS arm64. It requires both `AETHER_AUTOMATION=1` and `AETHER_RTL_EVALUATION_RECEIVERS=2`, `4` or `8` at launch; it is not saved and cannot resize a running session. Use an isolated settings profile for evaluation. It does **not** change the one-receiver production limit or qualify a platform for sustained multi-receiver use.
 
-FM, FM-N and analog WFM can share the capture in this evaluation. Each receiver retains its frequency, filter, squelch and audio controls when parked. Selecting another slice does not retune the capture or change its audio settings. AM, SAM, USB, LSB, CW and CW-R remain singleton configurations, even if another configured receiver is parked. See the [evaluation procedure](https://github.com/aethersdr/AetherSDR/blob/main/docs/rtl-multirx-analog.md) for the validation boundaries.
+FM, FM-N, analog WFM, USB, LSB, CW and CWR can share the capture in this evaluation. Each receiver retains its frequency, filter, squelch and audio controls when parked. Selecting another slice does not retune the capture or change its audio settings. AM and SAM remain singleton legacy configurations, even if another configured receiver is parked. See the [evaluation procedure](https://github.com/aethersdr/AetherSDR/blob/main/docs/rtl-multirx-analog.md) for the validation boundaries.
 
 ## Reference
 

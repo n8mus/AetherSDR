@@ -93,6 +93,28 @@ public:
         bool operator==(const WbfmReceive&) const = default;
     };
 
+    // Optional host receive stages, prepared before the channel starts. Other
+    // owners retain WDSP's defaults unless they supply this recipe.
+    struct ReceiveNotch
+    {
+        double centerHz = 0;
+        double widthHz = 200;
+        bool active = true;
+        bool operator==(const ReceiveNotch&) const = default;
+    };
+    struct AnalogReceiveDsp
+    {
+        std::vector<ReceiveNotch> trackingNotches;
+        bool nrEnabled = false;
+        int nrLevel = 50;
+        bool anfEnabled = false;
+        int anfLevel = 50;
+        bool manualNotchEnabled = false;
+        double manualNotchCenterHz = 1500.0;
+        double manualNotchWidthHz = 400.0;
+        bool operator==(const AnalogReceiveDsp&) const = default;
+    };
+
     struct Config
     {
         Direction direction = Direction::Receive;
@@ -103,6 +125,7 @@ public:
         int outputSampleRate = 48000;
         Mode mode = Mode::Usb;
         std::optional<FmReceive> fmReceive;
+        std::optional<AnalogReceiveDsp> analogReceiveDsp;
         std::optional<WbfmReceive> wbfmReceive;
         // RXA output panel gain, linear, applied after the AGC. Unset keeps
         // WDSP's create_rxa() default of 4.0 (+12.04 dB, #5942).

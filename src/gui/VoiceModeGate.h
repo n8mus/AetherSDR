@@ -22,10 +22,22 @@ inline bool isVoiceMode(const QString& mode)
 // (The HL2 did too, until Hl2Backend::setSliceMode began collapsing CWU onto
 // CW. All three spellings stay here: Icom still produces CWU, and a guard
 // that is only correct while every backend canonicalises is the wrong kind.)
+inline bool isReverseCwMode(const QString& mode)
+{
+    return mode == QLatin1String("CWL") || mode == QLatin1String("CWR");
+}
+
+// Only a command-plane receiver interprets the session CWL offset flag.
+// Explicit reverse modes remain authoritative on independent host receivers.
+inline int cwReceiveSidebandSign(const QString& mode, bool hasCommandPlane, bool cwlEnabled)
+{
+    return isReverseCwMode(mode) || (hasCommandPlane && cwlEnabled) ? -1 : 1;
+}
+
 inline bool isCwMode(const QString& mode)
 {
     return mode == QLatin1String("CW") || mode == QLatin1String("CWU")
-        || mode == QLatin1String("CWL");
+        || isReverseCwMode(mode);
 }
 
 // Whether an already-open Copy Assist panel should be torn down (the pure half

@@ -86,6 +86,12 @@ Either one shows or hides the panel, which docks under the waterfall of the acti
 - A band-stack recall or a disconnect does **not** close an open panel, so transcription survives a band change.
 - Whenever the panel is open, the ASR toggle is lit and clickable, so you can always close it by hand.
 
+### Which receiver is transcribed
+
+On RTL-SDR, Copy Assist uses the selected slice's independent audio before speaker volume, mute and client DSP. Other audible slices do not enter that feed. **Transcribe from unprocessed audio (bypasses NR and RX effects)** is unavailable for this route and explains why; its saved preference is retained for radios that use the presentation stream. Retuning, switching slices or parking the receiver starts a fresh transcription context. A parked receiver supplies no audio until it returns to capture.
+
+Other radios retain their existing presentation-audio route and pre/post-DSP choice. Selecting a slice controls mode availability; it does not isolate that slice from a shared presentation mix.
+
 ### Transcribing
 
 1. Open the panel and click **Disabled** so it reads **Enabled**.
@@ -101,7 +107,7 @@ Text is **coloured by recognition confidence**, the same way as the [CW Decoder]
 | Orange | Questionable |
 | Red | Low |
 
-Copy Assist hears the audio after client-side noise reduction, so a suitable [DSP Noise Mitigation](./dsp-noise-mitigation.md) setting can improve the transcript as well as your own listening.
+On radios using the presentation stream, the default processed-audio setting hears client-side [DSP Noise Mitigation](./dsp-noise-mitigation.md), which can affect transcription as well as listening. The unprocessed setting and RTL's independent receiver feed bypass those client effects.
 
 ### Context
 

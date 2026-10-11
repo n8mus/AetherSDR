@@ -9088,6 +9088,7 @@ void MainWindow::setActiveSliceInternal(int sliceId, bool revealOffscreen)
 #endif
 
 #ifdef AETHER_ASR_ENABLED
+    if (m_copyAssistController) { m_copyAssistController->setSelectedSlice(s); }
     // A retune (or a switch to another slice) is a new listening context — clear
     // the Copy Assist decode window so text from the old frequency doesn't linger,
     // and mark the new frequency in the transcript log.
@@ -10887,12 +10888,10 @@ void MainWindow::updateKeyerAvailability()
     // ASR (Copy Assist): available in voice modes only (dimmed in CW and
     // DIGx/RTTY), gated on the SELECTED slice, which the rest of Copy Assist
     // follows (setActiveSliceInternal()) — not the TX slice, which may not exist
-    // (#4825). The slice is a proxy: AsrTapPolicy locks onto a RECEIVER
-    // (first-block-wins, 2 s release) on whichever presentation signal the
-    // operator's tap point selects — post-DSP, or its PreDsp twin when they
-    // transcribe ahead of NR — and on a Flex the stream is all audible slices
-    // mixed. Hiding the panel calls setAsrEnabled(false), so selecting a CW
-    // slice stops a running transcription.
+    // (#4825). Native independent audio exports follow this selected slice
+    // before client DSP and monitor controls. Other radios retain the chosen
+    // presentation tap; on Flex that stream mixes audible slices. Hiding the
+    // panel stops transcription when the selection leaves voice mode.
     SliceModel* asrSlice = activeSlice();
     const bool asrIsVoice = asrSlice && isVoiceMode(asrSlice->mode());
     if (m_asrIndicator) {
