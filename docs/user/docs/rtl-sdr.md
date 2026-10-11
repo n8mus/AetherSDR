@@ -46,6 +46,8 @@ Select **USB** or **LSB** for single-sideband reception, or **CW** / **CWR** for
 
 **AGC** offers Off, Slow, Med and Fast. **AGC-T** sets the local DSP's maximum gain; with AGC Off, **Off Level** controls fixed gain. These are local receiver controls, not a calibrated match for a FlexRadio's AGC-T scale. **NB** operates on receiver IQ; **APF** narrows CW audio around the selected pitch. **RIT** offsets reception while keeping the displayed dial frequency. These settings belong to each slice, except the shared CW pitch, and survive parking and reconnecting.
 
+The speaker icon opens a slice's audio controls; right-click it to toggle mute. A crossed speaker marks muted audio. The RX Controls speaker button also follows the selected slice's mute state.
+
 The [CW decoder](./cw-decoder.md) follows the selected CW or CWR slice. [Copy Assist](./copy-assist.md) follows the selected voice slice's independent audio before speaker volume, mute and client audio effects. A muted slice can still decode; a parked slice cannot. Selecting another slice or parking it discards queued audio from the old source. Copy Assist needs a downloaded speech model.
 
 **NR**, **ANF** and **MN** run independently inside each SSB/CW receiver. NR reduces noise, ANF suppresses sustained tones, and MN places a fixed-width notch within the passband. Their settings use the local WDSP algorithms, so the values are not equivalent to a FlexRadio's settings. [Tracking notch filters](./tnf-tracking-notch-filters.md) stay at an RF frequency as receivers tune past them.

@@ -1,4 +1,5 @@
 #include "VfoWidget.h"
+#include "AudioButtonIcon.h"
 #include <QScopeGuard>
 #include "ControlAvailabilityRegistry.h"
 #include "AntennaChoiceGate.h"
@@ -1497,7 +1498,7 @@ void VfoWidget::buildUI()
     tabLayout->setContentsMargins(0, 0, 0, 0);
     tabLayout->setSpacing(0);
 
-    const QStringList tabLabels = {"\xF0\x9F\x94\x8A", "DSP", "USB", "X/RIT", "DAX"};
+    const QStringList tabLabels = {QString(), "DSP", "USB", "X/RIT", "DAX"};
     m_daxTabIndex = tabLabels.indexOf(QLatin1String("DAX"));
     for (int i = 0; i < tabLabels.size(); ++i) {
         if (i > 0) {
@@ -1518,6 +1519,7 @@ void VfoWidget::buildUI()
         btn->setFocusPolicy(Qt::TabFocus);
         connect(btn, &QPushButton::clicked, this, [this, i]() { showTab(i); });
         if (i == 0) {
+            applyAudioIcon(btn, AudioIcon::Speaker, false, 16);
             // Right-click on speaker tab toggles mute directly
             btn->setContextMenuPolicy(Qt::CustomContextMenu);
             connect(btn, &QPushButton::customContextMenuRequested, this, [this](const QPoint&) {
@@ -1625,7 +1627,13 @@ void VfoWidget::buildTabContent()
         // AF row: mute-toggle label + gain slider
         auto* gainRow = new QHBoxLayout;
         gainRow->setSpacing(3);
-        m_muteBtn = new QPushButton(QString::fromUtf8("AF  \xF0\x9F\x94\x8A")); // AF 🔊
+        m_muteBtn = new QPushButton(QStringLiteral("AF"));
+        applyAudioIcon(m_muteBtn, AudioIcon::Speaker, false, 16);
+        connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, [this] {
+            const bool muted = m_slice && m_slice->audioMute();
+            applyAudioIcon(m_muteBtn, AudioIcon::Speaker, muted, 16);
+            applyAudioIcon(m_tabBtns[0], AudioIcon::Speaker, muted, 16);
+        });
         m_muteBtn->setAccessibleName("Slice audio mute");
         m_muteBtn->setCheckable(true);
         m_muteBtn->setFixedHeight(20);
@@ -1839,10 +1847,8 @@ void VfoWidget::buildTabContent()
                 AetherSDR::SplitAudioOperatorEdit op;  // #2242: operator-origin
                 m_slice->setAudioMute(on);
             }
-            m_muteBtn->setText(on ? QString::fromUtf8("AF  \xF0\x9F\x94\x87")    // 🔇 AF
-                                  : QString::fromUtf8("AF  \xF0\x9F\x94\x8A"));  // 🔊 AF
-            m_tabBtns[0]->setText(on ? QString::fromUtf8("\xF0\x9F\x94\x87")
-                                     : QString::fromUtf8("\xF0\x9F\x94\x8A"));
+            applyAudioIcon(m_muteBtn, AudioIcon::Speaker, on, 16);
+            applyAudioIcon(m_tabBtns[0], AudioIcon::Speaker, on, 16);
             if (!m_updatingFromModel) emit audioMuteToggled(on);  // (#1560)
         });
         // SQL button: when wired to an RxApplet (the normal case in
@@ -5447,10 +5453,8 @@ void VfoWidget::syncFromSlice()
         QSignalBlocker sb(m_muteBtn);
         bool muted = m_slice->audioMute();
         m_muteBtn->setChecked(muted);
-        m_muteBtn->setText(muted ? QString::fromUtf8("AF  \xF0\x9F\x94\x87")
-                                 : QString::fromUtf8("AF  \xF0\x9F\x94\x8A"));
-        m_tabBtns[0]->setText(muted ? QString::fromUtf8("\xF0\x9F\x94\x87")
-                                    : QString::fromUtf8("\xF0\x9F\x94\x8A"));
+        applyAudioIcon(m_muteBtn, AudioIcon::Speaker, muted, 16);
+        applyAudioIcon(m_tabBtns[0], AudioIcon::Speaker, muted, 16);
     }
     syncSqlVisuals();
     {

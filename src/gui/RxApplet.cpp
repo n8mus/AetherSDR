@@ -1,4 +1,5 @@
 #include "RxApplet.h"
+#include "AudioButtonIcon.h"
 #include <QScopeGuard>
 #include "AntennaChoiceGate.h"
 #include "SplitAudioProfile.h"
@@ -954,7 +955,11 @@ void RxApplet::buildUI()
         auto* row = new QHBoxLayout;
         row->setSpacing(4);
 
-        m_muteBtn = new QPushButton(QString::fromUtf8("\xF0\x9F\x94\x8A")); // 🔊
+        m_muteBtn = new QPushButton;
+        applyAudioIcon(m_muteBtn, AudioIcon::Speaker, false, 16);
+        connect(&ThemeManager::instance(), &ThemeManager::themeChanged, this, [this] {
+            applyAudioIcon(m_muteBtn, AudioIcon::Speaker, m_slice && m_slice->audioMute(), 16);
+        });
         m_muteBtn->setFixedSize(18, 18);
         AetherSDR::ThemeManager::instance().applyStyleSheet(m_muteBtn, "QPushButton { background: transparent; border: none; font-size: 12px; padding: 0px; }"
             "QPushButton:hover { background: {{color.background.1}}; border-radius: 3px; }");
@@ -2795,13 +2800,9 @@ void RxApplet::connectSlice(SliceModel* s)
     // routes to muteAllToggled via eventFilter).  The icon flips when the
     // radio acks the mute change via audioMuteChanged so the source of
     // truth is the slice state, not the click.
-    m_muteBtn->setText(s->audioMute()
-        ? QString::fromUtf8("\xF0\x9F\x94\x87")
-        : QString::fromUtf8("\xF0\x9F\x94\x8A"));
+    applyAudioIcon(m_muteBtn, AudioIcon::Speaker, s->audioMute(), 16);
     connect(s, &SliceModel::audioMuteChanged, this, [this](bool muted) {
-        m_muteBtn->setText(muted
-            ? QString::fromUtf8("\xF0\x9F\x94\x87")
-            : QString::fromUtf8("\xF0\x9F\x94\x8A"));
+        applyAudioIcon(m_muteBtn, AudioIcon::Speaker, muted, 16);
     });
 
     // Audio pan
