@@ -3000,6 +3000,18 @@ void MainWindow::preparePanadapterUiForShutdown()
     m_panadapterUiPreparedForShutdown = true;
     m_shuttingDown = true;
 
+#ifdef AETHER_ASR_ENABLED
+    // The pane owns Copy Assist's settings dialog. Retire its controller and
+    // worker before pane destruction, while radio/audio objects remain alive.
+    // Radio disconnect can otherwise notify a controller whose UI is gone.
+    {
+        ShutdownTrace trace("asr.controller.destroy");
+        delete m_copyAssistController;
+        m_copyAssistController = nullptr;
+        m_copyAssistApplet = nullptr;
+    }
+#endif
+
     if (m_sHistoryExpireTimer) {
         m_sHistoryExpireTimer->stop();
         QObject::disconnect(m_sHistoryExpireTimer, nullptr, this, nullptr);
