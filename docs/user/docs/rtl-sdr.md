@@ -54,6 +54,16 @@ The [CW decoder](./cw-decoder.md) follows the selected CW or CWR slice. [Copy As
 
 Client **AetherDSP** voice processing applies to the speaker stream; it is not independent per-slice processing and is not included in the native Copy Assist feed.
 
+### AM and synchronous AM
+
+**AM** uses envelope detection. **SAM** follows the station carrier with a phase-locked synchronous detector; it combines both received sidebands. Both modes have independent 48 kHz audio and the same **AGC**, **AGC-T**, **Off Level**, **NB**, **NR**, **ANF** and **RIT** controls described above. **APF** remains a CW control, and squelch remains available only in FM and FM-N.
+
+Filter edges describe RF relative to the displayed carrier. Each edge can be moved independently, from −12,000 to −100 Hz below the carrier and +100 to +12,000 Hz above it. Narrow the interfered side while keeping the other side wide. Switching between AM and SAM preserves these cuts. SAM needs a received carrier within its tracking range (up to ±2 kHz); tune close to the station for acquisition. If the carrier jumps after a dropout and does not recover, retune to restart acquisition. It is not a suppressed-carrier SSB decoder.
+
+**MN** places a 400 Hz notch in both RF sidebands at the selected audio frequency, leaving the carrier intact. Tracking notches keep their absolute RF positions; placing one on the station carrier can prevent SAM acquisition. The receiver removes demodulated carrier/DC from its audio, independently of **Suppress IQ DC**. Copy Assist, TCI and DAX receive the independent audio before speaker mute and volume.
+
+Tuning or using **Move capture away from DC** places the carrier away from the converter's centre where possible. Free panning preserves station frequencies. If you bring an AM/SAM carrier onto the capture centre while **Suppress IQ DC** is enabled, move the capture away or disable that correction: removing the wanted carrier distorts AM and can break SAM tracking.
+
 ### Broadcast FM
 
 Select **WFM** to use the **Broadcast FM** applet. It shows the selected slice letter and confirmed frequency. **Mono / Auto Stereo**, **De-emphasis** (50 or 75 µs) and **Bandwidth** belong to that receiver. **Auto Stereo** falls back to mono without a detected stereo pilot. The observed pilot status is separate from your selected audio mode; parking clears observations while retaining the controls.
@@ -72,7 +82,7 @@ Use the [TCI Server](./tci-server.md) on Linux, macOS or Windows. On Linux and m
 
 The process-only evaluation setting admits 2, 4 or 8 receivers on Linux x86-64, Windows x64 and macOS arm64. It requires both `AETHER_AUTOMATION=1` and `AETHER_RTL_EVALUATION_RECEIVERS=2`, `4` or `8` at launch; it is not saved and cannot resize a running session. Use an isolated settings profile for evaluation. It does **not** change the one-receiver production limit or qualify a platform for sustained multi-receiver use.
 
-FM, FM-N, analog WFM, USB, LSB, CW and CWR can share the capture in this evaluation. Each receiver retains its frequency, filter, squelch and audio controls when parked. Selecting another slice does not retune the capture or change its audio settings. AM and SAM remain singleton legacy configurations, even if another configured receiver is parked. See the [evaluation procedure](https://github.com/aethersdr/AetherSDR/blob/main/docs/rtl-multirx-analog.md) for the validation boundaries.
+AM, SAM, FM, FM-N, analog WFM, USB, LSB, CW and CWR can share the capture in this evaluation. Each receiver retains its frequency, filter, squelch and audio controls when parked. Selecting another slice does not retune the capture or change its audio settings. See the [evaluation procedure](https://github.com/aethersdr/AetherSDR/blob/main/docs/rtl-multirx-analog.md) for the validation boundaries.
 
 ## Reference
 

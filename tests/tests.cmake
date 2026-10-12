@@ -1742,6 +1742,13 @@ target_link_libraries(rtl_receive_pipeline_test PRIVATE aethercore Qt6::Core)
 add_test(NAME rtl_receive_pipeline_test COMMAND rtl_receive_pipeline_test)
 set_tests_properties(rtl_receive_pipeline_test PROPERTIES TIMEOUT 45)
 
+# Analytic modulated IQ through production extraction/WDSP; no USB or peer.
+add_executable(rtl_am_sam_pipeline_test tests/rtl_am_sam_pipeline_test.cpp)
+target_include_directories(rtl_am_sam_pipeline_test PRIVATE src)
+target_link_libraries(rtl_am_sam_pipeline_test PRIVATE aethercore Qt6::Core)
+add_test(NAME rtl_am_sam_pipeline_test COMMAND rtl_am_sam_pipeline_test)
+set_tests_properties(rtl_am_sam_pipeline_test PROPERTIES TIMEOUT 180)
+
 add_executable(rtl_ssb_cw_pipeline_test tests/rtl_ssb_cw_pipeline_test.cpp)
 target_include_directories(rtl_ssb_cw_pipeline_test PRIVATE src)
 target_link_libraries(rtl_ssb_cw_pipeline_test PRIVATE aethercore Qt6::Core)

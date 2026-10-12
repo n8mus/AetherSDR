@@ -17,7 +17,8 @@ CW pitch is session-wide, while RIT and receive DSP belong to each receiver.
 
 RTL analytic IQ is conjugated at the native sideband receiver boundary to
 match WDSP's receive convention. FM/FM-N/WFM keep their existing orientation
-and demodulator recipes. AM/SAM remain exclusive legacy modes.
+and demodulator recipes. AM/SAM use the same native bank; their carrier and
+audio-filter contract is described in [AM/SAM reception](rtl-am-sam.md).
 
 All affected receiver controls are prepared and adopted before readback or
 persistence. Invalid controls or failed preparation retain the prior accepted

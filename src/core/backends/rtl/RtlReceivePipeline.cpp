@@ -91,7 +91,7 @@ RtlReceivePipeline::Submission RtlReceivePipeline::prepareDetailed(
     std::array<bool, 8> receiving{};
     bool legacy = false;
     bool wfmTransition = false;
-    bool sidebandTransition = false;
+    bool analogTransition = false;
     std::uint8_t receivingMask = 0;
     for (int id : state.receivingIds) {
         if (id < 0 || id >= 8 || receiving[id] || !validated[id]) { return Submission::Failed; }
@@ -103,12 +103,12 @@ RtlReceivePipeline::Submission RtlReceivePipeline::prepareDetailed(
         legacy = legacy || !RtlReceiveRecipe::native(receiver->mode, m_enableWfm);
         if (legacy && receiver->squelchEnabled) { return Submission::Failed; }
         const auto& prior = m_specs[id];
-        const bool sideband = RtlReceiveRecipe::sideband(receiver->mode);
-        if (sideband || prior.conjugateIq) {
+        const bool analog = RtlReceiveRecipe::analogDsp(receiver->mode);
+        if (analog || prior.conjugateIq) {
             WdspChannel::Config dsp;
             dsp.mode = dspMode(receiver->mode);
             RtlReceiveRecipe::applyDsp(*receiver, dsp, state.trackingNotches);
-            sidebandTransition |= !sideband || !prior.conjugateIq || (faults & (1u << id))
+            analogTransition |= !analog || !prior.conjugateIq || (faults & (1u << id))
                 || prior.passband != RtlReceiveRecipe::extractionBand(*receiver)
                 || prior.dsp != dsp;
         }
@@ -129,7 +129,7 @@ RtlReceivePipeline::Submission RtlReceivePipeline::prepareDetailed(
     // history even when final PCM stays 48 kHz. A withdrawn receiver has lost
     // that graph even if its requested recipe is unchanged.
     const bool advanceCaptureEpoch = resetCapture || legacy != m_legacy
-        || receivingMask != m_receivingMask || wfmTransition || sidebandTransition;
+        || receivingMask != m_receivingMask || wfmTransition || analogTransition;
     if (advanceCaptureEpoch && m_nextEpoch == std::numeric_limits<std::uint64_t>::max()) { return Submission::Failed; }
     auto epochs = m_epochs;
     auto specs = m_specs;
@@ -178,7 +178,7 @@ RtlReceivePipeline::Submission RtlReceivePipeline::prepareDetailed(
             }
             spec.dsp.filterLowHz = receiver.passband.filterLowHz;
             spec.dsp.filterHighHz = receiver.passband.filterHighHz;
-            if (RtlReceiveRecipe::sideband(receiver.mode)) {
+            if (RtlReceiveRecipe::analogDsp(receiver.mode)) {
                 spec.passband = RtlReceiveRecipe::extractionBand(receiver);
                 spec.conjugateIq = true;
                 RtlReceiveRecipe::applyDsp(receiver, spec.dsp, state.trackingNotches);

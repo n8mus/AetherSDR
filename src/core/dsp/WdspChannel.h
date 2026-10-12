@@ -80,6 +80,14 @@ public:
         bool operator==(const FmReceive&) const = default;
     };
 
+    // Carrier-spanning RF cuts belong to the pre-detector NBP. The audio
+    // bandpass removes demodulated carrier/DC at 50 Hz and keeps the wider
+    // sideband's audio. SAM uses WDSP's PLL and dual-sideband detector.
+    struct AmReceive
+    {
+        bool operator==(const AmReceive&) const = default;
+    };
+
     // Broadcast receive recipe from WDSP Guide section 5.3.10. This opt-in
     // owns an RF FIR before WDSP's 384 -> 192 kHz conversion and normalizes
     // paired audio before any receiver tap. Other channel owners are unchanged.
@@ -125,6 +133,7 @@ public:
         int outputSampleRate = 48000;
         Mode mode = Mode::Usb;
         std::optional<FmReceive> fmReceive;
+        std::optional<AmReceive> amReceive;
         std::optional<AnalogReceiveDsp> analogReceiveDsp;
         std::optional<WbfmReceive> wbfmReceive;
         // RXA output panel gain, linear, applied after the AGC. Unset keeps

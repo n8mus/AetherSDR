@@ -27,10 +27,10 @@ namespace AetherSDR::rtl {
 namespace {
 
 Q_LOGGING_CATEGORY(lcRtlReceive, "aether.rtl.receive", QtWarningMsg)
-bool hasSideband(const std::vector<RtlCaptureTransaction::Receiver>& receivers)
+bool hasAnalogDsp(const std::vector<RtlCaptureTransaction::Receiver>& receivers)
 {
     return std::ranges::any_of(receivers, [](const auto& receiver) {
-        return RtlReceiveRecipe::sideband(receiver.mode);
+        return RtlReceiveRecipe::analogDsp(receiver.mode);
     });
 }
 
@@ -45,9 +45,7 @@ bool supportsAnalogBank(const RtlCaptureTransaction::Receiver& receiver)
 bool hasReceivingDcSensitive(const RtlCaptureTransaction::State& state)
 {
     return std::ranges::any_of(state.receivers, [&state](const auto& receiver) {
-        return (receiver.mode == RtlCaptureTransaction::Mode::Fm
-                || receiver.mode == RtlCaptureTransaction::Mode::Fmn
-                || RtlReceiveRecipe::cw(receiver.mode))
+        return RtlReceiveRecipe::dcSensitive(receiver.mode)
             && std::ranges::find(state.receivingIds, receiver.passband.stableId)
                 != state.receivingIds.end();
     });
@@ -98,6 +96,44 @@ int agcModeValue(const QString& mode)
     if (mode == QLatin1String("med")) { return 3; }
     if (mode == QLatin1String("fast")) { return 4; }
     return -1;
+}
+RtlCaptureTransaction::Receiver savedReceiver(const RtlSliceSettings::Slice& slice, int restoredPitch)
+{
+    const bool narrowFm = slice.mode == QLatin1String("FM") || slice.mode == QLatin1String("FMN");
+    const bool analog = RtlReceiveRecipe::analogDsp(captureMode(slice.mode));
+    const SharedCapturePolicy::SliceDescriptor descriptor{slice.id, slice.frequencyHz,
+        slice.filterLowHz, slice.filterHighHz,
+        analog && slice.ritEnabled ? double(slice.ritOffsetHz) : 0, 3000, 3000};
+    RtlCaptureTransaction::Receiver receiver{descriptor, captureMode(slice.mode), slice.audioGain, slice.audioPan,
+        slice.audioMute, narrowFm && slice.squelchEnabled, slice.squelchLevel, slice.wfmDeemphasisUs, slice.wfmForceMono,
+        narrowFm && slice.automaticSquelch, slice.automaticSquelchMarginDb};
+    receiver.agcMode = agcModeValue(slice.agcMode);
+    receiver.agcThreshold = slice.agcThreshold;
+    receiver.agcOffLevel = slice.agcOffLevel;
+    receiver.cwPitchHz = restoredPitch;
+    receiver.ritEnabled = slice.ritEnabled;
+    receiver.ritOffsetHz = slice.ritOffsetHz;
+    receiver.nbKind = slice.nbKind; receiver.nbLevel = slice.nbLevel; receiver.nbFill = slice.nbFill;
+    receiver.apfEnabled = slice.apfEnabled; receiver.apfLevel = slice.apfLevel;
+    receiver.nrEnabled = slice.nrEnabled; receiver.nrLevel = slice.nrLevel;
+    receiver.anfEnabled = slice.anfEnabled; receiver.anfLevel = slice.anfLevel;
+    receiver.mnEnabled = slice.mnEnabled; receiver.mnLevel = slice.mnLevel;
+    return receiver;
+}
+bool restorable(const RtlCaptureTransaction::Receiver& receiver)
+{
+    const auto& band = receiver.passband;
+    if (!RtlReceiveRecipe::valid(receiver)
+        || !SharedCapturePolicy::occupiedInterval(band).interval) { return false; }
+    if (receiver.mode == RtlCaptureTransaction::Mode::Wfm) {
+        return band.filterLowHz >= -100000 && band.filterLowHz <= -15000
+            && band.filterHighHz >= 15000 && band.filterHighHz <= 100000;
+    }
+    if (receiver.mode == RtlCaptureTransaction::Mode::Fm || receiver.mode == RtlCaptureTransaction::Mode::Fmn) {
+        return band.filterLowHz >= -21600 && band.filterLowHz < 0
+            && band.filterHighHz > 0 && band.filterHighHz <= 21600;
+    }
+    return true;
 }
 QString agcModeName(int mode)
 {
@@ -224,11 +260,11 @@ RadioCapabilities RtlSdrBackend::capabilities() const
     c.hasHostNoiseBlanker = true;
     c.receiveCwPitchControl = ReceiveCwPitchControl{100, 6000, 10};
     c.receiveDspControl = ReceiveDspControl{
-        {QStringLiteral("USB"), QStringLiteral("LSB"), QStringLiteral("CW"), QStringLiteral("CWR")},
+        {QStringLiteral("AM"), QStringLiteral("SAM"), QStringLiteral("USB"), QStringLiteral("LSB"), QStringLiteral("CW"), QStringLiteral("CWR")},
         {ReceiveDspControl::Feature::Agc, ReceiveDspControl::Feature::Nb,
          ReceiveDspControl::Feature::Apf, ReceiveDspControl::Feature::Rit,
          ReceiveDspControl::Feature::Nr, ReceiveDspControl::Feature::Anf, ReceiveDspControl::Feature::ManualNotch}};
-    if (m_lastPublished && hasSideband(m_lastPublished->receivers)) {
+    if (m_lastPublished && hasAnalogDsp(m_lastPublished->receivers)) {
         c.maxNotchFilters = RtlTrackingNotches::kCapacity;
         c.notchMinWidthHz = 200.0;
         c.notchMaxWidthHz = 12000.0;
@@ -268,7 +304,9 @@ RadioCapabilities RtlSdrBackend::capabilities() const
          QStringLiteral("FMN"), QStringLiteral("WFM"), QStringLiteral("USB"),
          QStringLiteral("LSB"), QStringLiteral("CW"), QStringLiteral("CWR")}};
     c.receiveFilterControl = ReceiveFilterControl{SliceFrequencyControl::Authority::Engine,
-        {{QStringLiteral("FM"), -21600, -1, 1, 21600, 2, 43200},
+        {{QStringLiteral("AM"), -12000, -100, 100, 12000, 200, 24000},
+         {QStringLiteral("SAM"), -12000, -100, 100, 12000, 200, 24000},
+         {QStringLiteral("FM"), -21600, -1, 1, 21600, 2, 43200},
          {QStringLiteral("FMN"), -21600, -1, 1, 21600, 2, 43200},
          {QStringLiteral("USB"), 0, 11998, 2, 12000, 2, 12000},
          {QStringLiteral("LSB"), -12000, -2, -11998, 0, 2, 12000},
@@ -468,13 +506,25 @@ RtlCaptureTransaction::Receiver RtlSdrBackend::initialReceiver() const
     // state adopts; a saved muted session must not briefly play bootstrap audio.
     receiver.audioMute = m_savedSettings.status == RtlSliceSettings::ReadStatus::Ready
         && !m_savedSettings.document.slices.isEmpty();
-    if (RtlReceiveRecipe::sideband(receiver.mode) && !RtlReceiveRecipe::valid(receiver)) {
-        // Legacy stored cuts were never constrained by a real sideband DSP.
+    if (receiver.audioMute) {
+        // Reserve the first restorable saved ID from the start. A provisional
+        // ID 0 otherwise consumes singleton capacity while a sparse saved ID
+        // waits for a reservation; the muted bootstrap is native too.
+        const auto& slices = m_savedSettings.document.slices;
+        for (const auto& slice : slices) {
+            if (restorable(savedReceiver(slice, slices.first().cwPitchHz))) {
+                receiver.passband.stableId = slice.id;
+                break;
+            }
+        }
+    }
+    if (RtlReceiveRecipe::analogDsp(receiver.mode) && !RtlReceiveRecipe::valid(receiver)) {
+        // Legacy stored cuts were never constrained by the native DSP.
         // A muted bootstrap lets the existing migration preserve that record
         // and report its refusal, without treating it as accepted DSP state.
-        receiver.mode = RtlCaptureTransaction::Mode::Am;
-        receiver.passband.filterLowHz = -3000; receiver.passband.filterHighHz = 3000;
-        receiver.passband.guardLowHz = 0; receiver.passband.guardHighHz = 0;
+        receiver.mode = RtlCaptureTransaction::Mode::Usb;
+        receiver.passband.filterLowHz = 100; receiver.passband.filterHighHz = 2900;
+        receiver.passband.guardLowHz = 3000; receiver.passband.guardHighHz = 3000;
         receiver.audioMute = true;
     }
     return receiver;
@@ -792,7 +842,7 @@ bool RtlSdrBackend::createSlice(const QString& panId, double frequencyHz)
         || (panId != QStringLiteral("0xe1000000") && !panId.isEmpty())
         || m_requested.receivers.size() >= static_cast<std::size_t>(m_receiverCapacity)) { return false; }
     if (!std::ranges::all_of(m_requested.receivers, supportsAnalogBank)) {
-        emit configurationWarning(tr("Additional RTL slices support FM, FM-N and analog WFM only. AM/SSB/CW require a single configured receiver."));
+        emit configurationWarning(tr("Additional RTL slices require supported native analog receive modes."));
         return false;
     }
     auto desired = m_requested;
@@ -890,14 +940,12 @@ bool RtlSdrBackend::recenterReceiveCapture(const QString& panId)
     if (!m_connected || !m_lastPublished
         || (!panId.isEmpty() && panId != QLatin1String("0xe1000000"))) { return false; }
     const auto activeFm = std::ranges::find_if(m_lastPublished->receivers, [this](const auto& receiver) {
-        return (receiver.mode == RtlCaptureTransaction::Mode::Fm
-                || receiver.mode == RtlCaptureTransaction::Mode::Fmn
-                || RtlReceiveRecipe::cw(receiver.mode))
+        return RtlReceiveRecipe::dcSensitive(receiver.mode)
             && std::ranges::find(m_lastPublished->receivingIds, receiver.passband.stableId)
                 != m_lastPublished->receivingIds.end();
     });
     if (m_capture.busy() || activeFm == m_lastPublished->receivers.end()) {
-        emit configurationWarning(tr("Capture DC placement requires an idle FM, FM-N, CW or CWR receiver."));
+        emit configurationWarning(tr("Capture DC placement requires an idle AM, SAM, FM, FM-N, CW or CWR receiver."));
         return false;
     }
     auto desired = m_requested;
@@ -918,7 +966,7 @@ void RtlSdrBackend::setSliceMode(int sliceId, const QString& mode)
     auto candidate = *receiver;
     candidate.mode = modeValue;
     if (desired.receivers.size() != 1 && !supportsAnalogBank(candidate)) {
-        emit configurationWarning(tr("This RTL mode requires a single configured receiver. Multiple receivers support FM, FM-N, analog WFM, USB, LSB, CW and CWR."));
+        emit configurationWarning(tr("This RTL mode requires a single configured receiver. Multiple receivers support AM, SAM, FM, FM-N, analog WFM, USB, LSB, CW and CWR."));
         return;
     }
     if (narrowFm && (receiver->passband.filterLowHz < -21600 || receiver->passband.filterHighHz > 21600
@@ -937,16 +985,17 @@ void RtlSdrBackend::setSliceMode(int sliceId, const QString& mode)
         receiver->passband.filterLowHz = -100000;
         receiver->passband.filterHighHz = 100000;
     }
-    if (receiver->mode != modeValue && RtlReceiveRecipe::sideband(modeValue)) {
+    if (receiver->mode != modeValue && RtlReceiveRecipe::analogDsp(modeValue)
+        && !(RtlReceiveRecipe::amplitude(receiver->mode) && RtlReceiveRecipe::amplitude(modeValue))) {
         const auto [low, high] = RtlReceiveRecipe::defaultFilter(modeValue);
         receiver->passband.filterLowHz = low;
         receiver->passband.filterHighHz = high;
     }
     receiver->mode = modeValue;
-    receiver->passband.translationHz = RtlReceiveRecipe::sideband(modeValue) && receiver->ritEnabled
+    receiver->passband.translationHz = RtlReceiveRecipe::analogDsp(modeValue) && receiver->ritEnabled
         ? receiver->ritOffsetHz : 0;
     desired.followReceiverId = sliceId;
-    desired.avoidDc = narrowFm || RtlReceiveRecipe::cw(modeValue);
+    desired.avoidDc = RtlReceiveRecipe::dcSensitive(modeValue);
     if (!narrowFm) { receiver->squelchEnabled = false; receiver->automaticSquelch = false; }
     receiver->passband.guardLowHz = supportsAnalogBank(*receiver) ? 3000 : 0;
     receiver->passband.guardHighHz = supportsAnalogBank(*receiver) ? 3000 : 0;
@@ -1006,7 +1055,7 @@ void RtlSdrBackend::setSliceAgc(int sliceId, const QString& mode, int thresholdD
     auto desired = m_requested;
     const auto receiver = std::ranges::find_if(desired.receivers,
         [sliceId](const auto& value) { return value.passband.stableId == sliceId; });
-    if (receiver == desired.receivers.end() || !RtlReceiveRecipe::sideband(receiver->mode)) { return; }
+    if (receiver == desired.receivers.end() || !RtlReceiveRecipe::analogDsp(receiver->mode)) { return; }
     receiver->agcMode = agc;
     receiver->agcThreshold = thresholdDb;
     requestCapture(desired);
@@ -1018,7 +1067,7 @@ void RtlSdrBackend::requestSliceAgc(int sliceId, const SliceAgcRequest& request)
     auto desired = m_requested;
     const auto receiver = std::ranges::find_if(desired.receivers,
         [sliceId](const auto& value) { return value.passband.stableId == sliceId; });
-    if (receiver == desired.receivers.end() || !RtlReceiveRecipe::sideband(receiver->mode)) { return; }
+    if (receiver == desired.receivers.end() || !RtlReceiveRecipe::analogDsp(receiver->mode)) { return; }
     switch (request.field) {
     case SliceAgcRequest::Field::Mode: {
         const int mode = agcModeValue(request.mode.trimmed().toLower());
@@ -1045,7 +1094,7 @@ ReceiveDispatch RtlSdrBackend::requestSliceDsp(int sliceId, const SliceDspReques
     auto desired = m_requested;
     const auto receiver = std::ranges::find_if(desired.receivers,
         [sliceId](const auto& value) { return value.passband.stableId == sliceId; });
-    if (receiver == desired.receivers.end() || !RtlReceiveRecipe::sideband(receiver->mode)) {
+    if (receiver == desired.receivers.end() || !RtlReceiveRecipe::analogDsp(receiver->mode)) {
         return ReceiveDispatch::Unsupported;
     }
     if (request.feature == SliceDspRequest::Feature::Nb) {
@@ -1071,7 +1120,7 @@ ReceiveDispatch RtlSdrBackend::requestSliceDsp(int sliceId, const SliceDspReques
 
 void RtlSdrBackend::createNotch(double centerHz, double widthHz)
 {
-    if (!m_connected || !hasSideband(m_requested.receivers)
+    if (!m_connected || !hasAnalogDsp(m_requested.receivers)
         || !std::isfinite(centerHz) || !std::isfinite(widthHz) || widthHz <= 0
         || m_nextNotchId == std::numeric_limits<int>::max()) { return; }
     auto desired = m_requested;
@@ -1081,7 +1130,7 @@ void RtlSdrBackend::createNotch(double centerHz, double widthHz)
 }
 void RtlSdrBackend::setNotch(int notchId, const NotchDelta& delta)
 {
-    if (!m_connected || !hasSideband(m_requested.receivers)) { return; }
+    if (!m_connected || !hasAnalogDsp(m_requested.receivers)) { return; }
     auto desired = m_requested;
     auto found = std::ranges::find_if(desired.trackingNotches.entries,
         [notchId](const auto& notch) { return notch.id == notchId; });
@@ -1126,7 +1175,7 @@ void RtlSdrBackend::setSliceRitEnabled(int sliceId, bool on)
     auto desired = m_requested;
     const auto receiver = std::ranges::find_if(desired.receivers,
         [sliceId](const auto& value) { return value.passband.stableId == sliceId; });
-    if (receiver == desired.receivers.end() || !RtlReceiveRecipe::sideband(receiver->mode)) { return; }
+    if (receiver == desired.receivers.end() || !RtlReceiveRecipe::analogDsp(receiver->mode)) { return; }
     receiver->ritEnabled = on;
     receiver->passband.translationHz = on ? receiver->ritOffsetHz : 0;
     requestCapture(desired);
@@ -1138,7 +1187,7 @@ void RtlSdrBackend::setSliceRitOffset(int sliceId, int hz)
     auto desired = m_requested;
     const auto receiver = std::ranges::find_if(desired.receivers,
         [sliceId](const auto& value) { return value.passband.stableId == sliceId; });
-    if (receiver == desired.receivers.end() || !RtlReceiveRecipe::sideband(receiver->mode)) { return; }
+    if (receiver == desired.receivers.end() || !RtlReceiveRecipe::analogDsp(receiver->mode)) { return; }
     receiver->ritOffsetHz = hz;
     receiver->passband.translationHz = receiver->ritEnabled ? hz : 0;
     requestCapture(desired);
@@ -1565,17 +1614,17 @@ void RtlSdrBackend::restoreAcceptedSlices()
             ? notch.id : notch.id + 1);
     }
     bool unsupportedWfmFilter = false;
-    bool unsupportedSidebandFilter = false;
+    bool unsupportedAnalogFilter = false;
     const int restoredPitch = saved.slices.first().cwPitchHz;
     for (const auto& slice : saved.slices) {
         const bool wide = slice.mode != QLatin1String("FM") && slice.mode != QLatin1String("FMN");
         const bool nativeWfm = RtlReceivePipeline::kQualifiedWfmEnabled
             && slice.mode == QLatin1String("WFM");
-        const bool sideband = RtlReceiveRecipe::sideband(captureMode(slice.mode));
-        const double guard = (!wide || nativeWfm || sideband) ? 3000.0 : 0.0;
+        const bool analog = RtlReceiveRecipe::analogDsp(captureMode(slice.mode));
+        const double guard = (!wide || nativeWfm || analog) ? 3000.0 : 0.0;
         const SharedCapturePolicy::SliceDescriptor descriptor{slice.id, slice.frequencyHz,
             slice.filterLowHz, slice.filterHighHz,
-            sideband && slice.ritEnabled ? double(slice.ritOffsetHz) : 0, guard, guard};
+            analog && slice.ritEnabled ? double(slice.ritOffsetHz) : 0, guard, guard};
         m_omittedSettings.insert(slice.id);
         if (slice.id < 0 || slice.id >= 8 || seen.contains(slice.id)
             || !SharedCapturePolicy::occupiedInterval(descriptor).interval
@@ -1587,35 +1636,22 @@ void RtlSdrBackend::restoreAcceptedSlices()
             unsupportedWfmFilter = true;
             continue;
         }
-        const bool bankCompatible = !wide || nativeWfm || sideband;
+        const bool bankCompatible = !wide || nativeWfm || analog;
         if ((!wide && (slice.filterLowHz < -21600 || slice.filterHighHz > 21600
             || slice.filterLowHz >= 0 || slice.filterHighHz <= 0))
             || (!desired.receivers.empty() && (!bankCompatible
                 || !std::ranges::all_of(desired.receivers, supportsAnalogBank)))) { continue; }
-        RtlCaptureTransaction::Receiver receiver{descriptor, captureMode(slice.mode), slice.audioGain, slice.audioPan,
-            slice.audioMute, !wide && slice.squelchEnabled, slice.squelchLevel, slice.wfmDeemphasisUs, slice.wfmForceMono,
-            !wide && slice.automaticSquelch, slice.automaticSquelchMarginDb};
-        receiver.agcMode = agcModeValue(slice.agcMode);
-        receiver.agcThreshold = slice.agcThreshold;
-        receiver.agcOffLevel = slice.agcOffLevel;
-        receiver.cwPitchHz = restoredPitch;
-        receiver.ritEnabled = slice.ritEnabled;
-        receiver.ritOffsetHz = slice.ritOffsetHz;
-        receiver.nbKind = slice.nbKind; receiver.nbLevel = slice.nbLevel; receiver.nbFill = slice.nbFill;
-        receiver.apfEnabled = slice.apfEnabled; receiver.apfLevel = slice.apfLevel;
-        receiver.nrEnabled = slice.nrEnabled; receiver.nrLevel = slice.nrLevel;
-        receiver.anfEnabled = slice.anfEnabled; receiver.anfLevel = slice.anfLevel;
-        receiver.mnEnabled = slice.mnEnabled; receiver.mnLevel = slice.mnLevel;
+        const auto receiver = savedReceiver(slice, restoredPitch);
         if (RtlReceiveRecipe::valid(receiver)) { desired.receivers.push_back(receiver); }
-        else if (sideband) { unsupportedSidebandFilter = true; }
+        else if (analog) { unsupportedAnalogFilter = true; }
     }
     // Preserve a valid configured receiver even when it is parked. The
     // transaction derives DSP membership from the confirmed capture; a
     // reconnect never silently retunes or loses an out-of-capture station.
-    const QString sidebandWarning = tr("Saved SSB/CW receiver settings are outside the supported DSP range. "
+    const QString analogWarning = tr("Saved AM/SAM/SSB/CW receiver settings are outside the supported DSP range. "
         "The saved receiver is preserved and has not been activated.");
     if (desired.receivers.empty()) {
-        if (unsupportedSidebandFilter) { emit configurationWarning(sidebandWarning); }
+        if (unsupportedAnalogFilter) { emit configurationWarning(analogWarning); }
         if (unsupportedWfmFilter) {
             emit configurationWarning(tr("Saved WFM filter is not supported by the broadcast decoder. "
                 "The saved filter is preserved. Select a supported WFM filter and unmute to resume audio."));
@@ -1623,7 +1659,7 @@ void RtlSdrBackend::restoreAcceptedSlices()
         return;
     }
     if (requestCapture(desired)) { m_restoreToken = m_capture.requested(); }
-    if (unsupportedSidebandFilter) { emit configurationWarning(sidebandWarning); }
+    if (unsupportedAnalogFilter) { emit configurationWarning(analogWarning); }
 }
 
 void RtlSdrBackend::applyRestoredState(const RestoredRadioState& state)
@@ -1685,11 +1721,9 @@ void RtlSdrBackend::applyRestoredState(const RestoredRadioState& state)
             m_sampleRateHz = static_cast<std::uint32_t>(saved.sampleRateHz);
         }
         m_sliceFreqHz = m_panCenterHz;
-        // A saved native receiver may use a sparse ID. A provisional native
-        // ID 0 would consume the sole reservation and prevent preparing it.
-        // Bootstrap with a muted legacy receiver (an empty native bank), then
-        // adopt the original saved recipe/ID through the normal transaction.
-        // AM also avoids FM's automatic converter-DC capture displacement.
+        // Start with a muted narrow recipe while the saved bank prepares.
+        // initialReceiver() shares its reservation with the first saved ID;
+        // the normal restore transaction adopts the original RF and controls.
         const bool nativeRestore = RtlReceivePipeline::kQualifiedWfmEnabled
             && !saved.slices.isEmpty();
         const double initialHalfWidth = RtlReceivePipeline::kQualifiedWfmEnabled ? 103000 : 100000;
@@ -1700,6 +1734,13 @@ void RtlSdrBackend::applyRestoredState(const RestoredRadioState& state)
             : QStringLiteral("WFM");
         m_sliceFilterLow = narrowInitial ? -8000 : -100000;
         m_sliceFilterHigh = narrowInitial ? 8000 : 100000;
+        if (nativeRestore) {
+            // A muted USB bootstrap has no carrier at converter DC and does
+            // not invoke AM/FM/CW startup placement. Preserve the saved capture
+            // center until the original receiver bank is restored.
+            m_sliceMode = QStringLiteral("USB");
+            m_sliceFilterLow = 100; m_sliceFilterHigh = 2900;
+        }
     }
 
 }
@@ -2139,7 +2180,7 @@ void RtlSdrBackend::publishCapture()
                 || current->wfmForceMono != previous.wfmForceMono
                 || current->agcMode != previous.agcMode || current->agcThreshold != previous.agcThreshold
                 || current->agcOffLevel != previous.agcOffLevel
-                || (RtlReceiveRecipe::sideband(current->mode) && current->cwPitchHz != previous.cwPitchHz)
+                || (RtlReceiveRecipe::cw(current->mode) && current->cwPitchHz != previous.cwPitchHz)
                 || current->nbKind != previous.nbKind || current->nbLevel != previous.nbLevel
                 || current->nbFill != previous.nbFill || current->apfEnabled != previous.apfEnabled
                 || current->apfLevel != previous.apfLevel
@@ -2148,15 +2189,15 @@ void RtlSdrBackend::publishCapture()
                 || current->mnEnabled != previous.mnEnabled || current->mnLevel != previous.mnLevel) {
                 m_sliceAudio[id] = {};
                 if (std::ranges::find(state.receivingIds, id) != state.receivingIds.end()
-                    && (RtlReceiveRecipe::sideband(previous.mode)
-                        || (current != state.receivers.end() && RtlReceiveRecipe::sideband(current->mode)))) {
+                    && (RtlReceiveRecipe::analogDsp(previous.mode)
+                        || (current != state.receivers.end() && RtlReceiveRecipe::analogDsp(current->mode)))) {
                     m_speakerAudio = {};
                 }
             }
         }
         if (m_lastPublished->trackingNotches != state.trackingNotches) {
             for (const auto& receiver : state.receivers) {
-                if (!RtlReceiveRecipe::sideband(receiver.mode)) { continue; }
+                if (!RtlReceiveRecipe::analogDsp(receiver.mode)) { continue; }
                 WdspChannel::Config before, after;
                 RtlReceiveRecipe::applyDsp(receiver, before, m_lastPublished->trackingNotches);
                 RtlReceiveRecipe::applyDsp(receiver, after, state.trackingNotches);
@@ -2337,7 +2378,7 @@ void RtlSdrBackend::publishCapture()
         const bool activated = activateSettings();
         if (activated || (prior && (prior->capture != state.capture
             || hasReceivingDcSensitive(*prior) != hasReceivingDcSensitive(state)
-            || hasSideband(prior->receivers) != hasSideband(state.receivers)))) {
+            || hasAnalogDsp(prior->receivers) != hasAnalogDsp(state.receivers)))) {
             emit capabilitiesChanged();
         }
         if (!current()) { return; }

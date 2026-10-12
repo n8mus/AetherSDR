@@ -288,13 +288,12 @@ static void analogBankSelection(int capacity = 4)
         && !model.slice(2)->wfmForceMono()
         && model.slice(2)->wfmDeemphasisUs() == 75 && selected(3),
         "WFM recipes and focus survive sibling publications");
-    const auto beforeRefusal = Access::state(backend);
-    int warnings = 0;
-    QObject::connect(&backend, &IRadioBackend::configurationWarning, &model, [&](const QString&) { ++warnings; });
     model.slice(0)->setMode("AM");
-    check(Access::idle(backend) && Access::state(backend).token == beforeRefusal.token
-        && model.slice(0)->mode() == "FM" && model.slice(1)->wfmForceMono()
-        && warnings >= 1, "unsupported legacy combinations refuse without altering recipes");
+    check(waitFor([&] { return settled() && model.slice(0)->mode() == "AM"; })
+        && model.slice(1)->wfmForceMono(), "AM adopts beside native WFM without altering sibling recipe");
+    model.slice(0)->setMode("SAM");
+    check(waitFor([&] { return settled() && model.slice(0)->mode() == "SAM"; }),
+        "SAM is an accepted independent mode through the public model caller");
     model.slice(2)->setActive(true);
     auto* pan = model.panadapter(model.slice(2)->panId());
     check(pan != nullptr, "multi receiver pan materialized");
@@ -366,8 +365,8 @@ static void invalidLegacySidebandRestore()
     check(waitFor([&] { clock.advance(); return Access::idle(backend) && model.slice(0)
         && !warnings.empty(); }), "invalid legacy cuts connect safely and report restore refusal");
     if (model.slice(0)) {
-        check(model.slice(0)->mode() == "AM" && model.slice(0)->audioMute(),
-            "invalid legacy USB never becomes an audible or accepted native recipe");
+        check(model.slice(0)->mode() == "USB" && model.slice(0)->audioMute(),
+            "invalid legacy cuts never become an audible or accepted native recipe");
     }
     RadioModelSliceLifecycleTestAccess::flush(model);
     const auto migrated = RtlSliceSettings(scope).load();
@@ -383,7 +382,7 @@ static void invalidLegacySidebandRestore()
         && retained.value("futureLegacy") == legacy.value("futureLegacy"),
         "legacy downgrade record and unknown data remain intact");
     check(std::ranges::any_of(warnings, [](const QString& warning) {
-        return warning.contains("Saved SSB/CW") && warning.contains("preserved");
+        return warning.contains("Saved AM/SAM/SSB/CW") && warning.contains("preserved");
     }), "restore warning explicitly describes preserved unsupported settings");
     backend.disconnectRadio();
     rtl::RtlTrackingNotches preserved;
@@ -584,6 +583,80 @@ static void sidebandControlsAndPersistence()
     second.disconnectRadio();
 }
 
+static void amControlsAndRestore()
+{
+    using Access = rtl::RtlCaptureBackendTestAccess;
+    const RadioSettingsScope scope("rtl", "am-sam-controls");
+    RtlSliceSettings::Slice saved;
+    saved.id = 6; saved.frequencyHz = 100'000'000; saved.mode = "SAM";
+    saved.filterLowHz = -1800; saved.filterHighHz = 4000;
+    saved.agcMode = "slow"; saved.audioMute = true;
+    // An invalid earlier record must not steal the singleton reservation from ID 6.
+    auto invalid = saved; invalid.id = 2; invalid.filterLowHz = 100;
+    check(RtlSliceSettings(scope).patch(100'600'000, 2'400'000, {invalid, saved}), "sparse SAM restore with invalid earlier record seeded");
+    RadioModel model;
+    check(model.rebuildBackendForTest("rtl"), "AM/SAM model initializes real backend");
+    RadioModelSliceLifecycleTestAccess::restore(model, "am-sam-controls");
+    auto& backend = *static_cast<rtl::RtlSdrBackend*>(model.backend());
+    auto usb = std::make_shared<test::DeviceState>();
+    Access::start(backend, std::make_unique<test::InjectedDevice>(usb));
+    usb->releaseReadback(); CaptureClock clock(usb);
+    const auto settle = [&] { clock.advance(); return Access::idle(backend); };
+    check(waitFor([&] { return settle() && model.slice(6) && model.slice(6)->mode() == "SAM"; }),
+        "first restorable sparse SAM ID acquires singleton reservation");
+    auto* slice = model.slice(6);
+    if (!slice) { backend.disconnectRadio(); return; }
+    check(!model.slice(0) && !model.slice(2) && Access::state(backend).hardware.centerHz == 100'600'000,
+        "AM bootstrap preserves sparse identity and exact saved capture center");
+    slice->setAgcMode("fast"); slice->setAgcThreshold(48); slice->setAgcOffLevel(22);
+    slice->setNbKind(NoiseBlankerKind::Advanced); slice->setNbLevel(65);
+    slice->setNr(true); slice->setNrLevel(60); slice->setAnf(true); slice->setMn(true); slice->setMnLevel(40);
+    slice->setRit(true, 250); slice->setFilterWidth(-2000, 5000);
+    check(slice->agcMode() == "slow" && !slice->ritOn(), "SAM controls remain accepted-only while preparing");
+    check(waitFor([&] { return settle() && slice->agcMode() == "fast" && slice->agcThreshold() == 48
+        && slice->agcOffLevel() == 22 && slice->nbKind() == NoiseBlankerKind::Advanced
+        && slice->nrOn() && slice->anfOn() && slice->mnOn() && slice->mnLevel() == 40
+        && slice->ritOn() && slice->ritFreq() == 250 && slice->filterLow() == -2000 && slice->filterHigh() == 5000; }),
+        "SAM AGC blankers NR ANF notch RIT and asymmetric RF cuts adopt through public model setters");
+    const auto token = Access::state(backend).token;
+    slice->setFilterWidth(0, 4000); slice->setFilterWidth(-13000, 4000);
+    slice->setApf(true); slice->setSquelch(true, 30);
+    check(Access::idle(backend) && Access::state(backend).token == token && !slice->apfOn() && !slice->squelchOn(),
+        "AM refuses carrier-excluding filters, out-of-range cuts, CW APF and unsupported squelch");
+    RadioModelSliceLifecycleTestAccess::flush(model);
+    const auto persisted = RtlSliceSettings(scope).load().document.slices.value(6);
+    check(persisted.mode == "SAM" && persisted.filterLowHz == -2000 && persisted.filterHighHz == 5000
+        && persisted.agcThreshold == 48 && persisted.nrEnabled && persisted.mnEnabled && persisted.ritOffsetHz == 250,
+        "only accepted SAM state persists");
+    slice->setMode("AM");
+    check(waitFor([&] { return settle() && slice->mode() == "AM"; }), "SAM to AM public transition adopts");
+    check(slice->agcThreshold() == 48 && slice->ritOn() && slice->ritFreq() == 250,
+        "AM transition preserves independent AGC and RIT controls");
+    auto* pan = model.panadapter(slice->panId());
+    if (pan) {
+        model.requestPanCenter(pan->panId(), 104.0, -1, IRadioBackend::PanCenterIntent::Drag);
+        check(waitFor([&] { return settle() && !slice->inCapture(); }), "AM free-pan parks receiver");
+        slice->setAgcThreshold(49);
+        check(waitFor([&] { return settle() && slice->agcThreshold() == 49; }), "parked AM accepts saved controls without reception");
+    }
+    RadioModelSliceLifecycleTestAccess::flush(model);
+    backend.disconnectRadio();
+    RadioModel restored;
+    check(restored.rebuildBackendForTest("rtl"), "AM reconnect model initializes");
+    RadioModelSliceLifecycleTestAccess::restore(restored, "am-sam-controls");
+    auto& next = *static_cast<rtl::RtlSdrBackend*>(restored.backend());
+    auto nextUsb = std::make_shared<test::DeviceState>();
+    Access::start(next, std::make_unique<test::InjectedDevice>(nextUsb));
+    nextUsb->releaseReadback(); CaptureClock nextClock(nextUsb);
+    check(waitFor([&] { nextClock.advance(); return Access::idle(next) && restored.slice(6)
+        && restored.slice(6)->mode() == "AM"; }), "parked sparse AM restores after reconnect");
+    if (auto* resumed = restored.slice(6)) {
+        check(!resumed->inCapture() && resumed->agcThreshold() == 49 && resumed->ritFreq() == 250,
+            "AM reconnect preserves parking and independent controls");
+    }
+    next.disconnectRadio();
+}
+
 int main(int argc, char** argv)
 {
     TestSettingsProfile profile(QStringLiteral("rtl-model-acceptance"));
@@ -594,6 +667,7 @@ int main(int argc, char** argv)
     analogBankRestoreAndSharedCapture();
     invalidLegacySidebandRestore();
     sidebandControlsAndPersistence();
+    amControlsAndRestore();
     const RadioSettingsScope scope("rtl", "model-accepted");
     RtlSliceSettings::Slice saved;
     saved.id = 3; saved.frequencyHz = 99'900'000; saved.mode = "FM";

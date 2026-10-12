@@ -953,11 +953,12 @@ void admission()
     for (const Transaction::Mode mode : {Transaction::Mode::Am, Transaction::Mode::Sam}) {
         invalid = current;
         invalid.receivers.push_back({{6, 103'000'000, -3000, 3000, 0, 3000, 3000}, mode});
-        check(!multiple->prepare(invalid),
-              "parked legacy recipe cannot bypass configured-set singleton admission");
+        check(multiple->prepare(invalid) && ready(*multiple) && multiple->adopt(),
+              "parked AM/SAM recipe shares configured native bank with WFM");
         std::reverse(invalid.receivers.begin(), invalid.receivers.end());
-        check(!multiple->prepare(invalid),
-              "configured legacy singleton refusal is independent of receiver order");
+        ++invalid.token.revision;
+        check(multiple->prepare(invalid) && ready(*multiple) && multiple->adopt(),
+              "native AM/SAM admission is independent of receiver order");
     }
     multiple->stop();
     multiple.reset(); native.reset(); legacy.reset();

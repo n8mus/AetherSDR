@@ -39,6 +39,10 @@ bool validCapture(const Registry::Capture& capture)
 
 bool boundedDsp(const WdspChannel::Config& config)
 {
+    if (config.amReceive && ((config.mode != WdspChannel::Mode::Am
+        && config.mode != WdspChannel::Mode::Sam) || config.fmReceive || config.wbfmReceive
+        || config.filterLowHz > -100 || config.filterHighHz < 100
+        || config.filterLowHz < -12000 || config.filterHighHz > 12000)) { return false; }
     if (config.wbfmReceive) {
         const auto& wide = *config.wbfmReceive;
         if (config.mode != WdspChannel::Mode::Wbfm || config.fmReceive

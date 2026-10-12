@@ -442,7 +442,7 @@ void refusals()
         case 6: receiver.apfLevel = 101; break;
         case 7: receiver.mode = T::Mode::Am; break;
         }
-        check(!pipeline.prepare(bad), "invalid controls and mixed legacy/native bank are rejected before preparation");
+        check(!pipeline.prepare(bad), "invalid controls and carrier-excluding AM filters are rejected before preparation");
     }
 }
 // Optional integration fixture: interleaved little-endian float32 analytic IQ

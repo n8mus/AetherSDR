@@ -28,7 +28,7 @@ class RtlSdrDdc;
 //
 // Receive-only (Principle VI): capabilities().canTransmit = false,
 // hostModulates = false. One capture/panadapter, prepared analog receiver bank;
-// AM/SAM retain the exclusive legacy DDC.
+// AM/SAM use independent WDSP envelope/synchronous receive channels.
 //
 // The worker owns the librtlsdr device handle and runs
 // rtlsdr_read_async → IQ conversion → DDC. Backend relays are delivered to

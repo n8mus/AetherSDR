@@ -98,6 +98,17 @@ int main(int argc, char** argv)
     emit source->sliceAudioFrameReady(3, *pa.produce({0.375f}));
     drain();
     check(chunks == 2 && delivered == QVector<float>({0.375f}), "monitor mute/gain/pan do not affect ASR");
+    for (const QString& mode : {QStringLiteral("AM"), QStringLiteral("SAM")}) {
+        const int beforeMode = chunks;
+        SliceDelta changed; changed.mode = mode;
+        emit source->sliceChanged(3, changed);
+        pa.start(PcmPurpose::Slice, 3, {48000, PcmLayout::Mono});
+        emit source->sliceAudioFrameReady(3, *pa.produce({0.45f}));
+        drain();
+        check(chunks == beforeMode + 1 && delivered == QVector<float>({0.45f}) && tap.usesNativeInput(),
+            "AM and SAM selected audio use native pre-monitor ASR routing");
+    }
+    chunks -= 2; // Keep the lifecycle census below relative to its original two blocks.
     emit source->sliceAudioFrameReady(3, *pa.produce({0.5f}));
     const int beforeSwitch = resets;
     route.setSlice(b);

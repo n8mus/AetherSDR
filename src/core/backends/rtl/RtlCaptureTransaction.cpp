@@ -108,7 +108,7 @@ std::vector<Policy::SliceDescriptor> receivingPassbands(const T::State& state)
 
 bool dcSensitive(const T::Receiver& receiver)
 {
-    return receiver.mode == T::Mode::Fm || receiver.mode == T::Mode::Fmn || RtlReceiveRecipe::cw(receiver.mode);
+    return RtlReceiveRecipe::dcSensitive(receiver.mode);
 }
 
 Policy::Interval dcExclusion(const T::Receiver& receiver)

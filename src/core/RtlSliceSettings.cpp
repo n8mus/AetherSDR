@@ -298,7 +298,10 @@ bool RtlSliceSettings::patch(double captureCenterHz, double sampleRateHz,
     object.insert(QStringLiteral("captureCenterHz"), captureCenterHz);
     object.insert(QStringLiteral("sampleRateHz"), sampleRateHz);
     object.insert(QStringLiteral("slices"), slices);
-    if (trackingNotches) {
+    // An absent bank already means enabled with no entries. A reconnect that
+    // merely observes that default must not rewrite the saved document.
+    if (trackingNotches && (object.contains(QStringLiteral("trackingNotches"))
+        || !trackingNotches->enabled || !trackingNotches->entries.empty())) {
         if (!trackingNotches->valid()) { return refuse(QStringLiteral("invalid tracking notch bank")); }
         auto notches = object.value(QStringLiteral("trackingNotches")).toObject();
         const auto previousEntries = notches.value(QStringLiteral("entries")).toObject();
