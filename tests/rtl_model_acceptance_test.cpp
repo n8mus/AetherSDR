@@ -404,6 +404,105 @@ static void invalidLegacySidebandRestore()
     next.disconnectRadio();
 }
 
+static void perModeFilterRecall()
+{
+    using Access = rtl::RtlCaptureBackendTestAccess;
+    const RadioSettingsScope scope("rtl", "mode-filter-recall");
+    RtlSliceSettings::Slice saved;
+    saved.id = 3; saved.frequencyHz = 100'000'000; saved.mode = "USB";
+    saved.filterLowHz = 200; saved.filterHighHz = 2700;
+    saved.modeFilters.insert("LSB", {100, 2900});
+    RtlSliceSettings::Slice sibling = saved;
+    sibling.id = 4; sibling.frequencyHz = 100'200'000;
+    sibling.filterLowHz = 400; sibling.filterHighHz = 2400;
+    check(RtlSliceSettings(scope).patch(100'600'000, 2'400'000, {saved, sibling}),
+        "per-mode sparse receivers seeded");
+    RadioModel model;
+    check(model.rebuildBackendForTest("rtl"), "filter recall model initialized");
+    RadioModelSliceLifecycleTestAccess::restore(model, "mode-filter-recall");
+    auto& backend = *static_cast<rtl::RtlSdrBackend*>(model.backend());
+    auto usb = std::make_shared<test::DeviceState>();
+    Access::start(backend, std::make_unique<test::InjectedDevice>(usb), 2);
+    usb->releaseReadback(); CaptureClock clock(usb);
+    const auto settle = [&] { clock.advance(); return Access::idle(backend); };
+    check(waitFor([&] { return settle() && model.slice(3) && model.slice(4); }),
+        "filter recall receivers restored");
+    auto* slice = model.slice(3);
+    if (!slice || !model.slice(4)) { backend.disconnectRadio(); return; }
+    check(slice->rxAntenna() == "RX" && slice->rxAntennaList() == QStringList{"RX"}
+        && slice->txAntenna().isEmpty() && slice->txAntennaList().isEmpty(),
+        "RTL publishes only its fixed physical receive input and no transmit ports");
+    slice->setMode("FM");
+    check(waitFor([&] { return settle() && slice->mode() == "FM"; })
+        && slice->filterLow() == -8000 && slice->filterHigh() == 8000,
+        "first FM entry uses its default filter");
+    slice->setFilterWidth(-6500, 6500);
+    check(waitFor([&] { return settle() && slice->filterLow() == -6500; }),
+        "custom FM filter accepted");
+    slice->setMode("USB");
+    check(waitFor([&] { return settle() && slice->mode() == "USB"; })
+        && slice->filterLow() == 200 && slice->filterHigh() == 2700,
+        "USB to FM to USB recalls accepted custom filter");
+    RadioModelSliceLifecycleTestAccess::flush(model);
+    const auto before = scope.featureExact("RtlSlices");
+    slice->setFilterWidth(300, 2300);
+    RadioModelSliceLifecycleTestAccess::flush(model);
+    check(scope.featureExact("RtlSlices") == before,
+        "pending filter intent does not overwrite per-mode recall");
+    slice->setFilterWidth(200, 2700);
+    check(waitFor(settle), "superseded filter request settles");
+    slice->setFilterWidth(-200, 2700);
+    check(Access::idle(backend) && slice->filterLow() == 200,
+        "invalid USB passband cannot enter recall history");
+    slice->setMode("LSB");
+    check(waitFor([&] { return settle() && slice->mode() == "LSB"; })
+        && slice->filterLow() == -2900 && slice->filterHigh() == -100,
+        "invalid signed LSB history falls back to its mode default");
+    slice->setFilterWidth(-2300, -300);
+    check(waitFor([&] { return settle() && slice->filterLow() == -2300; }),
+        "custom LSB filter accepted");
+    slice->setMode("CW");
+    check(waitFor([&] { return settle() && slice->mode() == "CW"; })
+        && slice->filterLow() == -250 && slice->filterHigh() == 250,
+        "first CW entry uses independent mode default");
+    slice->setFilterWidth(-150, 150);
+    check(waitFor([&] { return settle() && slice->filterLow() == -150; }),
+        "custom CW filter accepted");
+    slice->setMode("FM");
+    check(waitFor([&] { return settle() && slice->mode() == "FM"; })
+        && slice->filterLow() == -6500 && slice->filterHigh() == 6500,
+        "FM recalls its accepted custom filter");
+    check(model.slice(4)->mode() == "USB" && model.slice(4)->filterLow() == 400
+        && model.slice(4)->filterHigh() == 2400, "filter memory remains per slice");
+    RadioModelSliceLifecycleTestAccess::flush(model);
+    const auto filters = RtlSliceSettings(scope).load().document.slices[3].modeFilters;
+    check(filters.value("USB") == RtlSliceSettings::Filter{200, 2700}
+        && filters.value("LSB") == RtlSliceSettings::Filter{-2300, -300}
+        && filters.value("CW") == RtlSliceSettings::Filter{-150, 150},
+        "only accepted per-mode filters are persisted together");
+    backend.disconnectRadio();
+    RadioModel restored;
+    check(restored.rebuildBackendForTest("rtl"), "filter recall reconnect initialized");
+    RadioModelSliceLifecycleTestAccess::restore(restored, "mode-filter-recall");
+    auto& second = *static_cast<rtl::RtlSdrBackend*>(restored.backend());
+    auto nextUsb = std::make_shared<test::DeviceState>();
+    Access::start(second, std::make_unique<test::InjectedDevice>(nextUsb), 2);
+    nextUsb->releaseReadback(); CaptureClock nextClock(nextUsb);
+    const auto nextSettle = [&] { nextClock.advance(); return Access::idle(second); };
+    check(waitFor([&] { return nextSettle() && restored.slice(3); }), "filter history reconnect restores");
+    if (auto* resumed = restored.slice(3)) {
+        resumed->setMode("USB");
+        check(waitFor([&] { return nextSettle() && resumed->mode() == "USB"; })
+            && resumed->filterLow() == 200 && resumed->filterHigh() == 2700,
+            "reconnect retains custom USB filter while saved in FM");
+        resumed->setMode("CW");
+        check(waitFor([&] { return nextSettle() && resumed->mode() == "CW"; })
+            && resumed->filterLow() == -150 && resumed->filterHigh() == 150,
+            "reconnect retains custom CW filter independently");
+    }
+    second.disconnectRadio();
+}
+
 static void sidebandControlsAndPersistence()
 {
     using Access = rtl::RtlCaptureBackendTestAccess;
@@ -540,6 +639,20 @@ static void sidebandControlsAndPersistence()
     RadioModelSliceLifecycleTestAccess::flush(model);
     check(scope.featureExact("RtlSlices") == validNotchDocument,
         "rejected notch edits cannot change saved bank");
+    check(slice->filterLow() == -4000 && slice->filterHigh() == 4000,
+        "first AM entry uses its default independently of SAM cuts");
+    slice->setFilterWidth(-3500, 2500);
+    check(waitFor([&] { return settle() && slice->filterLow() == -3500; }),
+        "AM asymmetric filter accepts independently");
+    slice->setMode("SAM");
+    check(waitFor([&] { return settle() && slice->mode() == "SAM"; })
+        && slice->filterLow() == -2000 && slice->filterHigh() == 5000
+        && Access::state(backend).receivers.front().passband.translationHz == 250,
+        "SAM recalls accepted asymmetric cuts with active RIT");
+    slice->setMode("AM");
+    check(waitFor([&] { return settle() && slice->mode() == "AM"; })
+        && slice->filterLow() == -3500 && slice->filterHigh() == 2500,
+        "AM recalls its own accepted asymmetric cuts");
     auto* pan = model.panadapter(slice->panId());
     if (pan) {
         model.requestPanCenter(pan->panId(), 104.0, -1.0, IRadioBackend::PanCenterIntent::Drag);
@@ -632,6 +745,20 @@ static void amControlsAndRestore()
     check(waitFor([&] { return settle() && slice->mode() == "AM"; }), "SAM to AM public transition adopts");
     check(slice->agcThreshold() == 48 && slice->ritOn() && slice->ritFreq() == 250,
         "AM transition preserves independent AGC and RIT controls");
+    check(slice->filterLow() == -4000 && slice->filterHigh() == 4000,
+        "first AM entry uses its default independently of SAM cuts");
+    slice->setFilterWidth(-3500, 2500);
+    check(waitFor([&] { return settle() && slice->filterLow() == -3500; }),
+        "AM asymmetric filter accepts independently");
+    slice->setMode("SAM");
+    check(waitFor([&] { return settle() && slice->mode() == "SAM"; })
+        && slice->filterLow() == -2000 && slice->filterHigh() == 5000
+        && Access::state(backend).receivers.front().passband.translationHz == 250,
+        "SAM recalls accepted asymmetric cuts with active RIT");
+    slice->setMode("AM");
+    check(waitFor([&] { return settle() && slice->mode() == "AM"; })
+        && slice->filterLow() == -3500 && slice->filterHigh() == 2500,
+        "AM recalls its own accepted asymmetric cuts");
     auto* pan = model.panadapter(slice->panId());
     if (pan) {
         model.requestPanCenter(pan->panId(), 104.0, -1, IRadioBackend::PanCenterIntent::Drag);
@@ -653,6 +780,12 @@ static void amControlsAndRestore()
     if (auto* resumed = restored.slice(6)) {
         check(!resumed->inCapture() && resumed->agcThreshold() == 49 && resumed->ritFreq() == 250,
             "AM reconnect preserves parking and independent controls");
+        check(resumed->filterLow() == -3500 && resumed->filterHigh() == 2500,
+            "AM reconnect retains its own accepted cuts");
+        resumed->setMode("SAM");
+        check(waitFor([&] { nextClock.advance(); return Access::idle(next) && resumed->mode() == "SAM"; })
+            && resumed->filterLow() == -2000 && resumed->filterHigh() == 5000,
+            "reconnect recalls SAM history independently while parked");
     }
     next.disconnectRadio();
 }
@@ -666,6 +799,7 @@ int main(int argc, char** argv)
     analogBankSelection(8);
     analogBankRestoreAndSharedCapture();
     invalidLegacySidebandRestore();
+    perModeFilterRecall();
     sidebandControlsAndPersistence();
     amControlsAndRestore();
     const RadioSettingsScope scope("rtl", "model-accepted");

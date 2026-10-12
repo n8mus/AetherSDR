@@ -40,6 +40,8 @@ Building from source: the `ENABLE_RTL` option is on by default and takes effect 
 
 Normal launches admit **one receiver**, even though the capture is wide.
 
+The **RX ANT** controls show the dongle's fixed **RX** input. They do not offer FlexRadio antenna ports. The RX applet and VFO antenna button are dimmed unless a configured virtual receiver is available. **TX ANT** shows **None** and is dimmed because RTL-SDR cannot transmit.
+
 ### SSB and CW
 
 Select **USB** or **LSB** for single-sideband reception, or **CW** / **CWR** for Morse. These modes use independent receive DSP and 48 kHz audio. Filter presets and draggable edges change the actual receive passband. The CW marker remains on the station carrier; **Pitch** changes the audio tone without moving the dial frequency. Pitch is shared by the RTL session's CW receivers.
@@ -49,6 +51,8 @@ Select **USB** or **LSB** for single-sideband reception, or **CW** / **CWR** for
 The speaker icon opens a slice's audio controls; right-click it to toggle mute. A crossed speaker marks muted audio. The RX Controls speaker button also follows the selected slice's mute state.
 
 The [CW decoder](./cw-decoder.md) follows the selected CW or CWR slice. [Copy Assist](./copy-assist.md) follows the selected voice slice's independent audio before speaker volume, mute and client audio effects. A muted slice can still decode; a parked slice cannot. Selecting another slice or parking it discards queued audio from the old source. Copy Assist needs a downloaded speech model.
+
+Each slice remembers its last accepted filter separately for each mode. Switching from USB to FM and back recalls that slice’s USB passband, including after reconnecting. A mode you have not used on that slice starts with its normal default filter. Pending or refused filter changes do not replace the remembered passband.
 
 **NR**, **ANF** and **MN** run independently inside each SSB/CW receiver. NR reduces noise, ANF suppresses sustained tones, and MN places a fixed-width notch within the passband. Their settings use the local WDSP algorithms, so the values are not equivalent to a FlexRadio's settings. [Tracking notch filters](./tnf-tracking-notch-filters.md) stay at an RF frequency as receivers tune past them.
 

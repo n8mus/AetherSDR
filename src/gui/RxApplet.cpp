@@ -458,7 +458,7 @@ void RxApplet::buildUI()
                     emit kiwiRxAntennaSelected(slice->sliceId(), profileId);
                 } else {
                     emit flexRxAntennaSelected(slice->sliceId());
-                    slice->setRxAntenna(token);
+                    if (slice->rxAntenna() != token) { slice->setRxAntenna(token); }
                 }
             });
             menu->popup(
@@ -2140,6 +2140,19 @@ void RxApplet::setRadioModel(RadioModel* radioModel)
     }
     if (m_radioModel) {
         m_filterAvailability = new ControlAvailabilityRegistry(*m_radioModel, this);
+        m_filterAvailability->registerRestriction(m_txAntBtn,
+            tr("This radio is receive-only; no transmit antenna is available"),
+            [](bool connected, const RadioCapabilities& caps) {
+                return !connected || caps.canTransmit;
+            });
+        m_filterAvailability->registerRestriction(m_rxAntBtn,
+            tr("This receiver has one fixed receive input"),
+            [this](bool connected, const RadioCapabilities& caps) {
+                const bool virtualAntennas = m_kiwiSdrManager
+                    && !m_kiwiSdrManager->virtualAntennaTokens().isEmpty();
+                return !connected || caps.canTransmit || !m_slice
+                    || m_slice->rxAntennaList().size() != 1 || virtualAntennas;
+            });
         m_filterAvailability->registerRestriction(m_ritContainer,
             tr("Receive incremental tuning is unavailable in this mode"),
             [this](bool connected, const RadioCapabilities& caps) {
@@ -2191,6 +2204,7 @@ void RxApplet::setRadioModel(RadioModel* radioModel)
             if (m_exclusiveSquelch && m_slice && !m_clientSquelchScope.hasRadioIdentity()) {
                 setSlice(m_slice);
             }
+            updateAntennaButtons();
             configureRepeaterReverseControl();
             configureFmToneControls();
             syncAgcSliderFromSlice();
@@ -2465,6 +2479,11 @@ QString RxApplet::antennaMenuLabel(const QString& token,
 
 QStringList RxApplet::rxAntennaOptions() const
 {
+    if (m_radioModel && m_radioModel->isConnected()
+        && !m_radioModel->backendCapabilities().canTransmit && m_slice
+        && !m_slice->rxAntennaList().isEmpty()) {
+        return m_slice->rxAntennaList();
+    }
     QStringList options;
     auto append = [&options](const QString& token) {
         if (!token.isEmpty() && !options.contains(token)) {
@@ -2496,6 +2515,8 @@ QStringList RxApplet::rxAntennaOptions() const
 
 QStringList RxApplet::txAntennaOptions() const
 {
+    if (m_radioModel && m_radioModel->isConnected()
+        && !m_radioModel->backendCapabilities().canTransmit) { return {}; }
     QStringList options;
     auto append = [&options](const QString& token) {
         if (!token.isEmpty() && !options.contains(token))
@@ -2524,6 +2545,10 @@ void RxApplet::updateAntennaButton(QPushButton* button, const QString& token, bo
         return;
 
     QString effectiveToken = token;
+    if (tx && m_radioModel && m_radioModel->isConnected()
+        && !m_radioModel->backendCapabilities().canTransmit) {
+        effectiveToken = tr("None");
+    }
     if (!tx && m_kiwiSdrManager && m_slice) {
         const QString profileId =
             m_kiwiSdrManager->assignedProfileForSlice(m_slice->sliceId());
@@ -2559,6 +2584,7 @@ void RxApplet::updateAntennaButton(QPushButton* button, const QString& token, bo
         : QStringLiteral("%1 antenna port: %2")
               .arg(tx ? QStringLiteral("Transmit") : QStringLiteral("Receive"),
                    full));
+    if (m_filterAvailability) { m_filterAvailability->refreshEngaged(); }
 }
 
 void RxApplet::updateAntennaButtons()

@@ -554,6 +554,7 @@ void RtlSdrBackend::startCapture(std::unique_ptr<RtlSdrWorker> worker)
     m_activeSliceId = -1;
     m_published = {};
     m_lastPublished.reset();
+    m_acceptedModeFilters.clear();
     m_viewport.reset();
     m_pendingViewport = {};
     m_pendingDrag = false;
@@ -969,27 +970,39 @@ void RtlSdrBackend::setSliceMode(int sliceId, const QString& mode)
         emit configurationWarning(tr("This RTL mode requires a single configured receiver. Multiple receivers support AM, SAM, FM, FM-N, analog WFM, USB, LSB, CW and CWR."));
         return;
     }
-    if (narrowFm && (receiver->passband.filterLowHz < -21600 || receiver->passband.filterHighHz > 21600
-        || receiver->passband.filterLowHz >= 0 || receiver->passband.filterHighHz <= 0)) {
-        // The existing wide/sideband passband cannot describe the FM graph.
-        // Mode transition selects the new receiver's documented 16 kHz FM
-        // passband; restores and ordinary filter requests never resize it.
-        receiver->passband.filterLowHz = -8000; receiver->passband.filterHighHz = 8000;
-    }
-    const bool nativeWfm = RtlReceivePipeline::kQualifiedWfmEnabled
-        && modeValue == RtlCaptureTransaction::Mode::Wfm;
-    if (nativeWfm && (receiver->passband.filterLowHz > -15000
-        || receiver->passband.filterHighHz < 15000)) {
-        // Entering broadcast FM from a narrow mode selects its existing
-        // 200 kHz RF width. Ordinary edits and saved restores are never resized.
-        receiver->passband.filterLowHz = -100000;
-        receiver->passband.filterHighHz = 100000;
-    }
-    if (receiver->mode != modeValue && RtlReceiveRecipe::analogDsp(modeValue)
-        && !(RtlReceiveRecipe::amplitude(receiver->mode) && RtlReceiveRecipe::amplitude(modeValue))) {
-        const auto [low, high] = RtlReceiveRecipe::defaultFilter(modeValue);
-        receiver->passband.filterLowHz = low;
-        receiver->passband.filterHighHz = high;
+    if (receiver->mode != modeValue) {
+        RtlSliceSettings::Filter filter;
+        if (RtlReceiveRecipe::analogDsp(modeValue)) {
+            const auto [low, high] = RtlReceiveRecipe::defaultFilter(modeValue);
+            filter = {double(low), double(high)};
+        } else if (narrowFm) {
+            filter = {-8000, 8000};
+        } else if (modeValue == RtlCaptureTransaction::Mode::Wfm) {
+            filter = {-100000, 100000};
+        } else {
+            filter = {-3000, 3000};
+        }
+        const auto history = m_acceptedModeFilters.value(sliceId);
+        const auto saved = history.constFind(canonical);
+        if (saved != history.cend()) {
+            auto recalled = candidate;
+            recalled.passband.filterLowHz = saved->lowHz;
+            recalled.passband.filterHighHz = saved->highHz;
+            recalled.passband.translationHz = RtlReceiveRecipe::analogDsp(modeValue) && recalled.ritEnabled
+                ? recalled.ritOffsetHz : 0;
+            const bool fmValid = !narrowFm || (saved->lowHz >= -21600 && saved->lowHz < 0
+                && saved->highHz > 0 && saved->highHz <= 21600);
+            const bool wfmValid = modeValue != RtlCaptureTransaction::Mode::Wfm
+                || (saved->lowHz >= -100000 && saved->lowHz <= -15000
+                    && saved->highHz >= 15000 && saved->highHz <= 100000);
+            if (fmValid && wfmValid && RtlReceiveRecipe::valid(recalled)) {
+                filter = *saved;
+            } else {
+                emit configurationWarning(tr("The remembered %1 filter is outside the supported range; using the mode default.").arg(canonical));
+            }
+        }
+        receiver->passband.filterLowHz = filter.lowHz;
+        receiver->passband.filterHighHz = filter.highHz;
     }
     receiver->mode = modeValue;
     receiver->passband.translationHz = RtlReceiveRecipe::analogDsp(modeValue) && receiver->ritEnabled
@@ -1520,6 +1533,7 @@ void RtlSdrBackend::invokeExtension(const QString& ns, const QString& verb,
 void RtlSdrBackend::configureSettingsScope(const RadioSettingsScope& scope, const RadioSerialIdentity& identity)
 {
     m_settingsScope = scope; m_settingsIdentity = identity;
+    m_acceptedModeFilters.clear();
     m_lastPublished.reset();
     m_settingsActive = false; m_restoreAttempted = false; m_restoreToken = {};
     m_removedSettings.clear(); m_omittedSettings.clear();
@@ -1543,6 +1557,7 @@ QVector<RtlSliceSettings::Slice> RtlSdrBackend::acceptedSettings() const
         RtlSliceSettings::Slice slice;
         slice.id = id; slice.frequencyHz = receiver.passband.carrierHz; slice.mode = modeName(receiver.mode);
         slice.filterLowHz = receiver.passband.filterLowHz; slice.filterHighHz = receiver.passband.filterHighHz;
+        slice.modeFilters = m_acceptedModeFilters.value(id);
         slice.agcMode = agcModeName(receiver.agcMode);
         slice.agcThreshold = receiver.agcThreshold;
         slice.agcOffLevel = receiver.agcOffLevel;
@@ -2134,6 +2149,10 @@ void RtlSdrBackend::emitSliceState(const RtlCaptureTransaction::Receiver& receiv
     delta.wfmReceptionDiagnostics = m_wfmReception[id];
     delta.wfmStereoStatus = m_wfmStatus[id];
     delta.modeList = capabilities().receiveModeControl->modes;
+    delta.rxAntenna = QStringLiteral("RX");
+    delta.rxAntennaList = QStringList{QStringLiteral("RX")};
+    delta.txAntenna = QString();
+    delta.txAntennaList = QStringList{};
     delta.agcMode = agcModeName(receiver.agcMode);
     delta.agcThreshold = receiver.agcThreshold;
     delta.agcOffLevel = receiver.agcOffLevel;
@@ -2223,9 +2242,11 @@ void RtlSdrBackend::publishCapture()
     }
     const bool restoring = m_restoreToken == state.token;
     if (restoring) {
+        m_acceptedModeFilters.clear();
         for (const auto& receiver : state.receivers) {
             const int id = receiver.passband.stableId;
             const auto& saved = m_savedSettings.document.slices[id];
+            m_acceptedModeFilters[id] = saved.modeFilters;
             m_monitors[id] = {saved.audioGain, saved.audioPan, saved.audioMute};
             updateMonitor(id); m_omittedSettings.remove(id);
         }
@@ -2242,6 +2263,7 @@ void RtlSdrBackend::publishCapture()
             if (std::ranges::none_of(state.receivers, [id](const auto& value) { return value.passband.stableId == id; })) {
                 if (!m_removedSettings.contains(id)) { m_removedSettings.append(id); }
                 m_savedSettings.document.slices.remove(id);
+                m_acceptedModeFilters.remove(id);
                 m_omittedSettings.remove(id);
             }
         }
@@ -2274,6 +2296,10 @@ void RtlSdrBackend::publishCapture()
         }
     }
     m_lastPublished = state;
+    for (const auto& receiver : state.receivers) {
+        m_acceptedModeFilters[receiver.passband.stableId].insert(modeName(receiver.mode),
+            {receiver.passband.filterLowHz, receiver.passband.filterHighHz});
+    }
     publishRfMeterDefinitions();
     if (!m_capture.confirmed() || m_capture.confirmed()->token != state.token) { return; }
     for (const auto& receiver : state.receivers) {

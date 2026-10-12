@@ -861,7 +861,7 @@ void VfoWidget::buildUI()
                 emit kiwiRxAntennaSelected(slice->sliceId(), profileId);
             } else {
                 emit flexRxAntennaSelected(slice->sliceId());
-                slice->setRxAntenna(token);
+                if (slice->rxAntenna() != token) { slice->setRxAntenna(token); }
             }
         });
         menu->popup(m_rxAntBtn->mapToGlobal(QPoint(0, m_rxAntBtn->height())));
@@ -6779,6 +6779,19 @@ void VfoWidget::setRadioModel(RadioModel* radioModel)
         ? exclusiveSquelchScaleValue(m_radioModel->backendCapabilities().squelchLevelScale) : std::nullopt;
     if (m_radioModel) {
         m_filterAvailability = new ControlAvailabilityRegistry(*m_radioModel, this);
+        m_filterAvailability->registerRestriction(m_txAntBtn,
+            tr("This radio is receive-only; no transmit antenna is available"),
+            [](bool connected, const RadioCapabilities& caps) {
+                return !connected || caps.canTransmit;
+            });
+        m_filterAvailability->registerRestriction(m_rxAntBtn,
+            tr("This receiver has one fixed receive input"),
+            [this](bool connected, const RadioCapabilities& caps) {
+                const bool virtualAntennas = m_kiwiSdrManager
+                    && !m_kiwiSdrManager->virtualAntennaTokens().isEmpty();
+                return !connected || caps.canTransmit || !m_slice
+                    || m_slice->rxAntennaList().size() != 1 || virtualAntennas;
+            });
         using Feature = ReceiveDspControl::Feature;
         const auto signalAvailable = [this](bool connected, const RadioCapabilities& caps, Feature feature) {
             return !connected || !caps.receiveDspControl
@@ -6845,6 +6858,7 @@ void VfoWidget::setRadioModel(RadioModel* radioModel)
                 [this](bool connected, const RadioCapabilities& caps) {
             m_receiveFilterControl = connected ? caps.receiveFilterControl : std::nullopt;
             m_exclusiveSquelch = connected ? exclusiveSquelchScaleValue(caps.squelchLevelScale) : std::nullopt;
+            updateAntennaButtons();
             configureRepeaterReverseControl();
             configureFmToneControls();
             updateAgcSliderFromSlice();
@@ -7078,6 +7092,11 @@ QString VfoWidget::antennaMenuLabel(const QString& token,
 
 QStringList VfoWidget::rxAntennaOptions() const
 {
+    if (m_radioModel && m_radioModel->isConnected()
+        && !m_radioModel->backendCapabilities().canTransmit && m_slice
+        && !m_slice->rxAntennaList().isEmpty()) {
+        return m_slice->rxAntennaList();
+    }
     QStringList options;
     auto append = [&options](const QString& token) {
         if (!token.isEmpty() && !options.contains(token)) {
@@ -7109,6 +7128,8 @@ QStringList VfoWidget::rxAntennaOptions() const
 
 QStringList VfoWidget::txAntennaOptions() const
 {
+    if (m_radioModel && m_radioModel->isConnected()
+        && !m_radioModel->backendCapabilities().canTransmit) { return {}; }
     QStringList options;
     auto append = [&options](const QString& token) {
         if (!token.isEmpty() && !options.contains(token))
@@ -7137,6 +7158,10 @@ void VfoWidget::updateAntennaButton(QPushButton* button, const QString& token, b
         return;
 
     QString effectiveToken = token;
+    if (tx && m_radioModel && m_radioModel->isConnected()
+        && !m_radioModel->backendCapabilities().canTransmit) {
+        effectiveToken = tr("None");
+    }
     if (!tx && m_kiwiSdrManager && m_slice) {
         const QString profileId =
             m_kiwiSdrManager->assignedProfileForSlice(m_slice->sliceId());
@@ -7171,6 +7196,7 @@ void VfoWidget::updateAntennaButton(QPushButton* button, const QString& token, b
         : QStringLiteral("%1 antenna port: %2")
               .arg(tx ? QStringLiteral("Transmit") : QStringLiteral("Receive"),
                    full));
+    if (m_filterAvailability) { m_filterAvailability->refreshEngaged(); }
 }
 
 void VfoWidget::updateAntennaButtons()

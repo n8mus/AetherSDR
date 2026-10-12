@@ -39,7 +39,9 @@ keep their RF meaning, including a notch deliberately placed on a carrier.
 APF remains CW-only. AM/SAM squelch is not exposed. Advanced radio-specific
 algorithms remain unavailable.
 
-AM-to-SAM switches preserve the operator's filter cuts. Graph changes,
+Each slice remembers AM and SAM filter cuts separately, like its other modes.
+A first entry uses the mode default; later entries recall only accepted cuts,
+including after reconnecting. Graph changes,
 parking, receiver recreation and mode transitions invalidate the matching
 receiver/presentation epochs. Speaker monitor controls remain downstream of
 independent TCI/DAX, selected CW-decoder and selected native-ASR routes.

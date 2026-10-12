@@ -44,13 +44,13 @@ constexpr int kRate = 240000;
 constexpr int kChunk = 1200;
 constexpr double kCenter = 100000000;
 constexpr std::array<double, 4> kOffsets{-60000, -20000, 20000, 60000};
-T::State state()
+T::State state(int rate = kRate)
 {
     T::State result;
     result.token = {1, 1};
-    result.capture = {1, 1, kCenter, kRate, kRate * .45, kRate * .45};
+    result.capture = {1, 1, kCenter, double(rate), rate * .45, rate * .45};
     result.hardware.centerHz = static_cast<std::uint32_t>(kCenter);
-    result.hardware.sampleRateHz = kRate;
+    result.hardware.sampleRateHz = rate;
     constexpr std::array<T::Mode, 4> modes{T::Mode::Usb, T::Mode::Lsb, T::Mode::Cw, T::Mode::Cwr};
     for (int id = 0; id < 4; ++id) {
         const auto [low, high] = Recipe::defaultFilter(modes[id]);
@@ -65,7 +65,7 @@ T::State state()
 struct Tone { double hz; double amplitude; };
 using Audio = std::array<std::vector<float>, 4>;
 Audio render(T::State recipe, const std::vector<Tone>& tones, double seconds = 1.6,
-             double noise = 0.0, double impulse = 0.0, bool agcStep = false)
+             double noise = 0.0, double impulse = 0.0, bool agcStep = false, bool quantize = false)
 {
     Pipeline pipeline(4);
     Audio audio;
@@ -73,27 +73,36 @@ Audio render(T::State recipe, const std::vector<Tone>& tones, double seconds = 1
         check(false, "real sideband receiver bank prepares and adopts"); return audio;
     }
     check(!pipeline.legacy(), "SSB/CW must never fall back to legacy demodulation");
-    std::array<std::complex<float>, kChunk> iq;
+    const int rate = static_cast<int>(recipe.capture.achievedSampleRateHz);
+    const int chunk = rate / 200; // Five milliseconds at either capture rate.
+    std::vector<std::complex<float>> iq(chunk);
     AetherSDR::rtl::RtlDcBlocker dc;
-    dc.configure(true, kRate);
-    const std::uint64_t end = static_cast<std::uint64_t>(seconds * kRate);
+    dc.configure(true, rate);
+    const std::uint64_t end = static_cast<std::uint64_t>(seconds * rate);
     std::uint32_t random = 0x146713;
     const auto white = [&]() {
         random = random * 1664525u + 1013904223u;
         return (double(random) / 4294967296.0 - .5) * noise;
     };
-    for (std::uint64_t first = 0; first < end; first += kChunk) {
+    for (std::uint64_t first = 0; first < end; first += chunk) {
         for (std::size_t index = 0; index < iq.size(); ++index) {
             std::complex<double> sample{};
             for (const Tone& tone : tones) {
-                const double phase = 2 * std::numbers::pi * tone.hz * double(first + index) / kRate;
+                const double phase = 2 * std::numbers::pi * tone.hz * double(first + index) / rate;
                 sample += std::polar(tone.amplitude, phase);
             }
-            if (agcStep && first + index < kRate) { sample *= 1000.0; }
+            if (agcStep && first + index < std::uint64_t(rate)) { sample *= 1000.0; }
             sample += std::complex<double>(white(), white());
             // A single-sample real impulse is broadband. Rectangular multi-
             // sample pulses have RF spectral nulls and bias receiver comparisons.
-            if (first + index >= kRate && (first + index) % 10000 == 0) { sample += impulse; }
+            if (first + index >= std::uint64_t(rate) && (first + index) % 10000 == 0) { sample += impulse; }
+            if (quantize) {
+                const auto adc = [](double value) {
+                    const double code = std::round(std::clamp(value * 127.5 + 127.5, 0.0, 255.0));
+                    return (code - 127.5) / 127.5;
+                };
+                sample = {adc(sample.real()), adc(sample.imag())};
+            }
             iq[index] = {float(sample.real()), float(sample.imag())};
         }
         dc.process(iq);
@@ -153,6 +162,71 @@ void sidebandsAndCw()
         check(audio[id].size() > 24000 && signal > .005, "wanted RF produces expected audio tone on each independent tap");
         check(rejection > 40, "opposite sideband or out-of-passband carrier rejection exceeds 40 dB");
     }
+}
+void hardwareCaptureRate()
+{
+    // Exercise the 50:1 RF decimator used by the physical 2.4 MS/s capture,
+    // including opposite RF offsets and BFO signs. Equal RF amplitudes must
+    // produce equal PCM levels regardless of the capture sample rate.
+    std::array<double, 4> reference{};
+    constexpr std::array<double, 4> wanted{1000, 1300, 600, 600};
+    constexpr std::array<double, 4> rejected{1700, 1900, 2600, 2600};
+    for (int rate : {kRate, 2400000}) {
+        auto recipe = state(rate);
+        const double scale = double(rate) / kRate;
+        std::array<double, 4> offsets{};
+        for (int id = 0; id < 4; ++id) {
+            offsets[id] = kOffsets[id] * scale;
+            recipe.receivers[id].passband.carrierHz = kCenter + offsets[id];
+        }
+        const auto audio = render(recipe, {
+            {offsets[0] + 1000, .015}, {offsets[0] - 1700, .015},
+            {offsets[1] - 1300, .015}, {offsets[1] + 1900, .015},
+            {offsets[2], .015}, {offsets[2] + 2000, .015},
+            {offsets[3], .015}, {offsets[3] - 2000, .015}});
+        for (int id = 0; id < 4; ++id) {
+            const double signal = magnitude(audio[id], wanted[id]);
+            const double image = magnitude(audio[id], rejected[id]);
+            const double rejection = 20 * std::log10(signal / std::max(image, 1e-12));
+            std::printf("capture_rate=%d receiver=%d wanted=%.6f rejection=%.1fdB\n",
+                rate, id, signal, rejection);
+            check(audio[id].size() > 24000 && signal > .005,
+                "hardware-rate capture produces expected SSB/CW audio on all four taps");
+            check(rejection > 40, "hardware-rate SSB/CW rejects opposite or out-of-band RF");
+            if (rate == kRate) { reference[id] = signal; }
+            else {
+                const double deltaDb = 20 * std::log10(signal / std::max(reference[id], 1e-12));
+                check(std::abs(deltaDb) < .5, "50:1 RF extraction preserves amplitude within half a dB");
+            }
+        }
+    }
+
+    auto recipe = state(2400000);
+    constexpr std::array<int, 4> thresholds{45, 65, 100, 45};
+    for (int id = 0; id < 4; ++id) {
+        auto& receiver = recipe.receivers[id];
+        receiver.mode = T::Mode::Usb;
+        receiver.passband.carrierHz = kCenter + 400000;
+        receiver.passband.filterLowHz = 100;
+        receiver.passband.filterHighHz = 2900;
+        receiver.agcMode = id == 3 ? 0 : 4;
+        receiver.agcThreshold = thresholds[id];
+    }
+    // A -80 dBFS wanted carrier probes the gain ceiling, below compression at
+    // the user-reported 45 setting. Wideband noise dithers the real RTL byte
+    // quantization; all chains receive the same quantized acquisition samples.
+    const auto audio = render(recipe, {{401500, .0001}}, 2.0, .02, 0, false, true);
+    std::array<double, 4> signal{};
+    for (int id = 0; id < 4; ++id) {
+        signal[id] = magnitude(audio[id], 1500);
+        std::printf("weak_input capture_rate=2400000 AGC=%s threshold=%d tone=%.7f rms=%.7f\n",
+            id == 3 ? "off" : "fast", thresholds[id], signal[id], rms(audio[id]));
+        check(signal[id] > .0001, "weak input survives hardware-rate SSB extraction and gain");
+    }
+    const double gainStep = 20 * std::log10(signal[1] / std::max(signal[0], 1e-12));
+    check(std::abs(gainStep - 12) < .5, "AGC 45 to 65 supplies the mapped 12 dB weak-signal gain");
+    check(signal[2] > signal[1] * 3, "upper AGC range raises a weak hardware-rate signal");
+    check(signal[0] > signal[3] * 3, "AGC at 45 raises a weak signal above fixed off gain");
 }
 void pitchRitAndFilter()
 {
@@ -494,6 +568,7 @@ int main(int argc, char** argv)
     const char* pcm = std::getenv("AETHER_RTL_SSB_OUTPUT_PCM");
     if (iq && pcm) { return externalFixture(iq, pcm); }
     sidebandsAndCw();
+    hardwareCaptureRate();
     pitchRitAndFilter();
     gainAndPeaking();
     agcResponse();

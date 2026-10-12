@@ -21,12 +21,18 @@ class RtlSliceSettings {
 public:
     static constexpr int kSchemaVersion = 1;
     static QString featureName() { return QStringLiteral("RtlSlices"); }
+    struct Filter {
+        double lowHz = 0;
+        double highHz = 0;
+        bool operator==(const Filter&) const = default;
+    };
     struct Slice {
         int id = -1;
         double frequencyHz = 0;
         QString mode;
         double filterLowHz = 0;
         double filterHighHz = 0;
+        QMap<QString, Filter> modeFilters;
         // Existing SliceModel defaults, also used for fields legacy RTL never saved.
         QString agcMode = QStringLiteral("med");
         int agcThreshold = 65;

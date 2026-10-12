@@ -45,6 +45,14 @@ QJsonObject encodeSlice(const RtlSliceSettings::Slice& slice, QJsonObject previo
     previous.insert(QStringLiteral("mode"), slice.mode);
     previous.insert(QStringLiteral("filterLow"), slice.filterLowHz);
     previous.insert(QStringLiteral("filterHigh"), slice.filterHighHz);
+    QJsonObject filters = previous.value(QStringLiteral("modeFilters")).toObject();
+    for (auto it = slice.modeFilters.cbegin(); it != slice.modeFilters.cend(); ++it) {
+        QJsonObject filter = filters.value(it.key()).toObject();
+        filter.insert(QStringLiteral("low"), it->lowHz);
+        filter.insert(QStringLiteral("high"), it->highHz);
+        filters.insert(it.key(), filter);
+    }
+    previous.insert(QStringLiteral("modeFilters"), filters);
     previous.insert(QStringLiteral("agcMode"), slice.agcMode);
     previous.insert(QStringLiteral("agcThreshold"), slice.agcThreshold);
     QJsonObject squelch = previous.value(QStringLiteral("squelch")).toObject();
@@ -133,6 +141,19 @@ bool RtlSliceSettings::decode(const QJsonObject& object, Document& output, QStri
             || !entry.value(QStringLiteral("audioMute")).isBool()
             || !entry.value(QStringLiteral("squelch")).isObject()) {
             return false;
+        }
+        if (entry.contains(QStringLiteral("modeFilters"))) {
+            if (!entry.value(QStringLiteral("modeFilters")).isObject()) { return false; }
+            const QJsonObject filters = entry.value(QStringLiteral("modeFilters")).toObject();
+            if (filters.size() > modes.size()) { return false; }
+            for (auto filter = filters.begin(); filter != filters.end(); ++filter) {
+                Filter value;
+                if (!modes.contains(filter.key()) || !filter.value().isObject()
+                    || !number(filter.value().toObject(), QStringLiteral("low"), -100000, 100000, value.lowHz, true)
+                    || !number(filter.value().toObject(), QStringLiteral("high"), -100000, 100000, value.highHz, true)
+                    || value.lowHz >= value.highHz) { return false; }
+                slice.modeFilters.insert(filter.key(), value);
+            }
         }
         // Optional schema-1 object: old documents use the existing UI defaults.
         if (entry.contains(QStringLiteral("receiveDsp"))) {

@@ -214,6 +214,7 @@ private:
     int m_receiverCapacity = kQualifiedReceiverCapacity;
     RtlCaptureTransaction m_capture{{8, kQualifiedReceiverCapacity}};
     std::optional<RtlCaptureTransaction::State> m_lastPublished;
+    QMap<int, QMap<QString, RtlSliceSettings::Filter>> m_acceptedModeFilters;
     // Focus belongs to a configured stable identity, including parked receivers.
     // It does not change the capture or demodulator bank.
     int m_activeSliceId = -1;

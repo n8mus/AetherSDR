@@ -639,5 +639,41 @@ int main(int argc, char** argv)
             && settings.load().document.trackingNotches == notches,
             "explicit empty accepted notch bank removes old saved notches");
     }
+    {
+        const RadioSettingsScope scope("rtl", "mode-filter-settings");
+        RtlSliceSettings owner(scope);
+        auto accepted = slice(3);
+        accepted.modeFilters = {{"USB", {200, 2700}}, {"FM", {-7000, 7000}}};
+        check(owner.patch(100'000'000, 2'400'000, {accepted}), "mode filters stored atomically with receiver");
+        check(owner.load().document.slices.value(3).modeFilters == accepted.modeFilters,
+            "per-mode filters roundtrip without sharing between modes");
+        const auto good = scope.featureExact(feature);
+        for (const QJsonValue& malformed : QList<QJsonValue>{
+                 false, QJsonObject{{"UNKNOWN", QJsonObject{{"low", 0}, {"high", 2500}}}},
+                 QJsonObject{{"USB", QJsonObject{{"low", 2700}, {"high", 200}}}},
+                 QJsonObject{{"USB", QJsonObject{{"low", 200.5}, {"high", 2700}}}},
+                 QJsonObject{{"USB", QJsonObject{{"low", 200}, {"high", 100001}}}},
+                 QJsonObject{{"USB", QJsonObject{{"low", "200"}, {"high", 2700}}}}}) {
+            auto invalid = good;
+            auto entries = invalid.value("slices").toObject();
+            auto entry = entries.value("3").toObject();
+            entry.insert("modeFilters", malformed);
+            entries.insert("3", entry); invalid.insert("slices", entries);
+            RtlSliceSettings::Document decoded; QString reason;
+            check(!RtlSliceSettings::decode(invalid, decoded, reason),
+                "malformed remembered filter is rejected before publishing parsed settings");
+        }
+        auto legacy = good;
+        auto entries = legacy.value("slices").toObject();
+        auto entry = entries.value("3").toObject(); entry.remove("modeFilters");
+        entries.insert("3", entry); legacy.insert("slices", entries);
+        RtlSliceSettings::Document decoded; QString reason;
+        check(RtlSliceSettings::decode(legacy, decoded, reason)
+            && decoded.slices.value(3).modeFilters.isEmpty(),
+            "old schema-1 documents have no invented filter history");
+        accepted.modeFilters["USB"] = {300, 100001};
+        check(!owner.patch(100'000'000, 2'400'000, {accepted})
+            && scope.featureExact(feature) == good, "invalid history cannot replace the saved document");
+    }
     return failures == 0 ? 0 : 1;
 }
