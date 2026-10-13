@@ -464,9 +464,9 @@ void Kat500Applet::refresh()
     m_tune->setAccessibleName(m_tune->text());
     availability(m_tune, tuning && m_model && m_model->isResponding() ? QString() : reason);
     for (int i = 0; i < 3; ++i) {
-        m_modes[i]->setChecked(ready && s.mode && static_cast<int>(*s.mode) == i);
+        m_modes[i]->setChecked(s.mode && static_cast<int>(*s.mode) == i);
         availability(m_modes[i], reason);
-        m_antennas[i]->setChecked(ready && s.antenna == i + 1);
+        m_antennas[i]->setChecked(s.antenna == i + 1);
         QString antennaReason = reason;
         if (antennaReason.isEmpty()) {
             if (!s.band ||
@@ -633,7 +633,7 @@ void Kat500Applet::renderHistory()
             segment = true;
             prior = point.time;
         }
-        p.setPen(QPen(theme.color("color.accent.primary"), 1.5));
+        p.setPen(QPen(theme.color(this, i == 0 ? "color.canon.cyan" : "color.canon.aqua"), 1.5));
         p.drawPath(path);
     }
     m_graph->setPixmap(pixmap);

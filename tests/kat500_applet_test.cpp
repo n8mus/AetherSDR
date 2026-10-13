@@ -1,5 +1,6 @@
 #include "TestSettingsProfile.h"
 #include "core/AppSettings.h"
+#include "core/ThemeManager.h"
 #include "gui/Kat500Applet.h"
 #include "models/Kat500Model.h"
 #include <QApplication>
@@ -47,6 +48,13 @@ class Kat500ModelTest
             model.m_configuration[{Kat500::Setting::EnabledAntenna, 5, i}] = i == 2 ? 0 : 1;
         }
         emit model.configurationRead(model.m_configuration);
+    }
+    static void blocked(Kat500Model& model, int condition)
+    {
+        model.m_status.forwardAdc = condition == 0 ? 1 : 0;
+        model.m_operation = condition == 1 ? QStringLiteral("Test maintenance") : QString();
+        model.m_status.tuning = condition == 2;
+        emit model.availabilityChanged();
     }
     static void stale(Kat500Model& model)
     {
@@ -111,10 +119,51 @@ int main(int argc, char** argv)
     capacitance->setValue(1000);
     emit model.availabilityChanged();
     CHECK(capacitance->value() == 1000);
+    widget.findChild<QPushButton*>("katHistory")->setChecked(true);
+    AetherSDR::Kat500::Status sample = model.status();
+    sample.swr = 1;
+    sample.forwardAdc = 1;
+    sample.reflectedAdc = 1;
+    for (const QString& command : {QStringLiteral("VSWR"), QStringLiteral("VFWD"), QStringLiteral("VRFL")}) {
+        emit model.telemetryReceived(command, sample);
+    }
+    QTest::qWait(20);
+    sample.swr = 5;
+    sample.forwardAdc = 250;
+    sample.reflectedAdc = 250;
+    for (const QString& command : {QStringLiteral("VSWR"), QStringLiteral("VFWD"), QStringLiteral("VRFL")}) {
+        emit model.telemetryReceived(command, sample);
+    }
+    emit model.availabilityChanged();
+    const QImage image = widget.findChild<QLabel*>("katHistoryGraph")->pixmap().toImage();
+    const QColor cyan = AetherSDR::ThemeManager::instance().color(&widget, "color.canon.cyan");
+    const QColor aqua = AetherSDR::ThemeManager::instance().color(&widget, "color.canon.aqua");
+    int cyanPixels = 0, aquaPixels = 0;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            cyanPixels += image.pixelColor(x, y) == cyan;
+            aquaPixels += image.pixelColor(x, y) == aqua;
+        }
+    }
+    const bool visibleTraces = cyanPixels > 10 && aquaPixels > 10;
+    if (!visibleTraces) {
+        std::fprintf(stderr, "FAIL missing visible history traces: cyan=%d aqua=%d\n", cyanPixels,
+                     aquaPixels);
+    }
+    for (int condition = 0; condition < 3; ++condition) {
+        AetherSDR::Kat500ModelTest::blocked(model, condition);
+        auto* selectedMode = widget.findChild<QPushButton*>("katAuto");
+        auto* selectedAntenna = widget.findChild<QPushButton*>("katAntenna1");
+        CHECK(selectedMode->isChecked() && selectedAntenna->isChecked());
+        CHECK(!selectedMode->isEnabled() && !selectedAntenna->isEnabled());
+    }
+    AetherSDR::Kat500ModelTest::blocked(model, 3);
     AetherSDR::Kat500ModelTest::stale(model);
     CHECK(!tune->isEnabled() && widget.findChild<QPushButton*>("katPower")->text() == "ON");
     AetherSDR::Kat500ModelTest::off(model);
     CHECK(widget.findChild<QPushButton*>("katPower")->text() == "OFF" && !tune->isEnabled());
     CHECK(!model.followTxFrequency());
-    return 0;
+    CHECK(widget.findChild<QPushButton*>("katAuto")->isChecked() &&
+          widget.findChild<QPushButton*>("katAntenna1")->isChecked());
+    return visibleTraces ? 0 : 1;
 }
