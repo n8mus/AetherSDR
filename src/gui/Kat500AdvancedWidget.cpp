@@ -1,9 +1,9 @@
 #include "Kat500AdvancedWidget.h"
+#include "CanonIndicators.h"
 #include "models/Kat500Model.h"
 #include <QAccessible>
 #include <QCheckBox>
 #include <QComboBox>
-#include <QDesktopServices>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -17,7 +17,6 @@
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QTableWidget>
-#include <QUrl>
 #include <QVBoxLayout>
 #include <array>
 #include <cmath>
@@ -29,24 +28,25 @@ struct Field {
     Kat500::Setting setting;
     int antenna;
     const char* title;
+    const char* detail;
     double minimum, maximum;
     bool perBand;
 };
 const std::array<Field, 13> fields{
-    {{Kat500::Setting::AmpKeyPower, 0, "1. Amplifier key interrupt power (W; 1500 = unlimited)", 0, 1500,
+    {{Kat500::Setting::AmpKeyPower, 0, "Amp key limit (W)", "Amplifier key interrupt power (W; 1500 = unlimited)", 0, 1500,
       false},
-     {Kat500::Setting::PowerOnDc, 0, "2. Power on when DC applied (0/1)", 0, 1, false},
-     {Kat500::Setting::SleepIdle, 0, "3. Sleep when idle (0/1)", 0, 1, false},
-     {Kat500::Setting::EnabledAntenna, 1, "4. ANT 1 enabled (0/1)", 0, 1, true},
-     {Kat500::Setting::EnabledAntenna, 2, "4. ANT 2 enabled (0/1)", 0, 1, true},
-     {Kat500::Setting::EnabledAntenna, 3, "4. ANT 3 enabled (0/1)", 0, 1, true},
-     {Kat500::Setting::SlotsPerBin, 0, "5. ATU slots per bin (1–6, shared by antennas)", 1, 6, true},
-     {Kat500::Setting::PreferredAntenna, 0, "4. Preferred antenna (0 = last used, 1–3)", 0, 3, true},
-     {Kat500::Setting::AutoSwr, 0, "6. Auto tune SWR threshold", 1.5, 99.99, true},
-     {Kat500::Setting::BypassSwr, 0, "6. Bypass SWR threshold", 1, 99.99, true},
-     {Kat500::Setting::KeySwr, 0, "6. Amp key interrupt SWR threshold", 1, 99.99, true},
-     {Kat500::Setting::AutoFineTune, 0, "7. Auto fine tune (0/1)", 0, 1, true},
-     {Kat500::Setting::RetuneDistance, 0, "Additional: retune distance", 0, 65535, false}}};
+     {Kat500::Setting::PowerOnDc, 0, "Power on with DC", "Power on when DC applied (0/1)", 0, 1, false},
+     {Kat500::Setting::SleepIdle, 0, "Sleep when idle", "Sleep when idle (0/1)", 0, 1, false},
+     {Kat500::Setting::EnabledAntenna, 1, "ANT 1 enabled", "ANT 1 enabled (0/1)", 0, 1, true},
+     {Kat500::Setting::EnabledAntenna, 2, "ANT 2 enabled", "ANT 2 enabled (0/1)", 0, 1, true},
+     {Kat500::Setting::EnabledAntenna, 3, "ANT 3 enabled", "ANT 3 enabled (0/1)", 0, 1, true},
+     {Kat500::Setting::SlotsPerBin, 0, "ATU slots per bin", "ATU slots per bin (1–6, shared by antennas)", 1, 6, true},
+     {Kat500::Setting::PreferredAntenna, 0, "Preferred antenna", "Preferred antenna (0 = last used, 1–3)", 0, 3, true},
+     {Kat500::Setting::AutoSwr, 0, "Auto tune SWR", "Auto tune SWR threshold", 1.5, 99.99, true},
+     {Kat500::Setting::BypassSwr, 0, "Bypass SWR", "Bypass SWR threshold", 1, 99.99, true},
+     {Kat500::Setting::KeySwr, 0, "Amp interrupt SWR", "Amp key interrupt SWR threshold", 1, 99.99, true},
+     {Kat500::Setting::AutoFineTune, 0, "Auto fine tune", "Auto fine tune (0/1)", 0, 1, true},
+     {Kat500::Setting::RetuneDistance, 0, "Retune distance", "Additional: retune distance", 0, 65535, false}}};
 void available(QWidget* widget, const QString& reason)
 {
     widget->setEnabled(reason.isEmpty());
@@ -76,7 +76,7 @@ Kat500AdvancedWidget::Kat500AdvancedWidget(Kat500Model* model, QWidget* parent)
     setAccessibleName(tr("KAT500 Advanced settings and maintenance"));
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(0, 4, 0, 0);
-    root->setSpacing(8);
+    root->setSpacing(6);
     const auto label = [this](const QString& text, const char* name, QLayout* layout) {
         auto* l = new QLabel(text, this);
         l->setObjectName(name);
@@ -91,9 +91,22 @@ Kat500AdvancedWidget::Kat500AdvancedWidget(Kat500Model* model, QWidget* parent)
         b->setObjectName(name);
         b->setAccessibleName(title);
         b->setAutoDefault(false);
+        b->setFixedHeight(22);
         layout->addWidget(b);
         return b;
     };
+    applyCanonSheet(this, [] {
+        return QStringLiteral(
+            "QWidget#kat500Advanced, QWidget#kat500Advanced QLabel, QWidget#kat500Advanced QCheckBox, "
+            "QWidget#kat500Advanced QComboBox, QWidget#kat500Advanced QSpinBox, "
+            "QWidget#kat500Advanced QTableWidget, QWidget#kat500Advanced QHeaderView::section, "
+            "QWidget#kat500Advanced QLineEdit, QWidget#kat500Advanced QProgressBar { font-size: 10px; }"
+            "QWidget#kat500Advanced QLabel { color: {{color.canon.muted}}; }"
+            "QWidget#kat500Advanced QGroupBox { font-size: 10px; font-weight: bold; }"
+            "QWidget#kat500Advanced QPushButton { font-size: 10px; padding: 0 4px; }"
+            "QWidget#kat500Advanced QTableWidget::item { padding: 1px 3px; }"
+            "QWidget#kat500Advanced QHeaderView::section { padding: 2px 3px; }");
+    });
     m_identity = label({}, "katAdvancedIdentity", root);
     m_availability = label({}, "katAdvancedAvailability", root);
     auto* config = new QGroupBox(tr("Configuration — staged edits"), this);
@@ -116,13 +129,16 @@ Kat500AdvancedWidget::Kat500AdvancedWidget(Kat500Model* model, QWidget* parent)
     m_configuration = new QTableWidget(fields.size(), 3, this);
     m_configuration->setObjectName("katConfiguration");
     m_configuration->setAccessibleName(tr("Confirmed and staged KAT500 configuration"));
-    m_configuration->setHorizontalHeaderLabels({tr("Setting"), tr("Value to apply"), tr("Confirmed")});
+    m_configuration->setHorizontalHeaderLabels({tr("Setting"), tr("Edit"), tr("Readback")});
     m_configuration->verticalHeader()->hide();
     m_configuration->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-    m_configuration->setColumnWidth(1, 80);
-    m_configuration->setColumnWidth(2, 80);
-    m_configuration->verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
-    m_configuration->setMinimumHeight(300);
+    m_configuration->setColumnWidth(1, 56);
+    m_configuration->setColumnWidth(2, 62);
+    m_configuration->verticalHeader()->setMinimumSectionSize(22);
+    m_configuration->verticalHeader()->setDefaultSectionSize(22);
+    m_configuration->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
+    m_configuration->setMinimumHeight(320);
+    m_configuration->setWordWrap(false);
     configuration->addWidget(m_configuration);
     auto* edits = new QVBoxLayout;
     auto* apply = button(tr("Apply changed fields"), "katApplyConfiguration", edits);
@@ -223,15 +239,6 @@ Kat500AdvancedWidget::Kat500AdvancedWidget(Kat500Model* model, QWidget* parent)
         table->setMinimumHeight(150);
         table->setMaximumHeight(230);
     }
-    auto* links = new QVBoxLayout;
-    auto* utility = button(tr("Official Elecraft Utility"), "katOfficialUtility", links);
-    auto* help = button(tr("Official KAT500 manual"), "katOfficialHelp", links);
-    root->addLayout(links);
-    connect(utility, &QPushButton::clicked, this,
-            [] { QDesktopServices::openUrl(QUrl("https://elecraft.com/pages/kat500-software")); });
-    connect(help, &QPushButton::clicked, this, [] {
-        QDesktopServices::openUrl(QUrl("https://elecraft.com/pages/kat500-antenna-tuner-manuals"));
-    });
     m_progress = new QProgressBar(this);
     m_progress->setObjectName("katMaintenanceProgress");
     m_progress->setAccessibleName(tr("Tuner operation progress"));
@@ -559,6 +566,8 @@ void Kat500AdvancedWidget::renderConfiguration()
                  : edited    ? QString::number(*edited, 'g', 8)
                              : tr("Unknown");
         fillTable(m_configuration, row, {tr(f.title), staged, confirmed});
+        m_configuration->item(row, 0)->setToolTip(tr(f.detail));
+        m_configuration->item(row, 0)->setData(Qt::AccessibleDescriptionRole, tr(f.detail));
         m_configuration->item(row, 0)->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
         m_configuration->item(row, 2)->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
         m_configuration->item(row, 1)->setToolTip(

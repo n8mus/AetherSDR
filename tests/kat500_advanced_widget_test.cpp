@@ -1,3 +1,5 @@
+#include "TestSettingsProfile.h"
+#include "core/AppSettings.h"
 #include "gui/Kat500AdvancedWidget.h"
 #include "models/Kat500Model.h"
 #include <QApplication>
@@ -5,6 +7,8 @@
 #include <QFileDialog>
 #include <QPointer>
 #include <QPushButton>
+#include <QHeaderView>
+#include <QScrollBar>
 #include <QTableWidget>
 #include <QTemporaryFile>
 #include <QTest>
@@ -35,7 +39,13 @@ class Kat500AdvancedWidgetTest
     {
         Kat500Model model;
         Kat500AdvancedWidget widget(&model);
+        widget.resize(335, 1200);
         widget.show();
+        QTest::qWait(30);
+        CHECK(!widget.findChild<QPushButton*>("katOfficialUtility"));
+        CHECK(!widget.findChild<QPushButton*>("katOfficialHelp"));
+        CHECK(widget.m_configuration->font().pixelSize() == 10);
+        CHECK(widget.m_configuration->horizontalScrollBar()->maximum() == 0);
         CHECK(widget.findChild<QTableWidget*>("katConfiguration"));
         CHECK(!widget.findChild<QPushButton*>("katApplyConfiguration")->isEnabled());
         Kat500::Configuration config;
@@ -49,6 +59,11 @@ class Kat500AdvancedWidgetTest
         bands->setCurrentIndex(0);
         CHECK(widget.m_configuration->item(6, 1)->text() == QStringLiteral("Mixed"));
         CHECK(widget.m_staged.isEmpty());
+        for (int row = 0; row < widget.m_configuration->rowCount(); ++row) {
+            const auto* item = widget.m_configuration->item(row, 0);
+            CHECK(widget.m_configuration->fontMetrics().horizontalAdvance(item->text()) + 8 <=
+                  widget.m_configuration->columnWidth(0));
+        }
         widget.m_configuration->item(6, 1)->setText("3");
         CHECK(widget.m_staged.size() == 11);
         for (const auto key : widget.m_staged.keys()) {
@@ -81,6 +96,8 @@ class Kat500AdvancedWidgetTest
 } // namespace AetherSDR
 int main(int argc, char** argv)
 {
+    TestSettingsProfile profile("kat500-advanced-widget-test");
     QApplication app(argc, argv);
+    AetherSDR::AppSettings::instance().load();
     return AetherSDR::Kat500AdvancedWidgetTest::run();
 }

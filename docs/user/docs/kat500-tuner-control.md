@@ -32,11 +32,11 @@ Use a local USB serial port or a raw TCP serial bridge such as ser2net or aether
 
 **Auto**, **Manual** and **Bypass** select the tuner mode. **ANT 1**, **ANT 2** and **ANT 3** remain visible. Read **Advanced → Read configuration** to establish availability for the confirmed band; disabled antennas show a reason. Confirmed mode and antenna selections remain visible with dimmed text while actions are unavailable. **Clear fault** clears the current fault, not stored fault history.
 
-**Mini** retains Tune/Cancel, modes, antennas, fault status, SWR, bypass SWR, frequency/band, physical bypass, attenuator and amplifier key interrupt. **Full** exposes secondary controls. Full, Mini and popped-out windows scroll when their contents exceed the available height.
+**Mini** retains Tune/Cancel, modes, antennas, fault status, SWR, bypass SWR, frequency/band, physical bypass, attenuator and amplifier key interrupt. **Full** exposes secondary controls. The normal docked view uses compact 22 px buttons and status pills without scrolling. Expanded drawers and short popped-out windows scroll when needed. BYP, ATT and KEY show physical bypass, attenuator and amplifier key interrupt; READY, WAIT, TUNING, OFF or STALE describes availability. Hover over a pill for its full description.
 
-Expand **Manual controls** for C/L values and eight relay bits each, **Capacitor on antenna side**, physical bypass, attenuator and amplifier key interrupt. Numeric **Set** maps to the closest available relay combination. These requests can change the signal path. **Recall kHz** recalls the selected frequency; **Memorize** stores and verifies a match for that frequency. **Full tune without saving** requests FTNS explicitly.
+Expand **Manual** for C/L values and eight relay bits each, **Capacitor on antenna side**, physical bypass, attenuator and amplifier key interrupt. Numeric **Set** maps to the closest available relay combination. These requests can change the signal path. **Recall kHz** recalls the selected frequency; **Memorize** stores and verifies a match for that frequency. **Full tune without saving** requests FTNS explicitly.
 
-**History** plots last-observed SWR and forward/reflected ADC counts for five minutes, with gaps for missing replies. ADC counts are not watts. SWR can describe an earlier physical RF measurement. **Settings** shows identity, installed firmware, serial, DIRECT/NETWORK endpoint, baud where applicable, and freshness. **Debug** offers normal state/errors or **Verbose** wire and wake traffic, with copy, atomic save, clear and paused display. Debug TX means serial writes, not RF.
+**History** plots last-observed SWR and forward/reflected ADC counts for five minutes, with gaps for missing replies. ADC counts are not watts. SWR can describe an earlier physical RF measurement. **Settings** shows identity, installed firmware, serial, DIRECT/NETWORK endpoint, baud where applicable, and freshness, including milliseconds since the SWR reply. Availability explanations and the last operation result also live here. **Debug** offers normal state/errors or **Verbose** wire and wake traffic, with copy, atomic save, clear and paused display. Debug TX means serial writes, not RF.
 
 **Follow TX frequency** defaults off. Enabling it follows the effective TX slice frequency, including XIT and split offsets. When eligibility returns, a frequency change that has not yet been attempted can proceed. A failed or canceled request is not retried for the same frequency; change the effective TX frequency or switch Follow off and on to authorize a fresh attempt. It does not key a radio or couple radio carrier generation to tuner Tune.
 
@@ -46,7 +46,7 @@ Open **Peripherals → Elecraft KAT500 → Advanced**, or **Settings → Open Ad
 
 ### Configuration
 
-Click **Read configuration** before editing. Double-click a **Value to apply** cell and enter a documented numeric value (0/1 for off/on). Choose an individual band or **All bands**. **Mixed** stays mixed until you edit that field; editing it expands only that field across eleven bands. **Confirmed** remains device readback. **Apply changed fields** sends deliberate changes and verifies each GET; **Cancel edits** discards staging. At least one antenna must remain enabled, and a preferred antenna must be enabled.
+Click **Read configuration** before editing. Double-click an **Edit** cell and enter a documented numeric value (0/1 for off/on). Choose an individual band or **All bands**. **Mixed** stays mixed until you edit that field; editing it expands only that field across eleven bands. **Readback** remains device readback. Compact setting names have tooltips with units, ranges and special values. **Apply changed fields** sends deliberate changes and verifies each GET; **Cancel edits** discards staging. At least one antenna must remain enabled, and a preferred antenna must be enabled.
 
 | Category | Values |
 | --- | --- |
@@ -77,7 +77,7 @@ Restore requires a complete firmware 02.16 backup matching the connected tuner s
 
 ### Controls are disabled
 
-Read the availability text or the control's accessible description. Connect and identify the tuner, wait for fresh replies, turn it on, and keep it idle with no RF before writes. Configuration and memory tools require firmware 02.16. Bootloader identity directs you to the official Utility.
+Open **Settings** for the availability explanation, or read the control's tooltip or accessible description. Connect and identify the tuner, wait for fresh replies, turn it on, and keep it idle with no RF before writes. Configuration and memory tools require firmware 02.16. Bootloader identity directs you to the official Utility.
 
 ### A requested value is not confirmed
 

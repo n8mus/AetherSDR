@@ -68,7 +68,8 @@ class Kat500Applet : public CanonApplet
     QLabel* m_frequency;
     QLabel* m_swr;
     QLabel* m_bypassSwr;
-    QLabel* m_physical;
+    std::array<QLabel*, 3> m_physical{};
+    QLabel* m_readiness;
     QLabel* m_fault;
     QLabel* m_identity;
     QLabel* m_availability;

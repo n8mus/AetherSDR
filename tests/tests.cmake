@@ -4634,7 +4634,10 @@ add_test(NAME kat500_applet_test COMMAND kat500_applet_test)
 set_tests_properties(kat500_applet_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 add_executable(kat500_advanced_widget_test tests/kat500_advanced_widget_test.cpp
     src/gui/Kat500AdvancedWidget.cpp src/models/Kat500Model.cpp src/models/Kat500Model.h
-    src/core/Kat500Protocol.cpp src/core/Kat500Maintenance.cpp)
+    src/core/Kat500Protocol.cpp src/core/Kat500Maintenance.cpp
+    src/core/ThemeManager.cpp src/core/ThemeSeedGenerated.cpp
+    $<TARGET_OBJECTS:aether_test_settings> $<TARGET_OBJECTS:aether_test_log_manager>
+    $<TARGET_OBJECTS:aether_test_async_log_writer> ${THEME_TEST_RESOURCES})
 target_include_directories(kat500_advanced_widget_test PRIVATE src tests)
 target_link_libraries(kat500_advanced_widget_test PRIVATE Qt6::Core Qt6::Network Qt6::Widgets Qt6::Test)
 add_test(NAME kat500_advanced_widget_test COMMAND kat500_advanced_widget_test)
@@ -8777,6 +8780,7 @@ set(AETHER_SETTINGS_CONSUMERS
     canon_surface_test
     kpa500_applet_test
     kat500_applet_test
+    kat500_advanced_widget_test
     panadapter_header_test
     theme_seed_test
     panadapter_message_overlay_test

@@ -24,6 +24,7 @@
 #include <QScrollBar>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QStyle>
 #include <QVBoxLayout>
 #include <algorithm>
 namespace AetherSDR
@@ -54,6 +55,19 @@ void text(QLabel* label, const QString& value)
     QAccessibleEvent event(label, QAccessible::NameChanged);
     QAccessible::updateAccessibility(&event);
 }
+void pill(QLabel* label, const QString& value, const QString& detail, const char* tone)
+{
+    text(label, value);
+    label->setToolTip(detail);
+    label->setAccessibleDescription(detail);
+    const QString state = QString::fromLatin1(tone);
+    if (label->property("katTone").toString() != state) {
+        label->setProperty("katTone", state);
+        label->style()->unpolish(label);
+        label->style()->polish(label);
+        label->update();
+    }
+}
 QJsonObject preferences()
 {
     return QJsonDocument::fromJson(AppSettings::instance().value("Kat500Applet").toString().toUtf8())
@@ -78,17 +92,20 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
     m_scroll->setFrameShape(QFrame::NoFrame);
     m_scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_content = new QWidget;
+    m_content->setObjectName("katContent");
+    m_scroll->viewport()->setObjectName("katViewport");
     m_scroll->setWidget(m_content);
     body->addWidget(m_scroll);
     auto* root = new QVBoxLayout(m_content);
-    root->setContentsMargins(6, 5, 6, 5);
-    root->setSpacing(5);
+    root->setContentsMargins(4, 2, 4, 2);
+    root->setSpacing(2);
     root->setSizeConstraint(QLayout::SetMinAndMaxSize);
     const auto button = [this](const QString& label, const QString& name, QLayout* layout) {
         auto* b = new QPushButton(label, this);
         b->setObjectName(name);
         b->setAccessibleName(label);
         b->setAutoDefault(false);
+        b->setFixedHeight(22);
         layout->addWidget(b);
         return b;
     };
@@ -101,21 +118,37 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
         layout->addWidget(l);
         return l;
     };
+    const auto statusPill = [label](const QString& name, QLayout* layout) {
+        QLabel* cell = label(name, layout);
+        cell->setProperty("katPill", true);
+        cell->setWordWrap(false);
+        cell->setAlignment(Qt::AlignCenter);
+        cell->setFixedHeight(18);
+        return cell;
+    };
     auto* header = new QHBoxLayout;
+    header->setSpacing(4);
     m_power = button(tr("—"), "katPower", header);
     m_power->setCheckable(true);
     m_power->setFixedWidth(44);
-    m_frequency = label("katFrequency", header);
+    m_frequency = statusPill("katFrequency", header);
     header->setStretch(1, 1);
     m_mini = button(tr("Mini"), "katMini", header);
     m_mini->setCheckable(true);
+    m_mini->setFixedWidth(38);
     root->addLayout(header);
     auto* tuning = new QHBoxLayout;
+    tuning->setSpacing(4);
     m_tune = button(tr("Tune"), "katTune", tuning);
     m_tune->setProperty("aetherTxKeying", true);
+    m_tune->setFixedWidth(60);
+    m_fault = statusPill("katFault", tuning);
+    tuning->setStretch(1, 1);
     auto* clear = button(tr("Clear fault"), "katClearFault", tuning);
+    clear->setFixedWidth(72);
     root->addLayout(tuning);
     auto* modes = new QHBoxLayout;
+    modes->setSpacing(2);
     const QStringList names{tr("Auto"), tr("Manual"), tr("Bypass")};
     for (int i = 0; i < 3; ++i) {
         m_modes[i] = button(names[i], "kat" + names[i], modes);
@@ -129,6 +162,7 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
     }
     root->addLayout(modes);
     auto* ants = new QHBoxLayout;
+    ants->setSpacing(2);
     for (int i = 0; i < 3; ++i) {
         m_antennas[i] = button(tr("ANT %1").arg(i + 1), QStringLiteral("katAntenna%1").arg(i + 1), ants);
         m_antennas[i]->setCheckable(true);
@@ -140,21 +174,36 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
         });
     }
     root->addLayout(ants);
-    m_fault = label("katFault", root);
     auto* swrRow = new QHBoxLayout;
-    m_swr = label("katSwr", swrRow);
+    m_swr = statusPill("katSwr", swrRow);
+    m_swr->setFixedWidth(82);
+    swrRow->setSpacing(4);
     m_swrGauge = new HGauge(1, 5, 5, "", "", {{1, "1"}, {5, "5"}}, this);
+    m_swrGauge->setFixedHeight(24);
     swrRow->addWidget(m_swrGauge, 1);
     root->addLayout(swrRow);
     auto* bypassRow = new QHBoxLayout;
-    m_bypassSwr = label("katBypassSwr", bypassRow);
+    m_bypassSwr = statusPill("katBypassSwr", bypassRow);
+    m_bypassSwr->setFixedWidth(82);
+    bypassRow->setSpacing(4);
     m_bypassGauge = new HGauge(1, 5, 5, "", "", {{1, "1"}, {5, "5"}}, this);
+    m_bypassGauge->setFixedHeight(24);
     bypassRow->addWidget(m_bypassGauge, 1);
     root->addLayout(bypassRow);
-    m_physical = label("katPhysicalState", root);
-    m_availability = label("katAvailability", root);
-    m_result = label("katOperationResult", root);
-    m_manualToggle = button(tr("▸ Manual controls"), "katManualToggle", root);
+    auto* physical = new QWidget(this);
+    physical->setObjectName("katPhysicalState");
+    auto* states = new QHBoxLayout(physical);
+    states->setContentsMargins(0, 0, 0, 0);
+    states->setSpacing(3);
+    m_physical[0] = statusPill("katBypassedStatus", states);
+    m_physical[1] = statusPill("katAttenuatorStatus", states);
+    m_physical[2] = statusPill("katAmpInterruptStatus", states);
+    m_readiness = statusPill("katReadiness", states);
+    root->addWidget(physical);
+    auto* tools = new QHBoxLayout;
+    tools->setSpacing(3);
+    m_manualToggle = button(tr("▸ Manual"), "katManualToggle", tools);
+    m_manualToggle->setAccessibleName(tr("Manual controls"));
     m_manualToggle->setCheckable(true);
     m_manualPane = new QWidget(this);
     m_manualPane->setObjectName("katManualPane");
@@ -272,11 +321,10 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
             m_model->startTune(false);
         }
     });
-    root->addWidget(m_manualPane);
-    auto* tools = new QHBoxLayout;
     m_historyToggle = button(tr("▸ History"), "katHistory", tools);
     m_settings = button(tr("▸ Settings"), "katSettings", tools);
     root->addLayout(tools);
+    root->addWidget(m_manualPane);
     m_historyToggle->setCheckable(true);
     m_settings->setCheckable(true);
     m_historyPane = new QWidget(this);
@@ -298,6 +346,8 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
     m_follow->setChecked(prefs.value("FollowTx").toBool(false));
     settings->addWidget(m_follow);
     m_identity = label("katIdentity", settings);
+    m_availability = label("katAvailability", settings);
+    m_result = label("katOperationResult", settings);
     auto* help = label("katHistoryHelp", settings);
     help->setText(tr("History: SWR and forward/reflected ADC counts, last observed, 5 minutes. Gaps mean "
                      "missing replies; ADC counts are not watts. SWR may describe an earlier RF measurement. "
@@ -385,7 +435,20 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
     m_timer.start();
     applyCanonSheet(bodyWidget(), [] {
         return QStringLiteral(
-            "QPushButton { padding: 4px; border: 1px solid {{color.canon.lineHi}}; } QPushButton:checked:enabled { background: "
+            "QWidget#katContent, QWidget#katViewport, QScrollArea#katScroll { background: {{color.canon.ground}}; border: none; }"
+            "QLabel, QCheckBox { color: {{color.canon.muted}}; font-size: 10px; }"
+            "QLabel[katPill=true] { font-size: 9px; font-weight: bold; background: {{color.canon.nested}}; "
+            "border: 1px solid {{color.canon.lineHi}}; border-radius: 3px; padding: 0 2px; }"
+            "QLabel[katTone=ok] { color: {{color.accent.success}}; }"
+            "QLabel[katTone=warn] { color: {{color.accent.warning}}; }"
+            "QLabel[katTone=error] { color: {{color.accent.danger}}; }"
+            "QPushButton { padding: 0 4px; font-size: 10px; font-weight: bold; "
+            "color: {{color.canon.inkSoft}}; background: {{color.canon.control}}; "
+            "border-radius: 3px; border: 1px solid {{color.canon.lineHi}}; } "
+            "QPushButton:hover { background: {{color.canon.nested}}; color: {{color.canon.aqua}}; } "
+            "QSpinBox { font-size: 10px; min-height: 18px; } "
+            "QPlainTextEdit { font-size: 10px; font-family: monospace; color: {{color.canon.inkSoft}}; } "
+            "QPushButton:checked:enabled { background: "
             "{{color.accessory.key.meffa.active.background}}; color: "
             "{{color.accessory.key.meffa.active.foreground}}; } QPushButton#katBypass:checked:enabled { "
             "background: {{color.accessory.key.standby.background}}; color: "
@@ -498,15 +561,33 @@ void Kat500Applet::refresh()
         availability(m_antennas[i], antennaReason);
     }
     availability(findChild<QPushButton*>("katClearFault"), reason);
-    text(m_fault, s.faultCode ? Kat500::currentFaultName(*s.faultCode) : tr("Fault unknown"));
+    pill(m_fault, s.faultCode ? (*s.faultCode == 0 ? tr("NO FAULT") : tr("FAULT %1").arg(*s.faultCode))
+                             : tr("FAULT ?"),
+         s.faultCode ? Kat500::currentFaultName(*s.faultCode) : tr("Fault unknown"),
+         s.faultCode ? (*s.faultCode == 0 ? "ok" : "error") : "muted");
     text(m_swr, tr("SWR %1").arg(reading(s.swr)));
-    text(m_bypassSwr, tr("Bypass SWR %1").arg(reading(s.bypassSwr)));
+    text(m_bypassSwr, tr("BYP SWR %1").arg(reading(s.bypassSwr)));
     m_swrGauge->setValue(s.swr.value_or(1));
     m_bypassGauge->setValue(s.bypassSwr.value_or(1));
-    text(m_physical, tr("Bypassed %1 · Attenuator %2 · Amp key interrupt %3")
-                         .arg(flag(s.bypassed), flag(s.attenuator), flag(s.ampKeyInterrupted)));
-    text(m_availability,
-         ready ? tr("Last observed · SWR age %1 ms").arg(m_model->fieldAgeMs("VSWR")) : reason);
+    const std::array<std::optional<bool>, 3> physical{s.bypassed, s.attenuator, s.ampKeyInterrupted};
+    const QStringList shortNames{tr("BYP"), tr("ATT"), tr("KEY")};
+    const QStringList fullNames{tr("Physical bypass"), tr("Attenuator"), tr("Amplifier key interrupt")};
+    for (int i = 0; i < 3; ++i) {
+        pill(m_physical[i], tr("%1 %2").arg(shortNames[i], physical[i] ? flag(physical[i]) : tr("?")),
+             tr("%1: %2").arg(fullNames[i], flag(physical[i])),
+             physical[i].value_or(false) ? "warn" : "muted");
+    }
+    const bool responding = m_model && m_model->isResponding();
+    const QString readiness = !m_model || !m_model->isDetected() ? tr("OFFLINE")
+                              : !responding ? tr("STALE")
+                              : s.powerOn == false ? tr("OFF")
+                              : tuning ? tr("TUNING")
+                              : ready ? tr("READY") : tr("WAIT");
+    pill(m_readiness, readiness, ready ? tr("Tuner is ready for an operator request.") : reason,
+         ready ? "ok" : "warn");
+    text(m_availability, tr("%1\nLast observed SWR: %2 ms since reply.")
+                             .arg(ready ? tr("Tuner ready.") : reason)
+                             .arg(m_model ? m_model->fieldAgeMs("VSWR") : -1));
     text(m_identity, m_model
                          ? tr("%1\n%2 · Firmware %3 · S/N %4\nReply %5 · forward/reflected ADC %6 / %7")
                                .arg(m_model->description(), s.identity, s.firmware, s.serial,
@@ -595,7 +676,7 @@ QSize Kat500Applet::sizeHint() const
 }
 QSize Kat500Applet::minimumSizeHint() const
 {
-    return QSize(254, 160);
+    return QSize(254, 220);
 }
 bool Kat500Applet::eventFilter(QObject* watched, QEvent* event)
 {
