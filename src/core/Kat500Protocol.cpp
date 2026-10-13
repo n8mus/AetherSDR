@@ -1,5 +1,6 @@
 #include "Kat500Protocol.h"
 #include <QRegularExpression>
+#include <QStringList>
 #include <array>
 #include <cmath>
 

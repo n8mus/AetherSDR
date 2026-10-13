@@ -108,6 +108,100 @@ struct Peer {
     void step() { now += 100; model.tick(); }
     void complete() { for (int i=0; i<50000 && model.operationBusy(); ++i) { step(); } }
 };
+static int rejectNewUnsafeReadback()
+{
+    const QList<QPair<QByteArray,QByteArray>> cases{{"VFWD;","VFWD 1;"},{"TP;","TP1;"},{"PS;","PS0;"}};
+    for (const auto& [query,reply] : cases) {
+        Peer peer;
+        const auto transport = peer.model.m_write;
+        peer.model.m_write = [&](const QByteArray& bytes) {
+            return bytes == query ? true : transport(bytes);
+        };
+        peer.model.query(query); peer.step();
+        CHECK(peer.model.m_active && peer.model.m_active->wire == query);
+        CHECK(peer.model.setCapacitorMask(4));
+        QSignalSpy failed(&peer.model,&Kat500Model::operationFailed);
+        peer.model.receiveBytes(reply); peer.step();
+        CHECK(!peer.wire.contains("C04;C;") && failed.size() == 1 && !peer.model.operationBusy());
+    }
+    Peer power;
+    power.model.m_status.powerOn = false; power.model.m_status.forwardAdc = 1;
+    CHECK(power.model.setPower(true)); power.complete(); CHECK(power.wire.contains("PS1;PS;"));
+    Peer cancel;
+    cancel.tuning = true; cancel.model.m_status.tuning = true; cancel.model.m_status.forwardAdc = 1;
+    CHECK(cancel.model.cancelTune()); cancel.complete();
+    CHECK(cancel.wire.contains("CT;TP;") && cancel.model.status().tuning == false);
+    return 0;
+}
+static int doNotExposeFailedBackup()
+{
+    for (const int failure : {0,1,2,3}) {
+        Peer peer;
+        bool completeData = false;
+        const auto transport = peer.model.m_write;
+        peer.model.m_write = [&](const QByteArray& bytes) {
+            if (completeData && bytes == "I;") {
+                if (failure == 1) { return true; } // Final identity query times out.
+                if (failure == 2) { peer.model.receiveBytes("SN 99999;"); return true; }
+                if (failure == 3) { peer.model.transportClosed("Final preflight disconnected"); return true; }
+                peer.rf = true;
+            }
+            const bool lastBlock = bytes.startsWith("ERSFFC040");
+            const bool result = transport(bytes);
+            if (lastBlock) { completeData = true; }
+            return result;
+        };
+        QSignalSpy published(&peer.model,&Kat500Model::backupRead);
+        QSignalSpy failed(&peer.model,&Kat500Model::operationFailed);
+        CHECK(peer.model.readBackup());
+        for (int i=0; i<2000 && !completeData; ++i) { peer.step(); }
+        CHECK(completeData && published.isEmpty());
+        CHECK(Kat500Model::encodeBackupFile(peer.model.backup()).isEmpty());
+        peer.complete();
+        CHECK(published.isEmpty() && failed.size() == 1);
+        CHECK(Kat500Model::encodeBackupFile(peer.model.backup()).isEmpty());
+    }
+    return 0;
+}
+static int cancelResetDuringDiagnostic()
+{
+    Peer peer;
+    QSignalSpy finished(&peer.model,&Kat500Model::operationFinished);
+    QObject::connect(&peer.model,&Kat500Model::diagnostic,&peer.model,[&](const QString& text) {
+        if (text.contains(QStringLiteral("TX EEINIT;"))) { peer.model.cancelOperation(); }
+    });
+    CHECK(peer.model.factoryReset(true)); peer.complete();
+    for (int i=0; i<50; ++i) { peer.step(); }
+    CHECK(peer.wire.contains("EEINIT;") && !peer.wire.contains("RST0;") && finished.isEmpty());
+    CHECK(peer.model.isConnected() && !peer.model.operationBusy());
+    return 0;
+}
+static int canceledMemoryDrainsWithoutTelemetry()
+{
+    for (const bool terminated : {false,true}) {
+        Peer peer;
+        peer.model.m_status.antenna = 1; peer.model.m_status.capacitorMask = 0; peer.model.m_status.inductorMask = 0;
+        const auto transport = peer.model.m_write;
+        peer.model.m_write = [&](const QByteArray& bytes) {
+            if (bytes == "DM14096;") {
+                peer.wire.append(bytes); peer.model.receiveBytes("DM 14080-14099;AN3;SIDEA;"); return true;
+            }
+            return transport(bytes);
+        };
+        CHECK(peer.model.inspectMemories(14096)); peer.step();
+        CHECK(peer.model.m_memoryReading);
+        peer.model.cancelOperation();
+        peer.model.receiveBytes("C06;L02;VSWRB 1.33;");
+        if (terminated) { peer.model.receiveBytes("5 UNUSED;"); }
+        peer.now += 2001; peer.model.tick();
+        CHECK(peer.model.status().antenna == 1 && peer.model.status().capacitorMask == 0 && peer.model.status().inductorMask == 0);
+        CHECK(peer.model.isConnected() == terminated && !peer.model.operationBusy());
+        for (const QByteArray& wire : peer.wire) {
+            CHECK(!wire.contains("C06;") && !wire.contains("L02;") && !wire.contains("SM") && !wire.contains("EW"));
+        }
+    }
+    return 0;
+}
 static int stateful()
 {
     Peer peer;
@@ -239,7 +333,9 @@ static int run()
     model.transportOpened(); model.m_timer.stop(); sent.clear();
     CHECK(next() == ";"); CHECK(!sent.contains("MDM;MD;"));
     model.transportClosed();
-    return stateful();
+    const int failures = rejectNewUnsafeReadback() | doNotExposeFailedBackup() |
+        cancelResetDuringDiagnostic() | canceledMemoryDrainsWithoutTelemetry();
+    return failures ? 1 : stateful();
 }
 };
 }

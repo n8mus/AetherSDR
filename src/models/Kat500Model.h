@@ -106,6 +106,7 @@ private:
         std::function<void(const QByteArray&)> complete;
         int timeoutMs = 2000;
         bool mutation = false;
+        bool requiresIdle = true;
     };
     void transportOpened();
     void transportClosed(const QString& reason = {});
@@ -147,6 +148,7 @@ private:
     std::optional<Request> m_active;
     quint64 m_generation = 0;
     qint64 m_resetAt = 0;
+    quint64 m_resetGeneration = 0;
     qint64 m_sentAt = 0;
     qint64 m_lastIo = -10000;
     qint64 m_lastReply = -10000;
@@ -182,6 +184,7 @@ private:
     Kat500::Configuration m_configuration;
     QQueue<QPair<Kat500::SettingKey,double>> m_edits;
     Kat500::Backup m_backup;
+    Kat500::Backup m_pendingBackup;
     Kat500::Backup m_restore;
     QList<Kat500::FaultRecord> m_faults;
     Kat500::MemoryBin m_memories;

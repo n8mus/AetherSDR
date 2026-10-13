@@ -80,7 +80,7 @@ void Kat500Model::reconnect()
 }
 void Kat500Model::transportOpened()
 {
-    ++m_generation; m_resetAt = 0;
+    ++m_generation; m_resetAt = 0; m_pendingBackup = {};
     m_connected = true; m_connecting = false; m_detected = false; m_status = {};
     m_configuration.clear(); m_received.clear(); m_lastStateFrames.clear(); m_queue.clear(); m_active.reset(); m_parser->reset();
     m_memoryReading = false; m_dropMemory = false; m_waking = false; m_wakeCount = 0;
@@ -90,7 +90,7 @@ void Kat500Model::transportOpened()
 }
 void Kat500Model::transportClosed(const QString& reason)
 {
-    ++m_generation; m_resetAt = 0;
+    ++m_generation; m_resetAt = 0; m_pendingBackup = {};
     const bool wasOpen = m_connected || m_connecting;
     m_connected = false; m_connecting = false; m_timer.stop();
     m_socket->abort();
@@ -179,10 +179,15 @@ void Kat500Model::tick()
     emit availabilityChanged();
     if (!m_connected) { return; }
     if (m_resetAt) {
+        if (m_resetGeneration != m_generation || m_operation != QStringLiteral("Factory reset")) {
+            m_resetAt = 0; return;
+        }
         if (now >= m_resetAt) {
             m_resetAt = 0;
             if (!write("RST0;")) { return; }
-            finish(QStringLiteral("Factory reset and restart requested. Reconnect at the default baud to verify identity and defaults. No power-on command was sent."));
+            if (m_resetGeneration == m_generation && m_operation == QStringLiteral("Factory reset")) {
+                finish(QStringLiteral("Factory reset and restart requested. Reconnect at the default baud to verify identity and defaults. No power-on command was sent."));
+            }
             disconnectDevice();
         }
         return;
@@ -216,8 +221,17 @@ void Kat500Model::tick()
         write(";"); return;
     }
     m_active = m_queue.dequeue(); m_sentAt = now;
-    if (m_active->wire.startsWith("DM") || m_active->wire.contains(";DM")) { m_memoryReading = true; }
-    write(m_active->wire);
+    // A poll already in flight at admission can provide newer unsafe state.
+    // Power requests and CT are explicit exceptions to the idle/RF guard.
+    if (m_active->mutation && m_active->requiresIdle &&
+        (m_status.powerOn != true || m_status.tuning != false || m_status.forwardAdc != 0 ||
+         fieldAgeMs(QStringLiteral("TP")) < 0 || fieldAgeMs(QStringLiteral("TP")) > 5000 ||
+         fieldAgeMs(QStringLiteral("VFWD")) < 0 || fieldAgeMs(QStringLiteral("VFWD")) > 5000)) {
+        fail(QStringLiteral("Write stopped: current power, tuning or RF readback is unsafe or stale.")); return;
+    }
+    const QByteArray wire = m_active->wire;
+    if (wire.startsWith("DM") || wire.contains(";DM")) { m_memoryReading = true; }
+    write(wire);
 }
 void Kat500Model::receiveBytes(const QByteArray& bytes) { m_parser->feed(bytes); }
 void Kat500Model::receiveFrame(const QByteArray& frame)
@@ -311,7 +325,7 @@ void Kat500Model::finish(const QString& message)
 }
 void Kat500Model::fail(const QString& reason)
 {
-    ++m_generation; m_resetAt = 0;
+    ++m_generation; m_resetAt = 0; m_pendingBackup = {};
     qCWarning(lcKat500).noquote() << reason;
     const bool busy = operationBusy();
     if (m_memoryReading) { m_dropMemory = true; }
@@ -340,7 +354,7 @@ bool Kat500Model::requestValue(const QByteArray& setter, const QByteArray& gette
         [this,verify = std::move(verify)](const QByteArray&) {
             if (!verify(m_status)) { fail(QStringLiteral("Requested value was not confirmed by device readback.")); }
             else { finish(QStringLiteral("Device readback confirmed.")); }
-        },2000,true});
+        },2000,true,!allowOff});
     return true;
 }
 bool Kat500Model::setPower(bool on) { return requestValue(on ? "PS1;" : "PS0;","PS;",[on](const Status& s) { return s.powerOn == on; },QStringLiteral("Set power"),true); }
@@ -384,7 +398,7 @@ bool Kat500Model::cancelTune()
     ++m_generation; m_operation = QStringLiteral("Cancel tuner search"); m_operationWriting = true;
     m_queue.clear(); m_cancelTuneDeadline = m_now() + 10000; emit operationBusyChanged(true);
     enqueue({"CT;TP;",[](const QByteArray& frame) { return matchesStatusQuery("TP;",frame); },
-        [this](const QByteArray&) { pollTuneCancellation(); },2000,true});
+        [this](const QByteArray&) { pollTuneCancellation(); },2000,true,false});
     return true;
 }
 bool Kat500Model::recallFrequency(int frequencyKhz)
@@ -509,14 +523,18 @@ bool Kat500Model::readBackup()
 {
     if (!begin(QStringLiteral("Read complete backup"),false)) { return false; }
     if (m_status.firmware != QStringLiteral("02.16")) { fail(QStringLiteral("Complete EEPROM support is verified only for firmware 02.16.")); return false; }
-    m_backup = {}; m_total = 1024 + 65536;
+    m_backup = {}; m_pendingBackup = {}; m_total = 1024 + 65536;
     preflight([this] {
-        m_backup.serial = m_status.serial; m_backup.firmware = m_status.firmware;
+        m_pendingBackup.serial = m_status.serial; m_pendingBackup.firmware = m_status.firmware;
         readRegion(false,0,1024,[this](QByteArray data) {
-            m_backup.internal = std::move(data);
+            m_pendingBackup.internal = std::move(data);
             readRegion(true,0,65536,[this](QByteArray data) {
-                m_backup.external = std::move(data);
-                preflight([this] { const Backup result = m_backup; finish(QStringLiteral("Complete backup read, including fault history.")); emit backupRead(result); });
+                m_pendingBackup.external = std::move(data);
+                preflight([this] {
+                    m_backup = std::move(m_pendingBackup);
+                    const Backup result = m_backup;
+                    finish(QStringLiteral("Complete backup read, including fault history.")); emit backupRead(result);
+                });
             });
         });
     }); return true;
@@ -616,7 +634,10 @@ bool Kat500Model::factoryReset(bool confirmed)
     preflight([this] {
         // Utility 1.23.11.9 waits several seconds between EEINIT and RST0.
         // This restart is part of the explicitly confirmed factory reset.
+        const quint64 generation = m_generation;
         if (!write("EEINIT;")) { return; }
+        if (!m_connected || generation != m_generation || m_operation != QStringLiteral("Factory reset")) { return; }
+        m_resetGeneration = generation;
         m_resetAt = m_now() + 4000;
     }); return true;
 }
