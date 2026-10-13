@@ -147,7 +147,10 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
     auto* clear = button(tr("Clear fault"), "katClearFault", tuning);
     clear->setFixedWidth(72);
     root->addLayout(tuning);
-    auto* modes = new QHBoxLayout;
+    m_miniState = statusPill("katMiniState", root);
+    m_modesPane = new QWidget(this);
+    auto* modes = new QHBoxLayout(m_modesPane);
+    modes->setContentsMargins(0, 0, 0, 0);
     modes->setSpacing(2);
     const QStringList names{tr("Auto"), tr("Manual"), tr("Bypass")};
     for (int i = 0; i < 3; ++i) {
@@ -160,8 +163,10 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
             refresh();
         });
     }
-    root->addLayout(modes);
-    auto* ants = new QHBoxLayout;
+    root->addWidget(m_modesPane);
+    m_antennasPane = new QWidget(this);
+    auto* ants = new QHBoxLayout(m_antennasPane);
+    ants->setContentsMargins(0, 0, 0, 0);
     ants->setSpacing(2);
     for (int i = 0; i < 3; ++i) {
         m_antennas[i] = button(tr("ANT %1").arg(i + 1), QStringLiteral("katAntenna%1").arg(i + 1), ants);
@@ -173,7 +178,7 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
             refresh();
         });
     }
-    root->addLayout(ants);
+    root->addWidget(m_antennasPane);
     auto* swrRow = new QHBoxLayout;
     m_swr = statusPill("katSwr", swrRow);
     m_swr->setFixedWidth(82);
@@ -182,24 +187,26 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
     m_swrGauge->setFixedHeight(24);
     swrRow->addWidget(m_swrGauge, 1);
     root->addLayout(swrRow);
-    auto* bypassRow = new QHBoxLayout;
+    m_bypassPane = new QWidget(this);
+    auto* bypassRow = new QHBoxLayout(m_bypassPane);
+    bypassRow->setContentsMargins(0, 0, 0, 0);
     m_bypassSwr = statusPill("katBypassSwr", bypassRow);
     m_bypassSwr->setFixedWidth(82);
     bypassRow->setSpacing(4);
     m_bypassGauge = new HGauge(1, 5, 5, "", "", {{1, "1"}, {5, "5"}}, this);
     m_bypassGauge->setFixedHeight(24);
     bypassRow->addWidget(m_bypassGauge, 1);
-    root->addLayout(bypassRow);
-    auto* physical = new QWidget(this);
-    physical->setObjectName("katPhysicalState");
-    auto* states = new QHBoxLayout(physical);
+    root->addWidget(m_bypassPane);
+    m_physicalPane = new QWidget(this);
+    m_physicalPane->setObjectName("katPhysicalState");
+    auto* states = new QHBoxLayout(m_physicalPane);
     states->setContentsMargins(0, 0, 0, 0);
     states->setSpacing(3);
     m_physical[0] = statusPill("katBypassedStatus", states);
     m_physical[1] = statusPill("katAttenuatorStatus", states);
     m_physical[2] = statusPill("katAmpInterruptStatus", states);
     m_readiness = statusPill("katReadiness", states);
-    root->addWidget(physical);
+    root->addWidget(m_physicalPane);
     auto* tools = new QHBoxLayout;
     tools->setSpacing(3);
     m_manualToggle = button(tr("▸ Manual"), "katManualToggle", tools);
@@ -585,6 +592,13 @@ void Kat500Applet::refresh()
                               : ready ? tr("READY") : tr("WAIT");
     pill(m_readiness, readiness, ready ? tr("Tuner is ready for an operator request.") : reason,
          ready ? "ok" : "warn");
+    const QStringList modes{tr("AUTO"), tr("MANUAL"), tr("BYPASS")};
+    const QString mode = s.mode ? modes.value(static_cast<int>(*s.mode)) : tr("MODE ?");
+    const QString antenna = s.antenna ? tr("ANT %1").arg(*s.antenna) : tr("ANT ?");
+    pill(m_miniState, tr("%1 · %2 · %3").arg(mode, antenna, readiness),
+         tr("Confirmed mode: %1. Antenna: %2. %3")
+             .arg(mode, antenna, m_readiness->accessibleDescription()),
+         ready ? "ok" : "warn");
     text(m_availability, tr("%1\nLast observed SWR: %2 ms since reply.")
                              .arg(ready ? tr("Tuner ready.") : reason)
                              .arg(m_model ? m_model->fieldAgeMs("VSWR") : -1));
@@ -645,6 +659,13 @@ void Kat500Applet::presentation()
 {
     const bool mini = m_mini->isChecked();
     m_mini->setText(mini ? tr("Full") : tr("Mini"));
+    m_mini->setAccessibleName(mini ? tr("Show full tuner controls") : tr("Show mini tuner controls"));
+    m_modesPane->setVisible(!mini);
+    m_antennasPane->setVisible(!mini);
+    m_bypassPane->setVisible(!mini);
+    m_physicalPane->setVisible(!mini);
+    findChild<QPushButton*>("katClearFault")->setVisible(!mini);
+    m_miniState->setVisible(mini);
     m_manualToggle->setVisible(!mini);
     m_manualPane->setVisible(!mini && m_manualToggle->isChecked());
     m_settings->setVisible(!mini);
@@ -676,7 +697,7 @@ QSize Kat500Applet::sizeHint() const
 }
 QSize Kat500Applet::minimumSizeHint() const
 {
-    return QSize(238, 220);
+    return QSize(238, m_mini && m_mini->isChecked() ? 98 : 196);
 }
 bool Kat500Applet::eventFilter(QObject* watched, QEvent* event)
 {

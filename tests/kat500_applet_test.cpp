@@ -96,7 +96,7 @@ int main(int argc, char** argv)
     auto* scroll = widget.findChild<QScrollArea*>("katScroll");
     CHECK(scroll);
     for (const int width : {238, 248, 254, 300, 360}) {
-        widget.resize(width, 220);
+        widget.resize(width, 196);
         CHECK(widget.width() == width);
         QTest::qWait(30);
         CHECK(scroll->verticalScrollBar()->maximum() == 0);
@@ -112,13 +112,18 @@ int main(int argc, char** argv)
     }
     mini->setChecked(true);
     QTest::qWait(20);
-    for (const char* name :
-         {"katTune", "katAuto", "katManual", "katBypass", "katAntenna1", "katAntenna2", "katAntenna3",
-          "katClearFault", "katSwr", "katBypassSwr", "katPhysicalState", "katFrequency"}) {
+    widget.resize(248, 98);
+    QTest::qWait(20);
+    CHECK(widget.height() == 98 && scroll->verticalScrollBar()->maximum() == 0);
+    CHECK(scroll->horizontalScrollBar()->maximum() == 0);
+    for (const char* name : {"katPower", "katTune", "katSwr", "katFault", "katMiniState", "katFrequency"}) {
         auto* control = widget.findChild<QWidget*>(name);
         CHECK(control && control->isVisible());
     }
-    CHECK(!widget.findChild<QWidget*>("katManualPane")->isVisible());
+    for (const char* name : {"katAuto", "katManual", "katBypass", "katAntenna1", "katAntenna2", "katAntenna3",
+                             "katClearFault", "katBypassSwr", "katPhysicalState", "katManualPane"}) {
+        CHECK(!widget.findChild<QWidget*>(name)->isVisible());
+    }
     mini->setChecked(false);
     widget.findChild<QPushButton*>("katManualToggle")->setChecked(true);
     widget.findChild<QPushButton*>("katSettings")->setChecked(true);
@@ -151,13 +156,22 @@ int main(int argc, char** argv)
     for (const char* name : {"katManualToggle", "katSettings", "katHistory"}) {
         widget.findChild<QPushButton*>(name)->setChecked(false);
     }
-    widget.resize(300, 220);
+    widget.resize(248, 196);
     QTest::qWait(20);
     CHECK(scroll->verticalScrollBar()->maximum() == 0);
     const QString capture = qEnvironmentVariable("AETHER_KAT500_GRAB");
     if (!capture.isEmpty()) {
         CHECK(widget.grab().save(capture + "/applet-compact.png"));
     }
+    mini->setChecked(true);
+    widget.resize(248, 98);
+    QTest::qWait(20);
+    CHECK(widget.findChild<QLabel*>("katMiniState")->text() == "AUTO · ANT 1 · READY");
+    CHECK(scroll->verticalScrollBar()->maximum() == 0);
+    if (!capture.isEmpty()) {
+        CHECK(widget.grab().save(capture + "/applet-mini.png"));
+    }
+    mini->setChecked(false);
     widget.findChild<QPushButton*>("katManualToggle")->setChecked(true);
     widget.findChild<QPushButton*>("katSettings")->setChecked(true);
     widget.resize(700, 1400);

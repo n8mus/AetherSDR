@@ -44,13 +44,17 @@ class Kat500Applet : public CanonApplet
     QPointer<QFileDialog> m_fileDialog;
     QScrollArea* m_scroll;
     QWidget* m_content;
+    QWidget* m_modesPane;
+    QWidget* m_antennasPane;
+    QWidget* m_bypassPane;
+    QWidget* m_physicalPane;
     QWidget* m_manualPane;
     QWidget* m_settingsPane;
     QWidget* m_historyPane;
     QWidget* m_debugPane;
     QPushButton* m_power;
     QPushButton* m_tune;
-    QPushButton* m_mini;
+    QPushButton* m_mini = nullptr;
     QPushButton* m_manualToggle;
     QPushButton* m_settings;
     QPushButton* m_historyToggle;
@@ -70,6 +74,7 @@ class Kat500Applet : public CanonApplet
     QLabel* m_bypassSwr;
     std::array<QLabel*, 3> m_physical{};
     QLabel* m_readiness;
+    QLabel* m_miniState;
     QLabel* m_fault;
     QLabel* m_identity;
     QLabel* m_availability;
