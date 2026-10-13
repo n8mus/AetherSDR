@@ -21,6 +21,7 @@
 #include <chrono>
 #include <limits>
 #include <utility>
+#include <variant>
 
 namespace AetherSDR::rtl {
 
@@ -234,6 +235,9 @@ RadioCapabilities RtlSdrBackend::capabilities() const
     amplitude.clientPersistsDbmRange = false;  // no client owner is declared
     c.panAmplitude = amplitude;
     c.panFrameRateShaping = std::nullopt;  // no client owner is declared for FFT FPS
+    // A dongle stores no display state: the client keeps the waterfall rate.
+    c.panWaterfallRateShaping =
+        PanWaterfallRateShaping{/*clientPersistsWaterfallRate*/ true};
     c.backendPanAveraging = BackendPanAveraging{SpectrumTemporalAverage::kMsPerStep, true,
         tr("Spectrum averaging time: 10 ms per step; 0 is off and 100 is one second. Higher values smooth changes but blur short signals. The decay time stays the same when FPS changes."),
         tr("Off averages signal power. On averages dB levels for a smoother trace, but varying signals and noise read lower. Both modes use the FFT AVG time setting.")};
@@ -250,12 +254,14 @@ RadioCapabilities RtlSdrBackend::capabilities() const
     c.hasFmRepeaterOffset = false;
     c.hasCwTune = false;
     c.twoToneGenerator = std::nullopt;  // receive only; there is no transmitter.
+    c.firmwareUpdateSource = std::nullopt;  // no published firmware list is read.
     c.panZoomModes = std::nullopt;      // no command plane, no per-pan zoom flags.
     c.hasAmCarrierLevel = false;
     c.voxControl = std::nullopt;  // receive only
     c.speechProcessorControl = std::nullopt;
     c.txMonitorControl = std::nullopt;
     c.lineoutControl = std::nullopt;
+    c.txWaterfallClientFlag = std::nullopt;  // receive only; no owner declared
     c.hasAgcThreshold = true;
     c.hasHostNoiseBlanker = true;
     c.receiveCwPitchControl = ReceiveCwPitchControl{100, 6000, 10};
@@ -876,6 +882,18 @@ bool RtlSdrBackend::hasAcceptedSlice(int sliceId) const
         && std::ranges::any_of(m_lastPublished->receivers, [sliceId](const auto& receiver) {
             return receiver.passband.stableId == sliceId;
         });
+}
+
+ReceiveDispatch RtlSdrBackend::requestSliceControl(int sliceId, const SliceControlRequest& request)
+{
+    if (sliceId < 0 || !request.valid()
+        || request.field != SliceControlRequest::Field::ActiveSlice) {
+        return ReceiveDispatch::Unsupported;
+    }
+    if (!std::get<bool>(request.value)) { return ReceiveDispatch::LocalOnly; }
+    if (!hasAcceptedSlice(sliceId)) { return ReceiveDispatch::Unsupported; }
+    setActiveSlice(sliceId);
+    return ReceiveDispatch::Dispatched;
 }
 
 void RtlSdrBackend::setActiveSlice(int sliceId)

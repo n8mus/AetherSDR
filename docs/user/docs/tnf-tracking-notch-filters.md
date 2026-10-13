@@ -79,7 +79,7 @@ Add, move, resize and remove notches using the same gestures. The minimum width 
 
 ### Permanent vs temporary
 
-| Type | Colour | Survives reboot | Default |
+| Type | Color | Survives reboot | Default |
 |------|-------|-----------------|---------|
 | Temporary | Yellow | No | Yes |
 | Permanent | Green | Yes | No |

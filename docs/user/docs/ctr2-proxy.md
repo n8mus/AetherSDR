@@ -27,7 +27,7 @@ AetherSDR's own command or transmit paths.
   LAN or a VPN. The proxy is unavailable on SmartLink connections.
 - **Wi-Fi (TCP) mode** works with current CTR2 firmware.
 - **USB mode** needs CTR2 firmware with USB mode, which has not been released
-  yet, and a build with USB HID support (hidapi).
+  yet, or an AetherKnob, and a build with USB HID support (hidapi).
 
 ## Setup
 
@@ -68,23 +68,47 @@ AetherSDR starts the link, so you only pick the device and press **Start**. It
 needs CTR2 firmware with USB mode, which has not been released yet.
 
 - The **USB** device list shows candidate HID devices, with known CTR2 boards
-  named and listed first. **Rescan** refreshes the list (and the local
-  addresses).
+  and the AetherKnob named and listed first. **Rescan** refreshes the list
+  (and the local addresses).
 - **Linux:** a udev rule for the CTR2 ships with the build. If the device
   cannot be opened, **Start** offers to install the rule
   (`/etc/udev/rules.d/70-aethersdr-ctr2.rules`) through `pkexec`, asking for
-  your administrator password once. The rule only opens CTR2 controllers to
-  whoever is logged in at the computer.
+  your administrator password once. The rule only opens CTR2 controllers and
+  the AetherKnob to whoever is logged in at the computer.
 - **AetherKnob** (an AetherSDR controller on the Elecrow CrowPanel 2.1"
   rotary display) uses USB mode the same way. It appears in the list as
   **AetherKnob**. While it is relaying, AetherSDR also sends it a 32-bar
-  spectrum for its centre display. While receiving it shows the audio you
+  spectrum for its center display. While receiving it shows the audio you
   are hearing (after the radio's DSP, AetherSDR's noise reduction and the
   RX chain up to the EQ) across the active slice's filter width, for
-  example 20–600 Hz for a 600 Hz CW filter. While transmitting it shows your
+  example 20–600 Hz for a 600 Hz filter. While transmitting it shows your
   transmit audio across the TX filter width. Either way it reaches at most
-  12 kHz, and the bars are spaced logarithmically in frequency, as on an
-  audio analyser, so the low end gets more detail. A CTR2 never receives this.
+  half the audio sample rate (12 kHz for 24 kHz audio), and the bars are
+  spaced logarithmically in frequency, as on an audio analyzer, so the low
+  end gets more detail. AetherSDR also tells it the UDP port the relay uses,
+  so its meters update. A CTR2 never receives either.
+- **CW on a controller.** Controller firmware that supports them can take two
+  more things while you receive CW:
+  - **A zero-beat spectrum.** The bars are spaced evenly across a window
+    centered on your CW pitch: the filter's passband, plus half its width
+    on each side. For a ±200 Hz filter at a 600 Hz pitch that is 200–1000 Hz,
+    with the pitch in the middle of the display, so you can see how far a
+    signal is from zero beat. The window follows the pitch and the filter.
+    Near 0 Hz it narrows so the pitch stays centered. Firmware without this
+    keeps the logarithmic spectrum described above.
+  - **The CW decode.** The text the [CW decoder](./cw-decoder.md) reads
+    from the active slice, as it arrives, with its confidence. The decoder
+    must be running (**Decode: RX** on in **Settings → Radio Setup... →
+    Phone & CW**), and the CW panel's **Sens** slider filters what is sent,
+    as it filters the panel. Only plain ASCII is sent, and line breaks
+    become spaces. DeepFist's decode is not sent yet.
+
+  A CTR2 never receives either.
+- Other controller firmware that speaks the same USB link can name itself:
+  a `303A:1001` device whose USB product name starts with **Aether** (that
+  exact case) and continues with at least one more character appears in the
+  list under that name, as long as the whole name is printable ASCII and at
+  most 32 characters long.
 
 ## Reference
 

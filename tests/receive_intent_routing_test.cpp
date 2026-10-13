@@ -275,9 +275,13 @@ void confirmedReceiveControls()
           "accepted receive pitch updates presentation without feeding back into backend");
     f.backend->confirmed = false;
     RadioModelSliceLifecycleTestAccess::publishCapabilities(f.radio);
+    QSignalSpy pitchControls(&tx, &TransmitModel::controlRequested);
     tx.setCwPitch(800);
-    check(tx.cwPitch() == 800 && pitchRaw.size() == 1,
-          "legacy pitch keeps its existing optimistic wire behavior");
+    check(tx.cwPitch() == 800 && pitchRaw.isEmpty() && pitchControls.size() == 1
+              && qvariant_cast<TransmitControlRequest>(pitchControls.first().first()).field
+                    == TransmitControlRequest::Field::CwPitch
+              && std::get<int>(qvariant_cast<TransmitControlRequest>(pitchControls.first().first()).value) == 800,
+          "optimistic pitch uses the typed upstream control route once without raw wire text");
 }
 
 void ritLifecycle()
