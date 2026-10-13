@@ -80,6 +80,7 @@ private:
     QLabel* m_state;
     QLabel* m_fault;
     QLabel* m_tracking;
+    QLabel* m_trackingDetails;
     QLabel* m_link;
     QLabel* m_identity;
     QLabel* m_graph;
@@ -106,6 +107,8 @@ private:
     QWidget* m_content;
     QSpacerItem* m_bottomSpace;
     QWidget* m_detail;
+    QWidget* m_modesPane;
+    QWidget* m_toolsPane;
     QWidget* m_historyPane;
     QWidget* m_settingsPane;
     QWidget* m_debugPane;

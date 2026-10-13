@@ -159,15 +159,23 @@ cooling automatically.
 **Settings → Follow TX flag** is enabled by default. The amplifier follows
 the TX-assigned slice, including split selection, XIT and FM transmit offset,
 within the active band plan. Receive-only and Demo radios supply no TX band.
-Disable the setting to park the amp with **Band**. The dropdown always shows
-the confirmed amplifier band; the line below it shows the target and pending
-state. Band changes wait while the radio reports TX or the amplifier reports
+The top band pill shows the confirmed amplifier band and **Follow TX**.
+Hover over it, or open **Settings**, for the source frequency, target band and
+pending state. Disable the setting to park the amp with the band dropdown
+that replaces the pill; it also shows confirmed amplifier readback. Band changes wait while the radio reports TX or the amplifier reports
 RF, then send only the latest requested band. Missing readback stops automatic
 retries; select again or toggle **Follow TX flag** to retry. Following never
 powers the amp on, selects Operate, or keys the radio.
 
-**Mini** retains power, SWR, band, mode, power control and faults; **Full**
-restores the other meters. **History** adds graphs for power, SWR, temperature,
+The meter readouts use compact pills beside scales with major and minor ticks.
+The KPA500 SWR scale runs from **1 to 5**, matching the amplifier faceplate;
+its display turns amber at 2 and red at 2.5. No RF means SWR is unmeasured.
+
+**Mini** shows the power control, band header, amplifier mode and faults, with
+power and SWR meters at the bottom. It hides mode controls and the bottom
+**History** and **Settings** buttons. **Full** restores those controls, the other
+meters, and any previously expanded drawers; use it to change Standby/Operate
+or clear a fault. **History** adds graphs for power, SWR, temperature,
 voltage and current over 1, 5 or 10 minutes. Collection continues with the
 history collapsed or in Mini mode. Gaps represent unavailable measurements.
 The graphs use fixed scales and display measured peaks; values beyond a
@@ -176,7 +184,7 @@ full view with History. Meters and graphs follow the window width, and History
 uses extra height for taller graphs. Controls stay grouped at the top. A vertical
 scrollbar keeps expanded History and Debug accessible in a smaller window.
 
-<img src="/img/kpa500/kpa500-applet-mini.png" width="360" alt="KPA500 Mini mode with power, SWR, band and Standby controls." />
+<img src="/img/kpa500/kpa500-applet-mini.png" width="360" alt="KPA500 Mini mode with power, SWR, band and amplifier status." />
 
 *Mini mode keeps the essential controls and readings visible.*
 

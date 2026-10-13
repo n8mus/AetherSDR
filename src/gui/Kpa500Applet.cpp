@@ -38,6 +38,16 @@ public:
     QSize minimumSizeHint() const override { return sizeHint(); }
 };
 
+QVector<HGauge::Tick> meterTicks(float minimum, float maximum, int divisions, int majorEvery)
+{
+    QVector<HGauge::Tick> ticks;
+    for (int step = 0; step <= divisions; ++step) {
+        const float value = minimum + (maximum - minimum) * step / divisions;
+        ticks.append({value, step % majorEvery == 0 ? QString::number(value, 'g', 4) : QString()});
+    }
+    return ticks;
+}
+
 void labelText(QLabel* label, const QString& text)
 {
     if (label->text() == text) { return; }
@@ -72,12 +82,12 @@ QString accessoryCheckRules()
         for (bool checked : {false, true}) {
             const bool active = enabled && checked;
             const QColor fill = theme.color(active ? "color.accessory.key.meffa.active.background" : "color.background.2");
-            const QColor edge = theme.color(active ? "color.accessory.key.meffa.active.border" : "color.background.2");
+            const QColor edge = theme.color(active ? "color.accessory.key.meffa.active.border" : enabled ? "color.canon.inkSoft" : "color.canon.muted");
             const QColor ink = theme.color(!enabled ? "color.text.secondary" : active ? "color.accessory.key.meffa.active.foreground" : "color.text.primary");
             const QString key = fill.name(QColor::HexArgb) + edge.name(QColor::HexArgb) + ink.name(QColor::HexArgb);
             const QString path = themedImagePath("kpa-accessory-checks", checked ? "checked" : "unchecked", key, QSize(18, 18), 3,
                 [fill, edge, ink, checked](QPainter& painter) {
-                    painter.setPen(QPen(edge, 1));
+                    painter.setPen(QPen(edge, 1.5));
                     painter.setBrush(fill);
                     painter.drawRoundedRect(QRectF(1.5, 1.5, 15, 15), 3, 3);
                     if (checked) {
@@ -112,7 +122,7 @@ Kpa500Applet::Kpa500Applet(QWidget* parent) : CanonApplet(parent)
     setAccessibleName(tr("Elecraft KPA500 amplifier"));
     setCloseButtonVisible(false);
     theme::setContainer(this, QStringLiteral("canon/kpa500"));
-    setMinimumWidth(254);
+    setMinimumWidth(238);
     m_clock.start();
     const QJsonObject prefs = preferences();
     m_mini = prefs.value("MiniMode").toBool(false);
@@ -135,13 +145,14 @@ Kpa500Applet::Kpa500Applet(QWidget* parent) : CanonApplet(parent)
     body->addWidget(m_scroll);
     auto* root = new QVBoxLayout(m_content);
     root->setSizeConstraint(QLayout::SetMinAndMaxSize);
-    root->setContentsMargins(6, 5, 6, 5);
-    root->setSpacing(5);
+    root->setContentsMargins(4, 2, 4, 2);
+    root->setSpacing(2);
     const auto button = [this](const QString& text, const char* name) {
         auto* b = new QPushButton(text, this);
         b->setObjectName(QLatin1String(name));
         b->setAccessibleName(text);
         b->setAutoDefault(false);
+        b->setFixedHeight(22);
         return b;
     };
     auto* header = new QHBoxLayout;
@@ -150,9 +161,18 @@ Kpa500Applet::Kpa500Applet(QWidget* parent) : CanonApplet(parent)
     m_power->setFixedWidth(44);
     m_power->setCheckable(true);
     header->addWidget(m_power);
-    header->addWidget(new QLabel(tr("Band"), this));
+    m_tracking = new QLabel(this);
+    m_tracking->setObjectName("kpaTracking");
+    m_tracking->setProperty("kpaPill", true);
+    m_tracking->setAlignment(Qt::AlignCenter);
+    m_tracking->setFixedHeight(18);
+    m_tracking->setMinimumWidth(0);
+    m_tracking->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    m_tracking->setTextFormat(Qt::PlainText);
+    header->addWidget(m_tracking, 1);
     m_band = new GuardedComboBox(this);
     m_band->setObjectName("kpaBand");
+    m_band->setFixedHeight(22);
     m_band->setAccessibleName(tr("Confirmed amplifier band"));
     for (int band = 0; band <= 10; ++band) { m_band->addItem(Kpa500::bandName(band)); }
     m_band->setPlaceholderText(QStringLiteral("—"));
@@ -160,11 +180,14 @@ Kpa500Applet::Kpa500Applet(QWidget* parent) : CanonApplet(parent)
     header->addWidget(m_band, 1);
     m_miniButton = button(tr("Mini"), "kpaMini");
     m_miniButton->setCheckable(true);
+    m_miniButton->setFixedWidth(38);
     m_miniButton->setChecked(m_mini);
     header->addWidget(m_miniButton);
     root->addLayout(header);
-    auto* modes = new QHBoxLayout;
-    modes->setSpacing(4);
+    m_modesPane = new QWidget(this);
+    auto* modes = new QHBoxLayout(m_modesPane);
+    modes->setContentsMargins(0, 0, 0, 0);
+    modes->setSpacing(2);
     m_standby = button(tr("Standby"), "kpaStandby");
     m_operate = button(tr("Operate"), "kpaOperate");
     m_standby->setCheckable(true);
@@ -173,12 +196,12 @@ Kpa500Applet::Kpa500Applet(QWidget* parent) : CanonApplet(parent)
     modes->addWidget(m_operate);
     m_clear = button(tr("Clear fault"), "kpaClearFault");
     modes->addWidget(m_clear);
-    root->addLayout(modes);
+    root->addWidget(m_modesPane);
     m_state = new QLabel(this);
     m_state->setObjectName("kpaState");
     m_state->setAccessibleName(tr("Amplifier state"));
     m_state->setAlignment(Qt::AlignCenter);
-    m_state->setFixedHeight(24);
+    m_state->setFixedHeight(18);
     root->addWidget(m_state);
     m_fault = new QLabel(this);
     m_fault->setObjectName("kpaFault");
@@ -188,20 +211,26 @@ Kpa500Applet::Kpa500Applet(QWidget* parent) : CanonApplet(parent)
     m_detail = new QWidget(this);
     auto* details = new QVBoxLayout(m_detail);
     details->setContentsMargins(0, 0, 0, 0);
-    details->setSpacing(3);
+    details->setSpacing(2);
+    const std::array<int, 5> divisions{12, 16, 15, 10, 15};
+    const std::array<int, 5> majorEvery{4, 4, 5, 5, 5};
     const std::array<float, 5> maxima{600, 5, m_fahrenheit ? 302.0f : 150.0f, 100, 30};
     const QStringList names{tr("Power"), tr("SWR"), tr("Temperature"), tr("Voltage"), tr("Current")};
     for (int i = 0; i < 5; ++i) {
         auto* row = new QHBoxLayout;
         row->setSpacing(4);
         m_readouts[i] = new QLabel(this);
-        m_readouts[i]->setMinimumWidth(92);
+        m_readouts[i]->setFixedSize(62, 18);
+        m_readouts[i]->setAlignment(Qt::AlignCenter);
+        m_readouts[i]->setProperty("kpaPill", true);
         m_readouts[i]->setObjectName(QStringLiteral("kpaReading%1").arg(i));
         m_readouts[i]->setAccessibleName(names[i]);
         row->addWidget(m_readouts[i]);
         const float minimum = i == 1 ? 1.0f : (i == 2 && m_fahrenheit ? 32.0f : 0.0f);
-        QVector<HGauge::Tick> ticks{{minimum, QString::number(minimum)}, {maxima[i], QString::number(maxima[i])}};
-        m_gauges[i] = new HGauge(minimum, maxima[i], maxima[i], "", "", ticks, this);
+        m_gauges[i] = new HGauge(minimum, maxima[i], i == 1 ? 2.5f : maxima[i], "", "",
+            meterTicks(minimum, maxima[i], divisions[i], majorEvery[i]), this,
+            i == 1 ? 2.0f : maxima[i]);
+        m_gauges[i]->setObjectName(QStringLiteral("kpaGauge%1").arg(i));
         m_gauges[i]->setAccessibleName(names[i]);
         if (i == 0) { m_gauges[i]->setWindowPeakEnabled(true); }
         row->addWidget(m_gauges[i], 1);
@@ -212,6 +241,7 @@ Kpa500Applet::Kpa500Applet(QWidget* parent) : CanonApplet(parent)
     auxiliaries->addWidget(new QLabel(tr("Fan min"), this));
     m_fan = new GuardedComboBox(this);
     m_fan->setObjectName("kpaFan");
+    m_fan->setFixedHeight(22);
     m_fan->setAccessibleName(tr("Minimum fan speed"));
     m_fan->addItem(tr("Auto"));
     for (int speed = 1; speed <= 6; ++speed) { m_fan->addItem(QString::number(speed)); }
@@ -224,11 +254,10 @@ Kpa500Applet::Kpa500Applet(QWidget* parent) : CanonApplet(parent)
     auxiliaries->addStretch();
     details->addLayout(auxiliaries);
     root->addWidget(m_detail);
-    m_tracking = new QLabel(tr("Following TX — no supported TX band"), this);
-    m_tracking->setObjectName("kpaTracking");
-    m_tracking->setWordWrap(true);
-    root->addWidget(m_tracking);
-    auto* tools = new QHBoxLayout;
+    m_toolsPane = new QWidget(this);
+    auto* tools = new QHBoxLayout(m_toolsPane);
+    tools->setContentsMargins(0, 0, 0, 0);
+    tools->setSpacing(2);
     m_historyButton = button(tr("▸ History"), "kpaHistory");
     m_historyButton->setCheckable(true);
     m_historyButton->setChecked(m_historyExpanded);
@@ -236,8 +265,7 @@ Kpa500Applet::Kpa500Applet(QWidget* parent) : CanonApplet(parent)
     m_settingsButton->setCheckable(true);
     tools->addWidget(m_historyButton);
     tools->addWidget(m_settingsButton);
-    tools->addStretch();
-    root->addLayout(tools);
+    root->addWidget(m_toolsPane);
     m_historyPane = new QWidget(this);
     auto* history = new QVBoxLayout(m_historyPane);
     history->setContentsMargins(0, 0, 0, 0);
@@ -272,7 +300,13 @@ Kpa500Applet::Kpa500Applet(QWidget* parent) : CanonApplet(parent)
     m_follow->setToolTip(tr("Follow the TX-assigned slice band, including XIT and split. Band changes wait until RX. Power and Operate remain manual."));
     m_follow->setAccessibleDescription(m_follow->toolTip());
     settings->addWidget(m_follow);
-    auto* explanation = new QLabel(tr("Disable to park the amp using Band. The dropdown always shows confirmed amplifier readback."), this);
+    m_trackingDetails = new QLabel(this);
+    m_trackingDetails->setObjectName("kpaTrackingDetails");
+    m_trackingDetails->setAccessibleName(tr("Amplifier band tracking details"));
+    m_trackingDetails->setWordWrap(true);
+    m_trackingDetails->setTextFormat(Qt::PlainText);
+    settings->addWidget(m_trackingDetails);
+    auto* explanation = new QLabel(tr("Disable to park the amp using the band dropdown in the header. The header band always shows confirmed amplifier readback. Hover over Follow TX for the source frequency and pending changes."), this);
     explanation->setWordWrap(true);
     settings->addWidget(explanation);
     m_units = new QCheckBox(tr("Temperature in °F"), this);
@@ -357,7 +391,7 @@ Kpa500Applet::Kpa500Applet(QWidget* parent) : CanonApplet(parent)
         const float minimum = on ? 32.0f : 0.0f;
         const float maximum = on ? 302.0f : 150.0f;
         m_gauges[2]->setRange(minimum, maximum, maximum,
-            {{minimum, QString::number(minimum)}, {maximum, QString::number(maximum)}});
+            meterTicks(minimum, maximum, 15, 5));
         savePreferences();
         refresh();
         m_gauges[2]->setValueImmediate(m_gauges[2]->value());
@@ -388,23 +422,29 @@ Kpa500Applet::Kpa500Applet(QWidget* parent) : CanonApplet(parent)
     m_timer.setInterval(500);
     connect(&m_timer, &QTimer::timeout, this, [this] { refresh(); if (m_historyPane->isVisible()) { renderHistory(); } });
     m_timer.start();
-    applyCanonSheet(bodyWidget(), [] {
+    applyCanonSheet(bodyWidget(), [this] {
+        for (HGauge* gauge : m_gauges) {
+            gauge->setTickMarkColor(ThemeManager::instance().color(this, "color.canon.muted"));
+        }
         return QStringLiteral(
+            "QWidget#kpaContent, QScrollArea#kpaScroll { background: {{color.canon.ground}}; border: none; }"
+            "QLabel[kpaPill=true] { font-size: 9px; font-weight: bold; color: {{color.canon.muted}}; "
+            "background: {{color.canon.ground}}; border: 1px solid {{color.canon.line}}; border-radius: 3px; padding: 0 2px; }"
             "QScrollBar:vertical { background: {{color.background.0}}; width: 12px; }"
             "QScrollBar:horizontal { background: {{color.background.0}}; height: 12px; }"
             "QScrollBar::handle { background: {{color.background.1}}; border-radius: 4px; min-width: 20px; min-height: 20px; }"
             "QScrollBar::handle:hover { background: {{color.canon.lineHi}}; }"
             "QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }"
             "QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }"
-            "QLabel { color: {{color.canon.inkSoft}}; background: transparent; font-size: 11px; }"
-            "QPushButton, QComboBox { min-height: 20px; background: {{color.background.2}}; "
-            "color: {{color.text.primary}}; border: 1px solid {{color.background.2}}; border-radius: 3px; padding: 0 4px; font-size: 11px; }"
-            "QPushButton:hover { background: {{color.background.1}}; }"
+            "QLabel { color: {{color.canon.muted}}; background: transparent; font-size: 10px; }"
+            "QPushButton, QComboBox { background: {{color.canon.control}}; "
+            "color: {{color.canon.inkSoft}}; border: 1px solid {{color.canon.lineHi}}; border-radius: 3px; padding: 0 4px; font-size: 10px; font-weight: bold; }"
+            "QPushButton:hover { background: {{color.canon.nested}}; color: {{color.canon.aqua}}; }"
             "QPushButton:checked { background: {{color.accessory.key.meffa.active.background}}; color: {{color.accessory.key.meffa.active.foreground}}; border-color: {{color.accessory.key.meffa.active.border}}; }"
             "QPushButton:checked:hover { background: {{color.accessory.key.meffa.active.hover}}; }"
             "QPushButton#kpaStandby:checked, QPushButton#kpaStandby:checked:hover { background: {{color.accessory.key.standby.background}}; color: {{color.accessory.key.standby.foreground}}; border-color: {{color.accessory.key.standby.foreground}}; }"
             "QPushButton:disabled, QPushButton:checked:disabled, QPushButton#kpaStandby:checked:disabled, QComboBox:disabled { background: {{color.background.2}}; color: {{color.text.secondary}}; border-color: {{color.background.2}}; }"
-            "QCheckBox { color: {{color.text.primary}}; font-size: 11px; spacing: 5px; }"
+            "QCheckBox { color: {{color.canon.muted}}; font-size: 10px; spacing: 4px; }"
             "QCheckBox:disabled { color: {{color.text.secondary}}; }"
             "QPlainTextEdit { background: {{color.canon.ground}}; color: {{color.canon.inkSoft}}; border: 1px solid {{color.canon.lineHi}}; font-family: monospace; font-size: 10px; }") + canonIndicatorRules() + accessoryCheckRules();
     });
@@ -445,7 +485,12 @@ void Kpa500Applet::setResponding(bool responding)
     refresh();
 }
 void Kpa500Applet::setConnectionDescription(const QString& text) { m_connection = text; refresh(); }
-void Kpa500Applet::setBandTrackingText(const QString& text) { labelText(m_tracking, text); }
+void Kpa500Applet::setBandTrackingText(const QString& text)
+{
+    labelText(m_trackingDetails, text);
+    m_tracking->setToolTip(text);
+    m_tracking->setAccessibleDescription(text);
+}
 void Kpa500Applet::setRadioTransmitting(bool transmitting) { m_radioTransmitting = transmitting; refresh(); }
 void Kpa500Applet::setIdentification(const QString& firmware, const QString& serial)
 {
@@ -464,15 +509,16 @@ void Kpa500Applet::setFloating(bool floating)
 }
 QSize Kpa500Applet::sizeHint() const
 {
-    const int width = std::max(254, m_content->layout()->minimumSize().width() + 2);
+    const int width = std::max(238, m_content->layout()->minimumSize().width() + 2);
     const int height = m_content->layout()->totalHeightForWidth(width - 2);
     return QSize(width, (height >= 0 ? height : m_content->sizeHint().height()) + 2);
 }
 QSize Kpa500Applet::minimumSizeHint() const
 {
     if (!m_floating) { return sizeHint(); }
-    return QSize(std::max(254, m_content->layout()->minimumSize().width()
-        + m_scroll->verticalScrollBar()->sizeHint().width() + 2), 160);
+    return QSize(std::max(238, m_content->layout()->minimumSize().width()
+        + (m_mini ? 0 : m_scroll->verticalScrollBar()->sizeHint().width()) + 2),
+        m_mini ? sizeHint().height() : 160);
 }
 bool Kpa500Applet::eventFilter(QObject* watched, QEvent* event)
 {
@@ -482,10 +528,12 @@ bool Kpa500Applet::eventFilter(QObject* watched, QEvent* event)
 void Kpa500Applet::updatePresentation()
 {
     m_detail->setVisible(!m_mini);
+    m_modesPane->setVisible(!m_mini);
+    m_toolsPane->setVisible(!m_mini);
     m_miniButton->setText(m_mini ? tr("Full") : tr("Mini"));
     m_historyPane->setVisible(m_historyExpanded && !m_mini);
     m_historyButton->setText(m_historyExpanded && !m_mini ? tr("▾ History") : tr("▸ History"));
-    m_settingsPane->setVisible(m_settingsButton->isChecked());
+    m_settingsPane->setVisible(m_settingsButton->isChecked() && !m_mini);
     m_settingsButton->setText(m_settingsButton->isChecked() ? tr("▾ Settings") : tr("▸ Settings"));
     m_debugPane->setVisible(m_debugButton->isChecked());
     m_debugButton->setText(m_debugButton->isChecked() ? tr("▾ Debug") : tr("▸ Debug"));
@@ -536,6 +584,9 @@ void Kpa500Applet::refresh()
     m_operate->setChecked(powered && m_status.operate == true);
     available(m_band, powered && m_status.band.has_value() && !followTx() && !m_maintenanceBusy, m_maintenanceBusy ? busyReason : followTx() ? tr("Disable Follow TX flag in Settings to select a manual band") : unavailable);
     { const QSignalBlocker blocker(m_band); m_band->setCurrentIndex(m_status.band.value_or(-1)); }
+    m_tracking->setVisible(followTx());
+    m_band->setVisible(!followTx());
+    labelText(m_tracking, tr("%1 · Follow TX").arg(m_status.band ? Kpa500::bandName(*m_status.band) : QStringLiteral("—")));
     available(m_fan, powered && m_status.fanMinSpeed.has_value() && !m_maintenanceBusy, unavailable);
     { const QSignalBlocker blocker(m_fan); m_fan->setCurrentIndex(m_status.fanMinSpeed.value_or(-1)); }
     available(m_speaker, live && m_status.speakerOn.has_value() && m_status.powerOn.value_or(false) && !m_maintenanceBusy, unavailable);
@@ -553,21 +604,26 @@ void Kpa500Applet::refresh()
     labelText(m_state, state);
     const QString stateToken = ampRfActive ? "color.accent.danger" : powered && m_status.operate == false ? "color.accessory.key.standby.foreground" : powered ? "color.accent.success" : "color.text.secondary";
     ThemeManager::instance().applyStyleSheet(m_state,
-        "QLabel { background: {{color.canon.nested}}; color: {{" + stateToken + "}}; border: 1px solid {{color.canon.lineHi}}; border-radius: 3px; font-weight: bold; }");
+        "QLabel { background: {{color.canon.nested}}; color: {{" + stateToken + "}}; border: 1px solid {{color.canon.lineHi}}; border-radius: 3px; font-size: 9px; font-weight: bold; }");
     labelText(m_fault, m_status.faultCode.value_or(0) > 0 ? tr("FAULT %1 · amplifier reports an active fault").arg(*m_status.faultCode, 2, 10, QLatin1Char('0')) : QString());
     m_fault->setVisible(!m_fault->text().isEmpty());
     std::optional<float> temperature = m_status.paTemperatureC;
     if (temperature && m_fahrenheit) { temperature = *temperature * 1.8f + 32.0f; }
-    labelText(m_readouts[0], tr("Power: %1").arg(reading(m_status.forwardPowerW, 0, " W")));
-    labelText(m_readouts[1], tr("SWR: %1").arg(m_status.swr ? reading(m_status.swr, 1, "") : m_status.forwardPowerW == 0.0f ? tr("NO RF") : QStringLiteral("—")));
-    labelText(m_readouts[2], tr("Temp: %1").arg(reading(temperature, 0, m_fahrenheit ? " °F" : " °C")));
-    labelText(m_readouts[3], tr("Voltage: %1").arg(reading(m_status.paVoltageV, 1, " V")));
-    labelText(m_readouts[4], tr("Current: %1").arg(reading(m_status.paCurrentA, 1, " A")));
+    labelText(m_readouts[0], tr("PWR %1").arg(reading(m_status.forwardPowerW, 0, " W")));
+    labelText(m_readouts[1], tr("SWR %1").arg(m_status.swr ? reading(m_status.swr, 1, "") : m_status.forwardPowerW == 0.0f ? tr("NO RF") : QStringLiteral("—")));
+    labelText(m_readouts[2], reading(temperature, 0, m_fahrenheit ? " °F" : " °C"));
+    labelText(m_readouts[3], reading(m_status.paVoltageV, 1, " V"));
+    labelText(m_readouts[4], reading(m_status.paCurrentA, 1, " A"));
     const std::array<std::optional<float>, 5> values{m_status.forwardPowerW, m_status.swr, temperature, m_status.paVoltageV, m_status.paCurrentA};
     for (int i = 0; i < 5; ++i) {
-        m_gauges[i]->setValue(values[i].value_or(i == 1 ? 1.0f : 0.0f));
-        if (!values[i]) { m_gauges[i]->clearPeak(); }
+        if (values[i]) {
+            m_gauges[i]->setValue(*values[i]);
+        } else {
+            m_gauges[i]->setValueImmediate(i == 1 ? 1.0f : 0.0f);
+            m_gauges[i]->clearPeak();
+        }
         m_gauges[i]->setAccessibleDescription(values[i] ? m_readouts[i]->text() : tr("No fresh measurement"));
+        m_readouts[i]->setToolTip(tr("%1: %2").arg(m_gauges[i]->accessibleName(), m_readouts[i]->text()));
     }
     labelText(m_link, tr("%1 · %2\nLast valid reply: %3").arg(m_connection.isEmpty() ? tr("Connection not configured") : m_connection,
         live ? tr("Responding") : m_connected ? tr("Link open / no response") : tr("Disconnected"),

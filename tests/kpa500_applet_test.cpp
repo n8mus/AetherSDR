@@ -70,7 +70,7 @@ public:
         check(widget.m_link->text().contains("amp.example.test:2000")
               && widget.m_identity->text().contains("01.54") && widget.m_identity->text().contains("01199"),
               "Settings reports network endpoint and amplifier identity from readback");
-        check(widget.m_state->text() == "AMP ON · STANDBY" && widget.m_readouts[1]->text() == "SWR: NO RF", "Standby shows zero power and unmeasured SWR");
+        check(widget.m_state->text() == "AMP ON · STANDBY" && widget.m_readouts[1]->text() == "SWR NO RF", "Standby shows zero power and unmeasured SWR");
         check(modes.isEmpty() && bands.isEmpty() && fans.isEmpty() && speakers.isEmpty(), "Status readback emits no hardware setters");
         QSignalSpy advancedRequests(&widget, &Kpa500Applet::advancedSettingsRequested);
         widget.findChild<QPushButton*>("kpaAdvancedSettings")->click();
@@ -134,13 +134,47 @@ public:
         state.forwardPowerW = 0.0f;
         state.operate = false;
         widget.applyStatus(state);
+        follow->setChecked(true);
+        widget.setBandTrackingText("Following TX B · 14.119100 MHz → 20m (queued until RX)");
+        check(widget.m_tracking->text() == "40m · Follow TX" && !band->isVisible()
+              && widget.m_tracking->toolTip().contains("queued until RX")
+              && widget.m_trackingDetails->text().contains("14.119100"),
+              "Header keeps confirmed band separate from the follow target and preserves full tracking details");
         const int fullHeight = widget.minimumSizeHint().height();
         widget.m_miniButton->setChecked(true);
         QTest::qWait(10);
-        check(widget.minimumSizeHint().height() < fullHeight, "Mini reduces the applet layout height");
+        check(widget.minimumSizeHint().height() * 2 <= fullHeight,
+              "Mini occupies at most half the collapsed full layout height");
+        check(!widget.m_toolsPane->isVisible() && !operate->isVisible()
+              && widget.m_readouts[0]->isVisible() && widget.m_readouts[1]->isVisible()
+              && widget.m_state->isVisible() && power->isVisible(),
+              "Mini retains power, status and two meters without mode or drawer buttons");
+        widget.m_settingsButton->setChecked(true);
+        widget.m_debugButton->setChecked(true);
+        check(!widget.m_settingsPane->isVisible(), "Opening Mini keeps expanded Settings and Debug out of the compact view");
+        widget.m_miniButton->setChecked(false);
+        check(widget.m_settingsPane->isVisible() && widget.m_debugPane->isVisible(),
+              "Full restores the user's expanded Settings and Debug");
+        widget.m_settingsButton->setChecked(false);
+        widget.m_debugButton->setChecked(false);
+        widget.m_miniButton->setChecked(true);
+        state.swr = 5.0f;
+        widget.applyStatus(state);
+        widget.m_gauges[1]->setValueImmediate(5.0f);
+        check(std::abs(widget.m_gauges[1]->filledFraction() - 1.0f) < 0.001f,
+              "KPA500 SWR reaches full scale at the amplifier's 5:1 limit");
+        state.swr = 3.0f;
+        widget.applyStatus(state);
+        widget.m_gauges[1]->setValueImmediate(3.0f);
+        check(std::abs(widget.m_gauges[1]->filledFraction() - 0.5f) < 0.001f,
+              "KPA500 SWR remains 1-5 instead of inheriting the tuner's shorter scale");
+        state.swr.reset();
+        widget.applyStatus(state);
+        check(widget.m_gauges[1]->filledFraction() == 0.0f,
+              "Unmeasured SWR immediately clears the fill instead of retaining a stale reading");
         state.faultCode = 4;
         widget.applyStatus(state);
-        check(!widget.m_detail->isVisible() && widget.m_fault->isVisible() && widget.m_clear->isEnabled(), "Mini retains active fault and clear action");
+        check(!widget.m_detail->isVisible() && widget.m_fault->isVisible() && widget.m_clear->isEnabled(), "Mini retains the active fault; Full exposes its qualified Clear action");
         widget.recordTelemetry("WS", state);
         widget.recordTelemetry("TM", state);
         widget.recordTelemetry("VI", state);
@@ -287,11 +321,11 @@ public:
             widget.m_debugButton->setChecked(false);
             widget.m_miniButton->setChecked(false);
             widget.m_historyButton->setChecked(false);
-            widget.resize(450, widget.minimumSizeHint().height());
+            widget.resize(254, widget.minimumSizeHint().height());
             QTest::qWait(50);
             widget.grab().save("kpa500-full-replay.png");
             widget.m_miniButton->setChecked(true);
-            widget.resize(450, widget.minimumSizeHint().height());
+            widget.resize(254, widget.minimumSizeHint().height());
             QTest::qWait(50);
             widget.grab().save("kpa500-mini-replay.png");
             widget.m_miniButton->setChecked(false);
