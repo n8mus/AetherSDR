@@ -13,6 +13,31 @@ using namespace AetherSDR::Kat500;
 namespace AetherSDR {
 class Kat500ModelTest {
 public:
+static int settlingReadback() {
+ Kat500Model model; qint64 now=0; QList<QByteArray> wire;
+ model.m_now=[&]{return now;}; model.m_write=[&](const QByteArray& bytes){wire.append(bytes);return true;};
+ model.m_connected=true; model.m_detected=true; model.m_lastReply=0; model.m_lastIo=0;
+ model.m_status.identity="KAT500"; model.m_status.powerOn=true; model.m_status.tuning=false; model.m_status.forwardAdc=0;
+ model.m_received["TP"]=0; model.m_received["VFWD"]=0;
+ QSignalSpy finished(&model,&Kat500Model::operationFinished),failed(&model,&Kat500Model::operationFailed);
+ CHECK(model.setAntenna(2)); model.tick(); CHECK(wire.last()=="AN2;AN;");
+ model.receiveBytes("AN1;"); CHECK(model.operationBusy() && failed.isEmpty() && finished.isEmpty());
+ now+=100; model.tick(); CHECK(wire.last()=="AN;"); model.receiveBytes("AN2;");
+ CHECK(!model.operationBusy() && finished.size()==1 && failed.isEmpty()); CHECK(wire.count("AN2;AN;")==1);
+ now+=200; model.m_active.reset(); model.m_queue.clear(); model.m_lastIo=now;
+ CHECK(model.setAntenna(3)); model.tick(); model.receiveBytes("AN2;"); now+=2100; model.tick();
+ CHECK(!model.operationBusy() && failed.size()==1 && wire.count("AN3;AN;")==1);
+ now+=2100; model.m_lastIo=now; model.m_lastReply=now; model.m_received["TP"]=now;model.m_received["VFWD"]=now;
+ CHECK(model.setAntenna(1)); model.tick(); model.receiveBytes("AN2;"); model.cancelOperation();
+ const int count=wire.size(); now+=100;model.tick();CHECK(wire.size()==count && !model.operationBusy());
+ now+=2100;model.m_lastIo=now;model.m_lastReply=now;model.m_received["TP"]=now;model.m_received["VFWD"]=now;
+ CHECK(model.setAntenna(2)); model.tick(); model.receiveBytes("AN1;");
+ model.query("VFWD;"); model.tick(); model.receiveBytes("VFWD1;"); now+=100; const int before=wire.size(); model.tick();
+ CHECK(!model.operationBusy() && wire.size()==before);
+
+ return 0;
+}
+
 struct Peer {
     Kat500Model model;
     qint64 now = 0;
@@ -317,9 +342,11 @@ static int run()
     QSignalSpy finished(&model,&Kat500Model::operationFinished);
     CHECK(model.setMode(Mode::Manual));
     CHECK(next() == "MDM;MD;"); model.receiveBytes("MDA;");
-    CHECK(failed.size() == 1 && finished.isEmpty() && model.status().mode == Mode::Auto);
+    CHECK(failed.isEmpty() && finished.isEmpty() && model.operationBusy() && model.status().mode == Mode::Auto);
+    now += 2100; model.tick();
+    CHECK(failed.size() == 1 && finished.isEmpty());
     now += 4000; model.tick(); sent.clear();
-    model.m_active.reset(); model.m_queue.clear(); model.m_waking = false; model.m_lastIo = now;
+    model.m_active.reset(); model.m_queue.clear(); model.m_waking = false; model.m_lastIo = now; model.m_lastReply = now;
     CHECK(model.inspectMemories(14096));
     CHECK(next() == "DM14096;");
     model.receiveBytes("DM 14080-14099;\r\nAN1;BYP;VSWRB 1.00;\r\n5 UNUSED;\r\n");
@@ -333,7 +360,7 @@ static int run()
     model.transportOpened(); model.m_timer.stop(); sent.clear();
     CHECK(next() == ";"); CHECK(!sent.contains("MDM;MD;"));
     model.transportClosed();
-    const int failures = rejectNewUnsafeReadback() | doNotExposeFailedBackup() |
+    const int failures = settlingReadback() | rejectNewUnsafeReadback() | doNotExposeFailedBackup() |
         cancelResetDuringDiagnostic() | canceledMemoryDrainsWithoutTelemetry();
     return failures ? 1 : stateful();
 }

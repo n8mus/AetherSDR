@@ -81,6 +81,7 @@ void Kat500Model::reconnect()
 void Kat500Model::transportOpened()
 {
     ++m_generation; m_resetAt = 0; m_pendingBackup = {};
+    m_settleGetter.clear(); m_settleVerify = {}; m_settleDeadline = 0;
     m_connected = true; m_connecting = false; m_detected = false; m_status = {};
     m_configuration.clear(); m_received.clear(); m_lastStateFrames.clear(); m_queue.clear(); m_active.reset(); m_parser->reset();
     m_memoryReading = false; m_dropMemory = false; m_waking = false; m_wakeCount = 0;
@@ -91,6 +92,7 @@ void Kat500Model::transportOpened()
 void Kat500Model::transportClosed(const QString& reason)
 {
     ++m_generation; m_resetAt = 0; m_pendingBackup = {};
+    m_settleGetter.clear(); m_settleVerify = {}; m_settleDeadline = 0;
     const bool wasOpen = m_connected || m_connecting;
     m_connected = false; m_connecting = false; m_timer.stop();
     m_socket->abort();
@@ -194,6 +196,15 @@ void Kat500Model::tick()
     }
     if (m_dropMemory && now >= m_quarantineUntil) {
         transportClosed(QStringLiteral("Incomplete memory response; close the stream before further commands.")); return;
+    }
+    if (!m_settleGetter.isEmpty()) {
+        if (m_settleGeneration != m_generation || !operationBusy()) {
+            m_settleGetter.clear(); m_settleVerify = {}; m_settleDeadline = 0;
+        } else if (now >= m_settleDeadline) {
+            fail(QStringLiteral("Requested value was not confirmed before the readback deadline; no write retry was sent.")); return;
+        } else if (!m_active && m_queue.isEmpty() && now >= m_settleNext) {
+            pollRequestedValue();
+        }
     }
     if (m_active) {
         if (now - m_sentAt > m_active->timeoutMs) {
@@ -320,12 +331,14 @@ bool Kat500Model::begin(const QString& name, bool writing)
 }
 void Kat500Model::finish(const QString& message)
 {
+    m_settleGetter.clear(); m_settleVerify = {}; m_settleDeadline = 0;
     m_operation.clear(); m_operationWriting = false; m_regionComplete = {}; m_edits.clear();
     m_nextPoll = m_now() + 200; report(message); emit operationBusyChanged(false); emit operationFinished(message); emit availabilityChanged();
 }
 void Kat500Model::fail(const QString& reason)
 {
     ++m_generation; m_resetAt = 0; m_pendingBackup = {};
+    m_settleGetter.clear(); m_settleVerify = {}; m_settleDeadline = 0;
     qCWarning(lcKat500).noquote() << reason;
     const bool busy = operationBusy();
     if (m_memoryReading) { m_dropMemory = true; }
@@ -350,13 +363,36 @@ bool Kat500Model::requestValue(const QByteArray& setter, const QByteArray& gette
         if (!reason.isEmpty()) { emit operationFailed(reason); return false; }
         if (!begin(name,true)) { return false; }
     }
+    m_settleGetter = getter;
+    m_settleVerify = std::move(verify);
+    m_settleDeadline = m_now() + 2000;
+    m_settleGeneration = m_generation;
+    m_settleAllowOff = allowOff;
     enqueue({setter + getter,[getter](const QByteArray& frame) { return matchesStatusQuery(getter,frame); },
-        [this,verify = std::move(verify)](const QByteArray&) {
-            if (!verify(m_status)) { fail(QStringLiteral("Requested value was not confirmed by device readback.")); }
-            else { finish(QStringLiteral("Device readback confirmed.")); }
-        },2000,true,!allowOff});
+        [this](const QByteArray&) { confirmRequestedValue(); },2000,true,!allowOff});
     return true;
 }
+void Kat500Model::confirmRequestedValue()
+{
+    if (m_settleGetter.isEmpty() || m_settleGeneration != m_generation || !operationBusy()) { return; }
+    if (m_settleVerify && m_settleVerify(m_status)) { finish(QStringLiteral("Device readback confirmed.")); return; }
+    // Firmware 02.16 may return the previous relay/antenna state immediately
+    // after SET. Wait for GET confirmation without repeating the mutation.
+    m_settleNext = m_now() + 100;
+}
+void Kat500Model::pollRequestedValue()
+{
+    if (!m_settleAllowOff &&
+        (m_status.powerOn != true || m_status.tuning != false || m_status.forwardAdc != 0 ||
+         fieldAgeMs(QStringLiteral("TP")) < 0 || fieldAgeMs(QStringLiteral("TP")) > 5000 ||
+         fieldAgeMs(QStringLiteral("VFWD")) < 0 || fieldAgeMs(QStringLiteral("VFWD")) > 5000)) {
+        fail(QStringLiteral("Readback settling stopped: power, tuning or RF readback is unsafe or stale.")); return;
+    }
+    const QByteArray getter = m_settleGetter;
+    enqueue({getter,[getter](const QByteArray& frame) { return matchesStatusQuery(getter,frame); },
+        [this](const QByteArray&) { confirmRequestedValue(); },2000,false});
+}
+
 bool Kat500Model::setPower(bool on) { return requestValue(on ? "PS1;" : "PS0;","PS;",[on](const Status& s) { return s.powerOn == on; },QStringLiteral("Set power"),true); }
 bool Kat500Model::setMode(Mode mode)
 {

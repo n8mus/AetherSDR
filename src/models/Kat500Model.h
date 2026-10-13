@@ -131,6 +131,8 @@ private:
     void eraseNextBand();
     void queueIdentity();
     void pollTuneCancellation();
+    void confirmRequestedValue();
+    void pollRequestedValue();
     void requestMemory(int frequencyKhz, const QByteArray& prefix = {});
     void reconnect();
 
@@ -191,6 +193,12 @@ private:
     QList<QByteArray> m_memoryFrames;
     bool m_memoryReading = false;
     std::optional<Kat500::MemoryMatch> m_memoryExpected;
+    QByteArray m_settleGetter;
+    std::function<bool(const Kat500::Status&)> m_settleVerify;
+    qint64 m_settleDeadline = 0;
+    qint64 m_settleNext = 0;
+    quint64 m_settleGeneration = 0;
+    bool m_settleAllowOff = false;
     qint64 m_cancelTuneDeadline = 0;
     bool m_tuneCompleted = false;
     bool m_regionExternal = false;
