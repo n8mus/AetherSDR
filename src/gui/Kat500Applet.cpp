@@ -80,7 +80,7 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
     setAccessibleName(tr("Elecraft KAT500 tuner"));
     setCloseButtonVisible(false);
     theme::setContainer(this, QStringLiteral("canon/kat500"));
-    setMinimumWidth(254);
+    setMinimumWidth(238);
     m_clock.start();
     const QJsonObject prefs = preferences();
     auto* body = new QVBoxLayout(bodyWidget());
@@ -676,7 +676,7 @@ QSize Kat500Applet::sizeHint() const
 }
 QSize Kat500Applet::minimumSizeHint() const
 {
-    return QSize(254, 220);
+    return QSize(238, 220);
 }
 bool Kat500Applet::eventFilter(QObject* watched, QEvent* event)
 {

@@ -122,7 +122,7 @@ Kat500AdvancedWidget::Kat500AdvancedWidget(Kat500Model* model, QWidget* parent)
     }
     actions->addWidget(m_band);
     configuration->addLayout(actions);
-    label(tr("Read before editing. Double-click a Value cell; 0/1 means off/on. All bands keeps Mixed until "
+    label(tr("Read before editing. Double-click an Edit cell; 0/1 means off/on. All bands keeps Mixed until "
              "that field is edited. Six physical memory slots are shared among antennas. Apply verifies "
              "changed fields; Cancel edits discards only staging."),
           "katConfigurationHelp", configuration);

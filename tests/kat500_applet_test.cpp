@@ -95,8 +95,9 @@ int main(int argc, char** argv)
     CHECK(follow && !follow->isChecked());
     auto* scroll = widget.findChild<QScrollArea*>("katScroll");
     CHECK(scroll);
-    for (const int width : {254, 300, 360}) {
+    for (const int width : {238, 248, 254, 300, 360}) {
         widget.resize(width, 220);
+        CHECK(widget.width() == width);
         QTest::qWait(30);
         CHECK(scroll->verticalScrollBar()->maximum() == 0);
         CHECK(scroll->horizontalScrollBar()->maximum() == 0);
@@ -124,7 +125,7 @@ int main(int argc, char** argv)
     widget.findChild<QPushButton*>("katDebug")->setChecked(true);
     QTest::qWait(20);
     CHECK(scroll && scroll->verticalScrollBar()->maximum() > 0);
-    for (const int width : {254, 280}) {
+    for (const int width : {238, 248, 254, 280}) {
         widget.resize(width, 300);
         QTest::qWait(20);
         CHECK(scroll->horizontalScrollBar()->maximum() == 0);
