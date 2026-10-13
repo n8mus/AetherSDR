@@ -916,7 +916,7 @@ bool RtlSdrBackend::requestReceiveTune(int sliceId, double hz, ReceiveTuneView v
     const bool centerView = view == ReceiveTuneView::Center
         || (view == ReceiveTuneView::Reveal && outsideView);
     receiver->passband.carrierHz = hz;
-    desired.avoidDc = RtlReceiveRecipe::cw(receiver->mode);
+    desired.avoidDc = RtlReceiveRecipe::cw(receiver->mode) || RtlReceiveRecipe::amplitude(receiver->mode);
     desired.automaticDirectSampling = true;
     desired.followReceiverId = sliceId;
     if (centerView) {

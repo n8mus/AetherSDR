@@ -639,20 +639,6 @@ static void sidebandControlsAndPersistence()
     RadioModelSliceLifecycleTestAccess::flush(model);
     check(scope.featureExact("RtlSlices") == validNotchDocument,
         "rejected notch edits cannot change saved bank");
-    check(slice->filterLow() == -4000 && slice->filterHigh() == 4000,
-        "first AM entry uses its default independently of SAM cuts");
-    slice->setFilterWidth(-3500, 2500);
-    check(waitFor([&] { return settle() && slice->filterLow() == -3500; }),
-        "AM asymmetric filter accepts independently");
-    slice->setMode("SAM");
-    check(waitFor([&] { return settle() && slice->mode() == "SAM"; })
-        && slice->filterLow() == -2000 && slice->filterHigh() == 5000
-        && Access::state(backend).receivers.front().passband.translationHz == 250,
-        "SAM recalls accepted asymmetric cuts with active RIT");
-    slice->setMode("AM");
-    check(waitFor([&] { return settle() && slice->mode() == "AM"; })
-        && slice->filterLow() == -3500 && slice->filterHigh() == 2500,
-        "AM recalls its own accepted asymmetric cuts");
     auto* pan = model.panadapter(slice->panId());
     if (pan) {
         model.requestPanCenter(pan->panId(), 104.0, -1.0, IRadioBackend::PanCenterIntent::Drag);
@@ -759,6 +745,11 @@ static void amControlsAndRestore()
     check(waitFor([&] { return settle() && slice->mode() == "AM"; })
         && slice->filterLow() == -3500 && slice->filterHigh() == 2500,
         "AM recalls its own accepted asymmetric cuts");
+    const double converterCenter = Access::state(backend).hardware.centerHz;
+    slice->setFrequency(converterCenter / 1e6);
+    check(waitFor([&] { return settle() && std::abs(slice->frequency() * 1e6 - converterCenter) < 1
+        && std::abs(double(Access::state(backend).hardware.centerHz) - converterCenter) > 5000; }),
+        "explicit AM tune onto converter DC preserves station RF and moves capture clear");
     auto* pan = model.panadapter(slice->panId());
     if (pan) {
         model.requestPanCenter(pan->panId(), 104.0, -1, IRadioBackend::PanCenterIntent::Drag);
