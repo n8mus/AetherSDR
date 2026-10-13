@@ -4584,6 +4584,32 @@ target_include_directories(spe_protocol_test PRIVATE src)
 target_link_libraries(spe_protocol_test PRIVATE Qt6::Core)
 add_test(NAME spe_protocol_test COMMAND spe_protocol_test)
 
+add_executable(kat500_protocol_test tests/kat500_protocol_test.cpp src/core/Kat500Protocol.cpp)
+target_include_directories(kat500_protocol_test PRIVATE src)
+target_link_libraries(kat500_protocol_test PRIVATE Qt6::Core)
+add_test(NAME kat500_protocol_test COMMAND kat500_protocol_test)
+
+add_executable(kat500_maintenance_test tests/kat500_maintenance_test.cpp
+    src/core/Kat500Maintenance.cpp src/core/Kat500Protocol.cpp)
+target_include_directories(kat500_maintenance_test PRIVATE src)
+target_link_libraries(kat500_maintenance_test PRIVATE Qt6::Core)
+target_compile_definitions(kat500_maintenance_test PRIVATE
+    KAT500_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/kat500/utility-1.23.11.9.KAT500Config")
+add_test(NAME kat500_maintenance_test COMMAND kat500_maintenance_test)
+
+# Injected transport and clock; no serial port or network peer is opened.
+add_executable(kat500_model_test tests/kat500_model_test.cpp src/models/Kat500Model.cpp
+    src/models/Kat500Model.h src/core/Kat500Protocol.cpp src/core/Kat500Maintenance.cpp)
+target_include_directories(kat500_model_test PRIVATE src)
+target_link_libraries(kat500_model_test PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+target_compile_definitions(kat500_model_test PRIVATE
+    KAT500_CONFIGURATION_PATH="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/kat500/configuration-readback.json")
+if(TARGET Qt6::SerialPort)
+    target_compile_definitions(kat500_model_test PRIVATE HAVE_SERIALPORT)
+    target_link_libraries(kat500_model_test PRIVATE Qt6::SerialPort)
+endif()
+add_test(NAME kat500_model_test COMMAND kat500_model_test)
+
 add_executable(kpa500_protocol_test
     tests/kpa500_protocol_test.cpp
     src/core/Kpa500Protocol.cpp

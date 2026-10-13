@@ -1064,6 +1064,9 @@ set(CORE_SOURCES
     src/core/AcomConnection.cpp
     src/core/SpeProtocol.cpp
     src/core/SpeConnection.cpp
+    src/models/Kat500Model.cpp
+    src/core/Kat500Protocol.cpp
+    src/core/Kat500Maintenance.cpp
     src/core/Kpa500Protocol.cpp
     src/core/Kpa500Maintenance.cpp
     src/core/Kpa500FaultHistory.cpp
