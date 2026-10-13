@@ -126,6 +126,13 @@ static void reconnectAtCaptureLimits()
         check(RtlSliceSettings(scope).patch(capture.centerHz, capture.rateHz, {saved}),
               "capture-limit reconnect fixture preserves a valid saved receiver");
         const QJsonObject original = scope.featureExact("RtlSlices");
+        QJsonObject expected = original;
+        QJsonObject entries = expected.value("slices").toObject();
+        QJsonObject entry = entries.value("1").toObject();
+        entry.insert("modeFilters", QJsonObject{{saved.mode,
+            QJsonObject{{"low", saved.filterLowHz}, {"high", saved.filterHighHz}}}});
+        entries.insert("1", entry);
+        expected.insert("slices", entries);
         rtl::RtlSdrBackend receiver;
         for (int attempt = 0; attempt < 2; ++attempt) {
             std::fprintf(stderr, "RTL_RECONNECT center=%u rate=%u mode=%s attempt=%d\n",
@@ -178,13 +185,13 @@ static void reconnectAtCaptureLimits()
                 check(receiver.storeOperatingState(scope, receiver.currentOperatingState()).value_or(false),
                     "accepted restored receiver remains owned by the RTL settings writer");
             }
-            if (scope.featureExact("RtlSlices") != original) {
+            if (scope.featureExact("RtlSlices") != expected) {
                 std::fprintf(stderr, "RESTORE_EXPECTED %s\nRESTORE_ACTUAL %s\n",
-                    QJsonDocument(original).toJson(QJsonDocument::Compact).constData(),
+                    QJsonDocument(expected).toJson(QJsonDocument::Compact).constData(),
                     QJsonDocument(scope.featureExact("RtlSlices")).toJson(QJsonDocument::Compact).constData());
             }
-            check(scope.featureExact("RtlSlices") == original,
-                  "reconnect and accepted persistence preserve the complete saved slice document");
+            check(scope.featureExact("RtlSlices") == expected,
+                  "reconnect adds only the accepted current-mode filter history to the saved document");
             receiver.disconnectRadio();
         }
     }
