@@ -8,6 +8,7 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <utility>
 using namespace AetherSDR::Kat500;
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #x); return 1; } } while (false)
 namespace AetherSDR {
@@ -139,6 +140,135 @@ struct Peer {
     void step() { now += 100; model.tick(); }
     void complete() { for (int i=0; i<50000 && model.operationBusy(); ++i) { step(); } }
 };
+// Reproduce MainWindow's availability-to-effective-frequency refresh wiring.
+static int followDoesNotRetryAdmittedIntent()
+{
+    Peer peer;
+    qint64 frequency = 14074000;
+    const auto transport = peer.model.m_write;
+    peer.model.m_write = [&](const QByteArray& bytes) {
+        if (bytes.startsWith("F ") || bytes == "F;") {
+            peer.wire.append(bytes); peer.model.receiveBytes("F 14000;"); return true;
+        }
+        return transport(bytes);
+    };
+    peer.model.setFollowTxFrequency(true);
+    QObject::connect(&peer.model, &Kat500Model::availabilityChanged, &peer.model, [&] {
+        if (peer.model.followTxFrequency() && peer.model.unavailableReason(true).isEmpty()) {
+            peer.model.setEffectiveTxFrequencyHz(frequency);
+        }
+    });
+    CHECK(peer.model.begin(QStringLiteral("Read-only maintenance"), false));
+    peer.model.setEffectiveTxFrequencyHz(frequency);
+    CHECK(!peer.wire.contains("F 14074;F;"));
+    peer.model.finish(QStringLiteral("Read-only maintenance finished"));
+    peer.complete();
+    for (int i = 0; i < 90; ++i) {
+        // Repeated fresh eligibility, as ordinary TP/VFWD polls provide it.
+        peer.model.m_received["TP"] = peer.model.m_received["VFWD"] = peer.now;
+        peer.model.m_lastReply = peer.now;
+        peer.model.m_nextPoll = peer.now + 10000;
+        peer.step();
+    }
+    CHECK(peer.wire.count("F 14074;F;") == 1);
+    frequency = 14076000;
+    peer.model.setEffectiveTxFrequencyHz(frequency);
+    for (int i = 0; i < 5 && !peer.wire.contains("F 14076;F;"); ++i) { peer.step(); }
+    CHECK(peer.wire.count("F 14076;F;") == 1);
+    peer.model.cancelOperation();
+    for (int i = 0; i < 25; ++i) { peer.model.m_nextPoll = peer.now + 10000; peer.step(); }
+    CHECK(peer.wire.count("F 14076;F;") == 1);
+    peer.model.setFollowTxFrequency(false);
+    peer.model.setFollowTxFrequency(true);
+    peer.model.m_lastReply = peer.now;
+    peer.model.m_received["TP"] = peer.model.m_received["VFWD"] = peer.now;
+    for (int i = 0; i < 5 && peer.wire.count("F 14076;F;") < 2; ++i) { peer.step(); }
+    CHECK(peer.wire.count("F 14076;F;") == 2);
+    return 0;
+}
+static int lateEepromRepliesStopRestore(bool readback)
+{
+    Peer peer;
+    Backup backup{peer.internal, peer.external, peer.model.status().firmware, peer.model.status().serial};
+    const auto transport = peer.model.m_write;
+    QByteArray held;
+    peer.model.m_write = [&](const QByteArray& bytes) {
+        if (held.isEmpty() && (readback ? bytes.startsWith("ERP002020") && peer.writes == 1 : bytes.startsWith("EWP"))) {
+            held = bytes; return true;
+        }
+        return transport(bytes);
+    };
+    QSignalSpy finished(&peer.model, &Kat500Model::operationFinished);
+    QSignalSpy failed(&peer.model, &Kat500Model::operationFailed);
+    CHECK(peer.model.restoreBackup(backup, true));
+    for (int i = 0; i < 30 && held.isEmpty(); ++i) { peer.step(); }
+    CHECK(!held.isEmpty() && peer.model.m_active);
+    peer.now = peer.model.m_sentAt + peer.model.m_active->timeoutMs + 1;
+    transport(held); // Receive-ready runs before the overdue timer callback.
+    CHECK(!peer.model.operationBusy() && failed.size() == 1 && finished.isEmpty());
+    for (int i = 0; i < 60; ++i) { peer.step(); }
+    CHECK(peer.writes == 1 && finished.isEmpty());
+    return 0;
+}
+static int lateMemoryTerminatorCannotPublish()
+{
+    Peer peer;
+    const auto transport = peer.model.m_write;
+    peer.model.m_write = [&](const QByteArray& bytes) {
+        if (bytes == "DM14096;") { peer.model.receiveBytes("DM 14080-14099;AN3;BYP;VSWRB 1.00;"); return true; }
+        return transport(bytes);
+    };
+    QSignalSpy published(&peer.model, &Kat500Model::memoriesRead);
+    QSignalSpy failed(&peer.model, &Kat500Model::operationFailed);
+    CHECK(peer.model.inspectMemories(14096)); peer.step();
+    CHECK(peer.model.m_active && peer.model.m_memoryReading);
+    peer.now = peer.model.m_sentAt + peer.model.m_active->timeoutMs + 1;
+    peer.model.receiveBytes("5 UNUSED;");
+    CHECK(published.isEmpty() && failed.size() == 1 && !peer.model.operationBusy());
+    CHECK(!peer.model.status().antenna); // AN3 belongs only to the expired memory response.
+    peer.now += 2001; peer.model.tick();
+    CHECK(peer.model.isConnected()); // The late terminator still completes drain.
+    return 0;
+}
+static int ordinaryPollLatencyKeepsSafetyFresh()
+{
+    Peer peer;
+    const QMap<QByteArray,QByteArray> extra{
+        {"VRFL;","VRFL0;"}, {"VSWR;","VSWR1.00;"}, {"VSWRB;","VSWRB1.00;"},
+        {"F;","F14074;"}, {"BN;","BN5;"}, {"MD;","MDA;"}, {"AMPI;","AMPI0;"},
+        {"ATTN;","ATTN0;"}, {"FLT;","FLT0;"}, {"FY;","FY 14060-14079;"},
+        {"FC;","FC14074;"}, {"FX;","FX14074;"}};
+    const auto transport = peer.model.m_write;
+    QByteArray pending;
+    qint64 replyAt = 0;
+    peer.model.m_write = [&](const QByteArray& bytes) {
+        pending = bytes; replyAt = peer.now + 300; return true;
+    };
+    for (int i = 0; i < 1200; ++i) {
+        peer.step();
+        if (!pending.isEmpty() && peer.now >= replyAt) {
+            const QByteArray request = std::exchange(pending, {});
+            if (extra.contains(request)) { peer.wire.append(request); peer.model.receiveBytes(extra[request]); }
+            else { transport(request); }
+        }
+        CHECK(peer.model.unavailableReason(true).isEmpty());
+        for (const QString& field : {QStringLiteral("VSWR"), QStringLiteral("VRFL")}) {
+            CHECK(peer.model.fieldAgeMs(field) <= 5000);
+            CHECK(peer.now < 5000 || peer.model.fieldAgeMs(field) >= 0);
+        }
+    }
+    CHECK(peer.wire.count("SN;") >= 3); // Background round-robin is not starved.
+    peer.rf = true;
+    for (int i = 0; i < 35; ++i) {
+        peer.step();
+        if (!pending.isEmpty() && peer.now >= replyAt) {
+            const QByteArray request = std::exchange(pending, {});
+            if (extra.contains(request)) { peer.model.receiveBytes(extra[request]); } else { transport(request); }
+        }
+    }
+    CHECK(!peer.model.unavailableReason(true).isEmpty());
+    return 0;
+}
 static int rejectNewUnsafeReadback()
 {
     const QList<QPair<QByteArray,QByteArray>> cases{{"VFWD;","VFWD 1;"},{"TP;","TP1;"},{"PS;","PS0;"}};
@@ -366,7 +496,8 @@ static int run()
     model.transportOpened(); model.m_timer.stop(); sent.clear();
     CHECK(next() == ";"); CHECK(!sent.contains("MDM;MD;"));
     model.transportClosed();
-    const int failures = settlingReadback() | rejectNewUnsafeReadback() | doNotExposeFailedBackup() |
+    const int failures = followDoesNotRetryAdmittedIntent() | lateEepromRepliesStopRestore(false) | lateEepromRepliesStopRestore(true) |
+        lateMemoryTerminatorCannotPublish() | ordinaryPollLatencyKeepsSafetyFresh() | settlingReadback() | rejectNewUnsafeReadback() | doNotExposeFailedBackup() |
         cancelResetDuringDiagnostic() | canceledMemoryDrainsWithoutTelemetry();
     return failures ? 1 : stateful();
 }

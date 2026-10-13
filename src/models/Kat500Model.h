@@ -51,7 +51,7 @@ public:
     bool cancelTune();
     bool memorize(int frequencyKhz = 0);
     bool recallFrequency(int frequencyKhz);
-    void setFollowTxFrequency(bool enabled) { m_followTx = enabled; }
+    void setFollowTxFrequency(bool enabled);
     bool followTxFrequency() const { return m_followTx; }
     void setEffectiveTxFrequencyHz(qint64 frequencyHz);
 
@@ -113,6 +113,7 @@ private:
     void receiveBytes(const QByteArray& bytes);
     void receiveFrame(const QByteArray& frame);
     void tick();
+    bool expireActiveRequest();
     bool write(const QByteArray& bytes);
     void query(const QByteArray& wire, std::function<void()> complete = {});
     void enqueue(Request request);
@@ -167,6 +168,8 @@ private:
     bool m_deliberateDisconnect = false;
     bool m_verbose = false;
     bool m_followTx = false;
+    std::optional<int> m_followIntentKhz;
+    bool m_followIntentAdmitted = false;
     bool m_dropMemory = false;
     QString m_host;
     QString m_portName;

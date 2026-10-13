@@ -5,6 +5,8 @@
 #include "models/Kat500Model.h"
 #include <QApplication>
 #include <QCheckBox>
+#include <QFileDialog>
+#include <QPointer>
 #include <QLabel>
 #include <QPushButton>
 #include <QScrollArea>
@@ -100,6 +102,11 @@ int main(int argc, char** argv)
     QTest::qWait(20);
     auto* scroll = widget.findChild<QScrollArea*>("katScroll");
     CHECK(scroll && scroll->verticalScrollBar()->maximum() > 0);
+    for (const int width : {254, 280}) {
+        widget.resize(width, 300);
+        QTest::qWait(20);
+        CHECK(scroll->horizontalScrollBar()->maximum() == 0);
+    }
     widget.resize(700, 1400);
     QTest::qWait(20);
     CHECK(scroll->horizontalScrollBar()->maximum() == 0);
@@ -156,6 +163,29 @@ int main(int argc, char** argv)
         auto* selectedAntenna = widget.findChild<QPushButton*>("katAntenna1");
         CHECK(selectedMode->isChecked() && selectedAntenna->isChecked());
         CHECK(!selectedMode->isEnabled() && !selectedAntenna->isEnabled());
+        // Render each disabled button in both states: selection must change its
+        // background/border as well as retaining the checked property.
+        for (QPushButton* selected : {selectedMode, selectedAntenna}) {
+            const QImage checked = selected->grab().toImage();
+            selected->setChecked(false);
+            const QImage unchecked = selected->grab().toImage();
+            selected->setChecked(true);
+            const QColor selectedFill = AetherSDR::ThemeManager::instance().color(
+                selected, "color.accessory.key.meffa.active.background");
+            int changed = 0, selectedPixels = 0;
+            for (int y = 0; y < checked.height(); ++y) {
+                for (int x = 0; x < checked.width(); ++x) {
+                    changed += checked.pixel(x, y) != unchecked.pixel(x, y);
+                    selectedPixels += checked.pixelColor(x, y) == selectedFill;
+                }
+            }
+            if (selectedPixels <= checked.width()) {
+                std::fprintf(stderr, "selection %s: changed=%d selected=%d expected=%s center=%s\n",
+                             qPrintable(selected->objectName()), changed, selectedPixels,
+                             qPrintable(selectedFill.name()), qPrintable(checked.pixelColor(10,10).name()));
+            }
+            CHECK(changed > checked.width() && selectedPixels > checked.width());
+        }
     }
     AetherSDR::Kat500ModelTest::blocked(model, 3);
     AetherSDR::Kat500ModelTest::stale(model);
@@ -165,5 +195,18 @@ int main(int argc, char** argv)
     CHECK(!model.followTxFrequency());
     CHECK(widget.findChild<QPushButton*>("katAuto")->isChecked() &&
           widget.findChild<QPushButton*>("katAntenna1")->isChecked());
+    auto* transient = new AetherSDR::Kat500Applet;
+    transient->show();
+    transient->findChild<QPushButton*>("katSettings")->setChecked(true);
+    transient->findChild<QPushButton*>("katDebug")->setChecked(true);
+    transient->findChild<QPushButton*>("katDebugSave")->click();
+    QTest::qWait(250);
+    QPointer<QFileDialog> dialog = transient->findChild<QFileDialog*>("katDebugFileDialog");
+    CHECK(dialog);
+    delete transient;
+    CHECK(dialog && !dialog->isVisible() && !dialog->parent());
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QTest::qWait(250);
+    CHECK(dialog.isNull());
     return visibleTraces ? 0 : 1;
 }

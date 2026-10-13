@@ -67,11 +67,13 @@ class Kat500AdvancedWidgetTest
         auto* transient = new Kat500AdvancedWidget(&model);
         transient->show();
         transient->findChild<QPushButton*>("katChooseBackup")->click();
-        QTest::qWait(10);
+        QTest::qWait(250);
         QPointer<QFileDialog> dialog = transient->findChild<QFileDialog*>("katMaintenanceFileDialog");
         CHECK(dialog);
         delete transient;
+        CHECK(dialog && !dialog->isVisible() && !dialog->parent());
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QTest::qWait(250);
         CHECK(dialog.isNull());
         return 0;
     }

@@ -119,9 +119,12 @@ Kat500AdvancedWidget::Kat500AdvancedWidget(Kat500Model* model, QWidget* parent)
     m_configuration->setHorizontalHeaderLabels({tr("Setting"), tr("Value to apply"), tr("Confirmed")});
     m_configuration->verticalHeader()->hide();
     m_configuration->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_configuration->setColumnWidth(1, 80);
+    m_configuration->setColumnWidth(2, 80);
+    m_configuration->verticalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     m_configuration->setMinimumHeight(300);
     configuration->addWidget(m_configuration);
-    auto* edits = new QHBoxLayout;
+    auto* edits = new QVBoxLayout;
     auto* apply = button(tr("Apply changed fields"), "katApplyConfiguration", edits);
     auto* discard = button(tr("Cancel edits"), "katDiscardConfiguration", edits);
     auto* optimize = button(tr("Optimize for KPA500"), "katOptimizeKpa500", edits);
@@ -129,7 +132,7 @@ Kat500AdvancedWidget::Kat500AdvancedWidget(Kat500Model* model, QWidget* parent)
     root->addWidget(config);
     auto* backupGroup = new QGroupBox(tr("Complete native backup and restore"), this);
     auto* backup = new QVBoxLayout(backupGroup);
-    auto* files = new QHBoxLayout;
+    auto* files = new QVBoxLayout;
     auto* saveBackup = button(tr("Read and save backup…"), "katSaveBackup", files);
     auto* choose = button(tr("Choose backup…"), "katChooseBackup", files);
     backup->addLayout(files);
@@ -139,14 +142,16 @@ Kat500AdvancedWidget::Kat500AdvancedWidget(Kat500Model* model, QWidget* parent)
              "undo blocks already written. Manually power-cycle after a successful restore."),
           "katBackupHelp", backup);
     m_restoreConfirm =
-        new QCheckBox(tr("Replace this tuner's settings and stored matches with the previewed backup"), this);
+        new QCheckBox(tr("Confirm backup replacement"), this);
     m_restoreConfirm->setObjectName("katConfirmRestore");
     backup->addWidget(m_restoreConfirm);
+    label(tr("Replace this tuner's settings and stored matches with the previewed backup."),
+          "katRestoreConfirmationHelp", backup);
     auto* restore = button(tr("Restore and verify"), "katRestoreBackup", backup);
     root->addWidget(backupGroup);
     auto* faultGroup = new QGroupBox(tr("Stored fault history — newest first"), this);
     auto* faults = new QVBoxLayout(faultGroup);
-    auto* faultActions = new QHBoxLayout;
+    auto* faultActions = new QVBoxLayout;
     auto* readFaultsButton = button(tr("Read fault history"), "katReadFaults", faultActions);
     auto* exportFaults = button(tr("Export CSV…"), "katExportFaults", faultActions);
     faults->addLayout(faultActions);
@@ -163,7 +168,7 @@ Kat500AdvancedWidget::Kat500AdvancedWidget(Kat500Model* model, QWidget* parent)
     root->addWidget(faultGroup);
     auto* memoriesGroup = new QGroupBox(tr("Memories and reset"), this);
     auto* memories = new QVBoxLayout(memoriesGroup);
-    auto* memoryActions = new QHBoxLayout;
+    auto* memoryActions = new QVBoxLayout;
     m_memoryFrequency = new QSpinBox(this);
     m_memoryFrequency->setObjectName("katInspectFrequency");
     m_memoryFrequency->setAccessibleName(
@@ -198,14 +203,17 @@ Kat500AdvancedWidget::Kat500AdvancedWidget(Kat500Model* model, QWidget* parent)
     }
     eraseSelectors->addWidget(m_eraseAntenna);
     memories->addLayout(eraseSelectors);
-    m_eraseConfirm = new QCheckBox(this);
+    auto* eraseTarget = label({}, "katEraseTarget", memories);
+    m_eraseConfirm = new QCheckBox(tr("Confirm selected erase"), this);
     m_eraseConfirm->setObjectName("katConfirmErase");
     memories->addWidget(m_eraseConfirm);
     auto* erase = button(tr("Erase selected memories"), "katEraseMemories", memories);
     m_resetConfirm = new QCheckBox(
-        tr("Factory reset: erase settings/matches, restart, and reconnect at the default baud"), this);
+        tr("Confirm factory reset"), this);
     m_resetConfirm->setObjectName("katConfirmReset");
     memories->addWidget(m_resetConfirm);
+    label(tr("Erase settings and stored matches, restart, and reconnect at the default baud."),
+          "katResetConfirmationHelp", memories);
     auto* reset = button(tr("Factory reset"), "katFactoryReset", memories);
     root->addWidget(memoriesGroup);
     for (auto* table : {m_faults, m_memories}) {
@@ -215,7 +223,7 @@ Kat500AdvancedWidget::Kat500AdvancedWidget(Kat500Model* model, QWidget* parent)
         table->setMinimumHeight(150);
         table->setMaximumHeight(230);
     }
-    auto* links = new QHBoxLayout;
+    auto* links = new QVBoxLayout;
     auto* utility = button(tr("Official Elecraft Utility"), "katOfficialUtility", links);
     auto* help = button(tr("Official KAT500 manual"), "katOfficialHelp", links);
     root->addLayout(links);
@@ -305,14 +313,18 @@ Kat500AdvancedWidget::Kat500AdvancedWidget(Kat500Model* model, QWidget* parent)
         }
     });
     for (auto* check : {m_restoreConfirm, m_eraseConfirm, m_resetConfirm}) {
-        check->setAccessibleName(check->text());
+        check->setAccessibleName(check == m_restoreConfirm
+                                     ? tr("Confirm replacing this tuner's settings and stored matches with the previewed backup")
+                                     : check == m_resetConfirm
+                                           ? tr("Confirm factory reset: erase settings and matches, restart, and reconnect at the default baud")
+                                           : check->text());
         connect(check, &QCheckBox::toggled, this, &Kat500AdvancedWidget::refreshAvailability);
     }
-    const auto targetChanged = [this] {
+    const auto targetChanged = [this, eraseTarget] {
         m_eraseConfirm->setChecked(false);
-        m_eraseConfirm->setText(
-            tr("Confirm erase: %1 / %2").arg(m_eraseBand->currentText(), m_eraseAntenna->currentText()));
-        m_eraseConfirm->setAccessibleName(m_eraseConfirm->text());
+        const QString target = tr("Erase target: %1 / %2").arg(m_eraseBand->currentText(), m_eraseAntenna->currentText());
+        eraseTarget->setText(target);
+        m_eraseConfirm->setAccessibleName(tr("Confirm selected erase. %1").arg(target));
         refreshAvailability();
     };
     connect(m_eraseBand, &QComboBox::currentIndexChanged, this, targetChanged);
@@ -382,6 +394,16 @@ Kat500AdvancedWidget::Kat500AdvancedWidget(Kat500Model* model, QWidget* parent)
 }
 Kat500AdvancedWidget::~Kat500AdvancedWidget()
 {
+    if (m_fileDialog) {
+        QFileDialog* dialog = m_fileDialog.data();
+        m_fileDialog.clear();
+        disconnect(dialog, nullptr, this, nullptr);
+        dialog->reject();
+        // Native sheets can still be unwinding their completion callback.
+        // QWidget child teardown must not delete them synchronously.
+        dialog->setParent(nullptr);
+        dialog->deleteLater();
+    }
     if (m_model && m_ownOperation) {
         m_model->cancelOperation();
     }

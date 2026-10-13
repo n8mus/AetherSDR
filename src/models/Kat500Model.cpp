@@ -207,11 +207,7 @@ void Kat500Model::tick()
         }
     }
     if (m_active) {
-        if (now - m_sentAt > m_active->timeoutMs) {
-            const bool mutation = m_active->mutation;
-            if (operationBusy()) { fail(mutation ? QStringLiteral("Write completion is uncertain; no retry was sent.") : QStringLiteral("KAT500 reply timed out.")); }
-            else { m_active.reset(); m_queue.clear(); m_quarantineUntil = now + 2000; m_lastReply = -10000; }
-        }
+        expireActiveRequest();
         return;
     }
     if (now < m_quarantineUntil) { return; }
@@ -219,7 +215,24 @@ void Kat500Model::tick()
         if (now < m_nextPoll || operationBusy()) { return; }
         if (m_status.powerOn == false) { query("PS;"); m_nextPoll = now + 5000; }
         else if (m_status.identity == QStringLiteral("kat500")) { query("I;"); m_nextPoll = now + 5000; }
-        else { query(kPolls[m_pollIndex++ % kPolls.size()]); m_nextPoll = now + 200; }
+        else {
+            // Safety telemetry has its own cadence: the background inventory
+            // round-trip can exceed the five-second write freshness limit.
+            const qint64 tuneAge = fieldAgeMs(QStringLiteral("TP"));
+            const qint64 forwardAge = fieldAgeMs(QStringLiteral("VFWD"));
+            if (tuneAge < 0 || (tuneAge >= 1500 && (forwardAge >= 0 && tuneAge >= forwardAge))) {
+                query("TP;");
+            } else if (forwardAge < 0 || forwardAge >= 1500) {
+                query("VFWD;");
+            } else if (fieldAgeMs(QStringLiteral("VSWR")) < 0 || fieldAgeMs(QStringLiteral("VSWR")) >= 3000) {
+                query("VSWR;");
+            } else if (fieldAgeMs(QStringLiteral("VRFL")) < 0 || fieldAgeMs(QStringLiteral("VRFL")) >= 3000) {
+                query("VRFL;");
+            } else {
+                query(kPolls[m_pollIndex++ % kPolls.size()]);
+            }
+            m_nextPoll = now + 200;
+        }
     }
     if (m_waking || now - m_lastIo > 1500) {
         m_waking = true;
@@ -244,6 +257,17 @@ void Kat500Model::tick()
     if (wire.startsWith("DM") || wire.contains(";DM")) { m_memoryReading = true; }
     write(wire);
 }
+bool Kat500Model::expireActiveRequest()
+{
+    if (!m_active || m_now() - m_sentAt < m_active->timeoutMs) { return false; }
+    const bool mutation = m_active->mutation;
+    if (operationBusy()) {
+        fail(mutation ? QStringLiteral("Write completion is uncertain; no retry was sent.") : QStringLiteral("KAT500 reply timed out."));
+    } else {
+        m_active.reset(); m_queue.clear(); m_quarantineUntil = m_now() + 2000; m_lastReply = -10000;
+    }
+    return true;
+}
 void Kat500Model::receiveBytes(const QByteArray& bytes) { m_parser->feed(bytes); }
 void Kat500Model::receiveFrame(const QByteArray& frame)
 {
@@ -258,6 +282,10 @@ void Kat500Model::receiveFrame(const QByteArray& frame)
     // DM fields look like status replies. Keep the entire compound transaction
     // isolated, including any late continuation after cancellation.
     if (m_memoryReading) {
+        if (expireActiveRequest()) {
+            if (frame.endsWith(" UNUSED")) { m_dropMemory = false; }
+            return;
+        }
         if (m_memoryFrames.size() >= 40) { fail(QStringLiteral("Memory response exceeds six slots.")); return; }
         m_memoryFrames.append(frame);
         if (frame.endsWith(" UNUSED")) {
@@ -292,7 +320,9 @@ void Kat500Model::receiveFrame(const QByteArray& frame)
     }
     const bool matched = m_active && m_active->matches(frame);
     if (!matched) { return; }
-    Request completed = std::move(*m_active); m_active.reset();
+    Request completed = *m_active;
+    const bool expired = expireActiveRequest();
+    m_active.reset();
     const QByteArray requested = completed.wire;
     const quint64 generation = m_generation;
     m_lastReply = m_now();
@@ -316,7 +346,9 @@ void Kat500Model::receiveFrame(const QByteArray& frame)
         }
         emit statusUpdated(m_status); emit telemetryReceived(key,m_status);
     }
-    if (generation == m_generation && m_connected && completed.complete) { completed.complete(frame); }
+    // An expired status reply is still authoritative telemetry, but cannot
+    // complete an operation or queue its next maintenance request.
+    if (!expired && generation == m_generation && m_connected && completed.complete) { completed.complete(frame); }
 }
 bool Kat500Model::begin(const QString& name, bool writing)
 {
@@ -444,10 +476,25 @@ bool Kat500Model::recallFrequency(int frequencyKhz)
 {
     return requestValue(buildFrequency(frequencyKhz),"F;",[frequencyKhz](const Status& s) { return s.frequencyKhz == frequencyKhz; },QStringLiteral("Recall frequency"));
 }
+void Kat500Model::setFollowTxFrequency(bool enabled)
+{
+    if (m_followTx == enabled) { return; }
+    m_followTx = enabled;
+    m_followIntentKhz.reset();
+    m_followIntentAdmitted = false;
+}
 void Kat500Model::setEffectiveTxFrequencyHz(qint64 frequencyHz)
 {
-    if (!m_followTx || frequencyHz < 1000 || frequencyHz > 99999000 || !unavailableReason(true).isEmpty()) { return; }
+    if (!m_followTx || frequencyHz < 1000 || frequencyHz > 99999000) { return; }
     const int khz = static_cast<int>(frequencyHz / 1000);
+    if (m_followIntentKhz != khz) {
+        m_followIntentKhz = khz;
+        m_followIntentAdmitted = false;
+    }
+    if (m_followIntentAdmitted || !unavailableReason(true).isEmpty()) { return; }
+    // Availability can dispatch a deferred intent, never retry a previously
+    // admitted one after failure, cancellation, or a transport interruption.
+    m_followIntentAdmitted = true;
     if (m_status.frequencyKhz != khz) { recallFrequency(khz); }
 }
 void Kat500Model::pollTuneCancellation()

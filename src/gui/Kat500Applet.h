@@ -22,6 +22,7 @@ class Kat500Applet : public CanonApplet
     Q_OBJECT
   public:
     explicit Kat500Applet(QWidget* parent = nullptr);
+    ~Kat500Applet() override;
     void setModel(Kat500Model* model);
     void setFloating(bool floating);
     QSize sizeHint() const override;

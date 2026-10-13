@@ -30,7 +30,7 @@ Use a local USB serial port or a raw TCP serial bridge such as ser2net or aether
 
 **ON/OFF** shows confirmed power. Click it to request the opposite state; the label changes after readback. Silence is stale, not OFF. **Tune** requests tuner search only after your explicit click; supply RF according to the Elecraft manual. **Cancel** requests cancellation while the tuner reports an active search. AetherSDR does not generate a radio carrier for these controls.
 
-**Auto**, **Manual** and **Bypass** select the tuner mode. **ANT 1**, **ANT 2** and **ANT 3** remain visible. Read **Advanced → Read configuration** to establish availability for the confirmed band; disabled antennas show a reason. **Clear fault** clears the current fault, not stored fault history.
+**Auto**, **Manual** and **Bypass** select the tuner mode. **ANT 1**, **ANT 2** and **ANT 3** remain visible. Read **Advanced → Read configuration** to establish availability for the confirmed band; disabled antennas show a reason. Confirmed mode and antenna selections remain visible with dimmed text while actions are unavailable. **Clear fault** clears the current fault, not stored fault history.
 
 **Mini** retains Tune/Cancel, modes, antennas, fault status, SWR, bypass SWR, frequency/band, physical bypass, attenuator and amplifier key interrupt. **Full** exposes secondary controls. Full, Mini and popped-out windows scroll when their contents exceed the available height.
 
@@ -38,11 +38,11 @@ Expand **Manual controls** for C/L values and eight relay bits each, **Capacitor
 
 **History** plots last-observed SWR and forward/reflected ADC counts for five minutes, with gaps for missing replies. ADC counts are not watts. SWR can describe an earlier physical RF measurement. **Settings** shows identity, installed firmware, serial, DIRECT/NETWORK endpoint, baud where applicable, and freshness. **Debug** offers normal state/errors or **Verbose** wire and wake traffic, with copy, atomic save, clear and paused display. Debug TX means serial writes, not RF.
 
-**Follow TX frequency** defaults off. Enabling it follows the effective TX slice frequency, including XIT and split offsets. Eligibility returning resubmits the current frequency, never a saved tuner state. It does not key a radio or couple radio carrier generation to tuner Tune.
+**Follow TX frequency** defaults off. Enabling it follows the effective TX slice frequency, including XIT and split offsets. When eligibility returns, a frequency change that has not yet been attempted can proceed. A failed or canceled request is not retried for the same frequency; change the effective TX frequency or switch Follow off and on to authorize a fresh attempt. It does not key a radio or couple radio carrier generation to tuner Tune.
 
 ## Using Advanced
 
-Open **Peripherals → Elecraft KAT500 → Advanced**, or **Settings → Open Advanced settings** in the applet. Opening the panel sends no maintenance request.
+Open **Peripherals → Elecraft KAT500 → Advanced**, or **Settings → Open Advanced settings** in the applet. Opening the panel sends no maintenance request. Sections fit the detail pane and scroll vertically; wide fault and memory tables scroll within their own table.
 
 ### Configuration
 
@@ -65,13 +65,13 @@ Click **Read configuration** before editing. Double-click a **Value to apply** c
 
 **Read and save backup...** acquires both EEPROM regions (66,560 bytes) and saves an atomic native `.KAT500Config` file. **Choose backup...** validates bounded size, complete coverage and checksum locally, then previews identity and firmware. Choosing a file does not change the tuner.
 
-Restore requires a complete firmware 02.16 backup matching the connected tuner serial/firmware, fresh idle state and zero forward ADC count. Check the explicit replacement confirmation, then click **Restore and verify**. Each permitted block is verified by exact readback; identity and fault history ranges are excluded. Progress and **Cancel operation** are available. Cancellation or failure leaves confirmed blocks applied; no automatic write retry, replay or reboot occurs. Manually power-cycle after success to load restored settings.
+Restore requires a complete firmware 02.16 backup matching the connected tuner serial/firmware, fresh idle state and zero forward ADC count. Review the replacement explanation and check **Confirm backup replacement**, then click **Restore and verify**. Each permitted block is verified by exact readback; identity and fault history ranges are excluded. Progress and **Cancel operation** are available. Cancellation or failure leaves confirmed blocks applied; no automatic write retry, replay or reboot occurs. Manually power-cycle after success to load restored settings.
 
 ### Fault history, memories and reset
 
 **Read fault history** shows newest records first, elapsed device seconds, decoded fault, ADC counts, SWR and raw bytes. Power On records differ from the current no-fault state. Unknown records remain visible. **Export CSV...** saves the captured records.
 
-**Inspect bin** reads matches for a selected kHz frequency, or **Current frequency**. Stored antenna/C/L rows do not alter live controls. To erase, select band and antenna, check the confirmation naming that target, and click **Erase selected memories**. Completion confirms the command barrier; inspect the bin to verify the resulting contents. **Factory reset** has a separate confirmation explaining erased settings/matches, restart and default-baud reconnection. Neither action runs on connect or page open.
+**Inspect bin** reads matches for a selected kHz frequency, or **Current frequency**. Stored antenna/C/L rows do not alter live controls. To erase, select band and antenna, review the displayed erase target, check **Confirm selected erase**, and click **Erase selected memories**. Completion confirms the command barrier; inspect the bin to verify the resulting contents. **Confirm factory reset** has a separate explanation of erased settings/matches, restart and default-baud reconnection. Neither action runs on connect or page open.
 
 ## Troubleshooting
 

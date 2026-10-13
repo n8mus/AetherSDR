@@ -17,6 +17,10 @@
 #include "core/PeripheralSettings.h"
 #include <QListWidget>
 #include <QPushButton>
+#include <QFileDialog>
+#include <QPointer>
+#include <QScrollArea>
+#include <QScrollBar>
 
 #include <QApplication>
 #include <QLabel>
@@ -95,7 +99,42 @@ private slots:
         QCOMPARE(devices->currentItem()->data(Qt::UserRole).toString(), QStringLiteral("kat500"));
         auto* toggle = dialog.findChild<QPushButton*>("peripheralAdvanced_kat500");
         QVERIFY(toggle && toggle->isChecked() && toggle->isVisible());
-        QVERIFY(dialog.findChild<QWidget*>("kat500Advanced")->isVisible());
+        auto* advanced = dialog.findChild<QWidget*>("kat500Advanced");
+        QVERIFY(advanced->isVisible());
+        QTest::qWait(30);
+        QCOMPARE(dialog.width(), 960);
+        bool verticalScroll = false;
+        for (QWidget* ancestor = advanced->parentWidget(); ancestor; ancestor = ancestor->parentWidget()) {
+            if (auto* scroll = qobject_cast<QScrollArea*>(ancestor)) {
+                QCOMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+                verticalScroll |= scroll->verticalScrollBar()->maximum() > 0;
+                QVERIFY(advanced->width() <= scroll->viewport()->width());
+            }
+        }
+        QVERIFY(verticalScroll);
+        grab(&dialog, "kat500-advanced.png");
+    }
+
+    void kat500ChooserClosesWithRealParent()
+    {
+        AppSettings::instance().load();
+        PeripheralSettings::setVisibleDeviceIds({QStringLiteral("kat500")});
+        RadioModel model;
+        Kat500Model tuner;
+        QPointer<RadioSetupDialog> dialog = new RadioSetupDialog(
+            &model, nullptr, nullptr, nullptr, nullptr, nullptr,
+            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &tuner);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->show();
+        dialog->revealKat500AdvancedSettings();
+        dialog->findChild<QPushButton*>("katChooseBackup")->click();
+        QTest::qWait(250);
+        QPointer<QFileDialog> chooser = dialog->findChild<QFileDialog*>("katMaintenanceFileDialog");
+        QVERIFY(chooser);
+        QVERIFY(dialog->close());
+        QTest::qWait(500);
+        QVERIFY(dialog.isNull());
+        QVERIFY(chooser.isNull());
     }
 
     void gpsPairsSpreadAndStayTogether()

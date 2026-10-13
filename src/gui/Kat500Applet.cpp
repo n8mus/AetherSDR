@@ -11,6 +11,7 @@
 #include <QClipboard>
 #include <QFileDialog>
 #include <QHBoxLayout>
+#include <QGridLayout>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
@@ -189,13 +190,13 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
             }
             refresh();
         });
-        auto* bits = new QHBoxLayout;
+        auto* bits = new QGridLayout;
         for (int bit = 0; bit < 8; ++bit) {
             auto* check = new QCheckBox(QString::number(bit), this);
             check->setObjectName(QStringLiteral("kat%1Bit%2").arg(kind == 0 ? "C" : "L").arg(bit));
             check->setAccessibleName(
                 tr("%1 relay bit %2").arg(kind == 0 ? "Capacitor" : "Inductor").arg(bit));
-            bits->addWidget(check);
+            bits->addWidget(check, bit / 4, bit % 4);
             (kind == 0 ? m_capBits : m_indBits)[bit] = check;
             connect(check, &QCheckBox::clicked, this, [this, kind, bit](bool on) {
                 if (m_model) {
@@ -250,7 +251,7 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
     m_frequencyRecall->setObjectName("katRecallFrequency");
     m_frequencyRecall->setAccessibleName(tr("Memory frequency in kHz"));
     m_frequencyRecall->setRange(1, 99999);
-    frequencyRow->addWidget(m_frequencyRecall, 1);
+    manual->addWidget(m_frequencyRecall);
     auto* recall = button(tr("Recall kHz"), "katRecall", frequencyRow);
     auto* memorize = button(tr("Memorize"), "katMemorize", frequencyRow);
     manual->addLayout(frequencyRow);
@@ -314,7 +315,7 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
     debug->addWidget(m_verbose);
     auto* debugActions = new QHBoxLayout;
     m_pause = new QCheckBox(tr("Pause display"), this);
-    debugActions->addWidget(m_pause);
+    debug->addWidget(m_pause);
     auto* copy = button(tr("Copy"), "katDebugCopy", debugActions);
     auto* save = button(tr("Save…"), "katDebugSave", debugActions);
     auto* clearDebug = button(tr("Clear"), "katDebugClear", debugActions);
@@ -384,15 +385,31 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
     m_timer.start();
     applyCanonSheet(bodyWidget(), [] {
         return QStringLiteral(
-            "QPushButton { padding: 4px; } QPushButton:checked:enabled { background: "
+            "QPushButton { padding: 4px; border: 1px solid {{color.canon.lineHi}}; } QPushButton:checked:enabled { background: "
             "{{color.accessory.key.meffa.active.background}}; color: "
             "{{color.accessory.key.meffa.active.foreground}}; } QPushButton#katBypass:checked:enabled { "
             "background: {{color.accessory.key.standby.background}}; color: "
             "{{color.accessory.key.standby.foreground}}; } QPushButton:disabled { color: "
-            "{{color.text.secondary}}; background: {{color.background.2}}; }");
+            "{{color.text.secondary}}; background: {{color.background.2}}; } "
+            "QPushButton:checked:disabled { background: {{color.accessory.key.meffa.active.background}}; "
+            "color: {{color.text.secondary}}; border-color: {{color.accessory.key.meffa.active.border}}; } "
+            "QPushButton#katBypass:checked:disabled { background: {{color.accessory.key.standby.background}}; "
+            "color: {{color.text.secondary}}; border-color: {{color.accessory.key.standby.foreground}}; }");
     });
     presentation();
     refresh();
+}
+Kat500Applet::~Kat500Applet()
+{
+    if (m_fileDialog) {
+        QFileDialog* dialog = m_fileDialog.data();
+        m_fileDialog.clear();
+        disconnect(dialog, nullptr, this, nullptr);
+        dialog->reject();
+        // Let the native sheet finish closing before QObject destruction.
+        dialog->setParent(nullptr);
+        dialog->deleteLater();
+    }
 }
 void Kat500Applet::setModel(Kat500Model* model)
 {
