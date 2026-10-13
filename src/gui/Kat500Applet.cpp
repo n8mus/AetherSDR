@@ -9,7 +9,9 @@
 #include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
+#include <QColor>
 #include <QFileDialog>
+#include <QFont>
 #include <QHBoxLayout>
 #include <QGridLayout>
 #include <QJsonDocument>
@@ -26,6 +28,7 @@
 #include <QSpinBox>
 #include <QStyle>
 #include <QVBoxLayout>
+#include <QVector>
 #include <algorithm>
 namespace AetherSDR
 {
@@ -226,9 +229,14 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
     m_swr->installEventFilter(this);
     connect(m_swr, &QPushButton::pressed, this, &Kat500Applet::refresh);
     connect(m_swr, &QPushButton::released, this, &Kat500Applet::refresh);
-    m_swr->setFixedWidth(82);
+    m_swr->setFixedWidth(62);
     swrRow->setSpacing(4);
-    m_swrGauge = new HGauge(1, 5, 5, "", "", {{1, "1"}, {5, "5"}}, this);
+    QVector<HGauge::Tick> swrTicks;
+    for (int step = 10; step <= 30; ++step) {
+        const float value = step / 10.0f;
+        swrTicks.append({value, step % 5 == 0 ? QString::number(value) : QString()});
+    }
+    m_swrGauge = new HGauge(1, 3, 2.5f, "", "", swrTicks, this, 2.0f);
     m_swrGauge->setFixedHeight(24);
     m_swrGauge->setObjectName("katSwrGauge");
     swrRow->addWidget(m_swrGauge, 1);
@@ -407,8 +415,8 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
     auto* help = label("katHistoryHelp", settings);
     help->setText(tr("History: SWR and forward/reflected ADC counts, last observed, 5 minutes. Gaps mean "
                      "missing replies; ADC counts are not watts. SWR may describe an earlier RF measurement. "
-                     "Hold the SWR pill (or Space) to compare bypass SWR; release to return. Held means "
-                     "a retained measurement, not current RF. Debug TX means serial writes, not RF."));
+                     "Hold the SWR pill (or Space) to compare bypass SWR; release to return. Readings remain "
+                     "after RF stops. Debug TX means serial writes, not RF."));
     auto* advanced = button(tr("Open Advanced settings"), "katAdvancedSettings", settings);
     connect(advanced, &QPushButton::clicked, this, &Kat500Applet::advancedSettingsRequested);
     m_debugToggle = button(tr("▸ Debug"), "katDebug", settings);
@@ -490,7 +498,8 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
     m_timer.setInterval(500);
     connect(&m_timer, &QTimer::timeout, this, &Kat500Applet::refresh);
     m_timer.start();
-    applyCanonSheet(bodyWidget(), [] {
+    applyCanonSheet(bodyWidget(), [this] {
+        m_swrGauge->setTickMarkColor(ThemeManager::instance().color(this, "color.canon.muted"));
         return checkRules() + QStringLiteral(
             "QWidget#katContent, QWidget#katViewport, QScrollArea#katScroll { background: {{color.canon.ground}}; border: none; }"
             "QLabel, QCheckBox { color: {{color.canon.muted}}; font-size: 10px; }"
@@ -508,7 +517,7 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
             "QSpinBox:focus { border-color: {{color.canon.cyan}}; } "
             "QSpinBox:disabled { color: {{color.canon.muted}}; border-color: {{color.canon.muted}}; } "
             "QPushButton[katPill=true] { font-size: 9px; padding: 0 2px; color: {{color.canon.muted}}; "
-            "background: {{color.canon.nested}}; } "
+            "background: {{color.canon.ground}}; border-color: {{color.canon.line}}; } "
             "QPushButton[katPill=true]:focus { border-color: {{color.canon.cyan}}; } "
             "QPushButton[katTone=warn] { color: {{color.accent.warning}}; } "
             "QPushButton[katTone=live] { color: {{color.canon.inkSoft}}; } "
@@ -638,14 +647,14 @@ void Kat500Applet::refresh()
     };
     const bool rf = m_model && m_model->isResponding() && s.powerOn == true &&
                     s.forwardAdc.value_or(0) > 0 && fresh("VFWD") && fresh("VSWR");
-    const bool held = swr && (preview || !rf);
-    const QString swrText = tr("%1 %2%3").arg(preview ? tr("BYP") : tr("SWR"), reading(swr),
-                                             held ? tr(" held") : QString());
+    const QString swrText = tr("%1 %2").arg(preview ? tr("BYP") : tr("SWR"), reading(swr));
     const QString swrHelp =
         tr("%1. Hold this pill or Space to view the last bypass SWR; release to return to adjusted SWR. "
-           "This only changes the display, not the tuner. Held readings are retained measurements, "
-           "not current RF.").arg(preview ? tr("Bypass SWR: %1").arg(reading(swr))
-                                          : tr("Adjusted SWR: %1").arg(reading(swr)));
+           "This only changes the display, not the tuner. Readings can remain after RF stops. "
+           "The meter spans 1–3, amber from 2 and red from 2.5; values above 3 remain exact in the pill.")
+            .arg(preview ? tr("Last bypass SWR: %1").arg(reading(swr))
+                         : rf ? tr("Adjusted SWR: %1").arg(reading(swr))
+                              : tr("Last observed adjusted SWR: %1 (no fresh RF indication)").arg(reading(swr)));
     pill(m_swr, swrText, swrHelp, preview ? "warn" : rf ? "live" : "muted");
     if (preview != m_showingBypass) {
         m_swrGauge->setValueImmediate(swr.value_or(1));
