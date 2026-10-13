@@ -12,6 +12,7 @@
 #include <functional>
 #include <fstream>
 #include <cstdlib>
+#include <memory>
 #include <numbers>
 #include <numeric>
 #include <span>
@@ -99,7 +100,9 @@ Run feed(Pipeline& pipeline, std::uint64_t& position, double seconds, const Sign
 }
 Run render(const T::State& recipe, double seconds, const Signal& signal)
 {
-    Pipeline pipeline(recipe.receivers.size());
+    // The fixed mixer buffers exceed the default Windows thread stack.
+    const auto pipelineOwner = std::make_unique<Pipeline>(recipe.receivers.size());
+    Pipeline& pipeline = *pipelineOwner;
     if (!pipeline.prepare(recipe, true) || !ready(pipeline) || !pipeline.adopt()) {
         check(false, "AM/SAM bank prepares and adopts"); return {};
     }
@@ -199,7 +202,8 @@ void fadesRetunesAndEpochs()
 {
     constexpr std::array modes{T::Mode::Sam, T::Mode::Am};
     auto recipe = state(modes);
-    Pipeline pipeline(2);
+    const auto pipelineOwner = std::make_unique<Pipeline>(2);
+    Pipeline& pipeline = *pipelineOwner;
     check(pipeline.prepare(recipe, true) && ready(pipeline) && pipeline.adopt(), "fade fixture adopts");
     std::uint64_t position = 0;
     const auto first = feed(pipeline, position, 2.5, [](double t) { return am(t, 20900, 1000); });
@@ -362,7 +366,8 @@ void refusals()
 {
     constexpr std::array modes{T::Mode::Am, T::Mode::Sam};
     const auto good = state(modes);
-    Pipeline pipeline(2);
+    const auto pipelineOwner = std::make_unique<Pipeline>(2);
+    Pipeline& pipeline = *pipelineOwner;
     for (int invalid = 0; invalid < 6; ++invalid) {
         auto bad = good;
         auto& rx = bad.receivers[0];
@@ -397,7 +402,8 @@ int externalFixture(const char* inputPath, const char* outputPath)
     }
     recipe.receivers.resize(1); recipe.receivingIds = {0};
     recipe.receivers[0].passband.carrierHz = kCenter + 40000;
-    Pipeline pipeline;
+    const auto pipelineOwner = std::make_unique<Pipeline>();
+    Pipeline& pipeline = *pipelineOwner;
     if (!pipeline.prepare(recipe, true) || !ready(pipeline) || !pipeline.adopt()) { return 3; }
     std::array<float, kChunk * 2> raw{};
     std::array<std::complex<float>, kChunk> iq{};

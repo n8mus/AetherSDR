@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <memory>
 #include <numbers>
 #include <span>
 #include <thread>
@@ -67,7 +68,9 @@ using Audio = std::array<std::vector<float>, 4>;
 Audio render(T::State recipe, const std::vector<Tone>& tones, double seconds = 1.6,
              double noise = 0.0, double impulse = 0.0, bool agcStep = false, bool quantize = false)
 {
-    Pipeline pipeline(4);
+    // The fixed mixer buffers exceed the default Windows thread stack.
+    const auto pipelineOwner = std::make_unique<Pipeline>(4);
+    Pipeline& pipeline = *pipelineOwner;
     Audio audio;
     if (!pipeline.prepare(recipe, true) || !ready(pipeline) || !pipeline.adopt()) {
         check(false, "real sideband receiver bank prepares and adopts"); return audio;
@@ -447,7 +450,8 @@ void morseThroughRadioDsp()
     recipe.receivers[0].passband.stableId = 0;
     recipe.receivers[0].audioMute = true;
     recipe.receivingIds = {0};
-    Pipeline pipeline;
+    const auto pipelineOwner = std::make_unique<Pipeline>();
+    Pipeline& pipeline = *pipelineOwner;
     if (!pipeline.prepare(recipe, true) || !ready(pipeline) || !pipeline.adopt()) {
         check(false, "CW Morse production bank adopts"); return;
     }
@@ -496,7 +500,8 @@ void morseThroughRadioDsp()
 
 void refusals()
 {
-    Pipeline pipeline(4);
+    const auto pipelineOwner = std::make_unique<Pipeline>(4);
+    Pipeline& pipeline = *pipelineOwner;
     const auto good = state();
     auto badNotch = good;
     badNotch.trackingNotches.entries = {{1, kCenter, 199, true}};
@@ -531,7 +536,8 @@ int externalFixture(const char* inputPath, const char* outputPath)
     auto recipe = state();
     recipe.receivers.resize(1); recipe.receivingIds = {0};
     recipe.receivers[0].passband.carrierHz = kCenter + 40000;
-    Pipeline pipeline;
+    const auto pipelineOwner = std::make_unique<Pipeline>();
+    Pipeline& pipeline = *pipelineOwner;
     if (!pipeline.prepare(recipe, true) || !ready(pipeline) || !pipeline.adopt()) { return 3; }
     std::array<float, kChunk * 2> raw{};
     std::array<std::complex<float>, kChunk> iq{};

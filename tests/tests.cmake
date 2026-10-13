@@ -1003,6 +1003,10 @@ set_tests_properties(wdsp_wbfm_test PROPERTIES TIMEOUT 120)
 add_executable(wdsp_channel_test tests/wdsp_channel_test.cpp)
 target_link_libraries(wdsp_channel_test PRIVATE aethercore)
 add_test(NAME wdsp_channel_test COMMAND wdsp_channel_test)
+if(WIN32)
+    # The Windows timer tick lengthens WDSP's bounded channel-stop waits.
+    set_tests_properties(wdsp_channel_test PROPERTIES TIMEOUT 600)
+endif()
 
 # Releasing the noise-blanker hold must not flush the stage: the blanker still
 # blanks impulses in the first 200 ms after the edge, unlike a re-enabled one.
@@ -1754,6 +1758,11 @@ target_include_directories(rtl_ssb_cw_pipeline_test PRIVATE src)
 target_link_libraries(rtl_ssb_cw_pipeline_test PRIVATE aethercore Qt6::Core)
 add_test(NAME rtl_ssb_cw_pipeline_test COMMAND rtl_ssb_cw_pipeline_test)
 set_tests_properties(rtl_ssb_cw_pipeline_test PROPERTIES TIMEOUT 180)
+if(WIN32)
+    # Paced IQ and bounded channel-stop waits use the coarser Windows timer tick.
+    set_tests_properties(rtl_am_sam_pipeline_test rtl_ssb_cw_pipeline_test
+        PROPERTIES TIMEOUT 600)
+endif()
 
 add_executable(cw_mode_gate_test tests/cw_mode_gate_test.cpp)
 target_include_directories(cw_mode_gate_test PRIVATE src)
