@@ -51,6 +51,12 @@ class Kat500ModelTest
         model.m_received["TP"] = 100;
         model.m_received["VFWD"] = 100;
     }
+    static void bypass(Kat500Model& model, Kat500::Mode mode, bool bypassed)
+    {
+        model.m_status.mode = mode;
+        model.m_status.bypassed = bypassed;
+        emit model.statusUpdated(model.m_status);
+    }
     static void antennas(Kat500Model& model)
     {
         for (int i = 1; i <= 3; ++i) {
@@ -146,6 +152,15 @@ int main(int argc, char** argv)
     widget.setModel(&model);
     CHECK(widget.findChild<QPushButton*>("katPower")->text() == "ON" && tune->isEnabled());
     CHECK(widget.findChild<QLabel*>("katReadiness")->text() == "READY");
+    auto* miniState = widget.findChild<QLabel*>("katMiniState");
+    CHECK(miniState->property("katTone") == "ok");
+    AetherSDR::Kat500ModelTest::bypass(model, AetherSDR::Kat500::Mode::Bypass, true);
+    CHECK(miniState->text() == "BYPASS · ANT 1 · READY");
+    CHECK(miniState->property("katTone") == "warn");
+    AetherSDR::Kat500ModelTest::bypass(model, AetherSDR::Kat500::Mode::Auto, true);
+    CHECK(miniState->property("katTone") == "warn");
+    AetherSDR::Kat500ModelTest::bypass(model, AetherSDR::Kat500::Mode::Auto, false);
+    CHECK(miniState->property("katTone") == "ok");
     CHECK(widget.findChild<QLabel*>("katAvailability")->isVisible());
     CHECK(widget.findChild<QLabel*>("katAvailability")->text().contains("ms since reply"));
     CHECK(!widget.findChild<QPushButton*>("katAntenna1")->isEnabled());

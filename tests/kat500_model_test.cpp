@@ -230,6 +230,49 @@ static int lateMemoryTerminatorCannotPublish()
     CHECK(peer.model.isConnected()); // The late terminator still completes drain.
     return 0;
 }
+// Antenna controls must become available from polling, without opening Advanced.
+static int antennaPermissionsLoadWhilePolling()
+{
+    Peer peer;
+    int band = 5;
+    const QMap<QByteArray,QByteArray> replies{
+        {"VRFL;","VRFL0;"}, {"VSWR;","VSWR1.00;"}, {"VSWRB;","VSWRB1.00;"},
+        {"F;","F14074;"}, {"MD;","MDA;"}, {"AMPI;","AMPI0;"},
+        {"ATTN;","ATTN0;"}, {"FLT;","FLT0;"}, {"FY;","FY 14060-14079;"},
+        {"FC;","FC14074;"}, {"FX;","FX14074;"}};
+    const auto transport = peer.model.m_write;
+    peer.model.m_write = [&](const QByteArray& bytes) {
+        if (bytes == "BN;" || replies.contains(bytes)) {
+            peer.wire.append(bytes);
+            peer.model.receiveBytes(bytes == "BN;" ? "BN" + QByteArray::number(band) + ';' : replies[bytes]);
+            return true;
+        }
+        return transport(bytes);
+    };
+    QSignalSpy busy(&peer.model, &Kat500Model::operationBusyChanged);
+    CHECK(peer.model.configuration().isEmpty());
+    for (int i = 0; i < 150; ++i) { peer.step(); }
+    CHECK(peer.model.configuration().size() == 3);
+    CHECK(peer.model.configuration().value({Setting::EnabledAntenna,5,1},-1) == 1);
+    CHECK(peer.model.configuration().value({Setting::EnabledAntenna,5,2},-1) == 0);
+    CHECK(peer.model.configuration().value({Setting::EnabledAntenna,5,3},-1) == 1);
+    CHECK(!peer.model.setAntenna(2));
+    CHECK(peer.setters.isEmpty() && busy.isEmpty());
+    band = 3;
+    for (int i = 0; i < 150; ++i) { peer.step(); }
+    CHECK(peer.model.status().band == 3);
+    CHECK(peer.model.configuration().contains({Setting::EnabledAntenna,3,1}));
+    CHECK(peer.model.configuration().contains({Setting::EnabledAntenna,3,2}));
+    CHECK(peer.model.configuration().contains({Setting::EnabledAntenna,3,3}));
+    peer.model.transportClosed();
+    CHECK(peer.model.configuration().isEmpty());
+    peer.model.transportOpened(); peer.model.m_timer.stop();
+    for (int i = 0; i < 150; ++i) { peer.step(); }
+    CHECK(peer.model.configuration().size() == 3);
+    CHECK(peer.model.configuration().contains({Setting::EnabledAntenna,3,3}));
+    CHECK(peer.setters.isEmpty() && busy.isEmpty());
+    return 0;
+}
 static int ordinaryPollLatencyKeepsSafetyFresh()
 {
     Peer peer;
@@ -497,7 +540,7 @@ static int run()
     CHECK(next() == ";"); CHECK(!sent.contains("MDM;MD;"));
     model.transportClosed();
     const int failures = followDoesNotRetryAdmittedIntent() | lateEepromRepliesStopRestore(false) | lateEepromRepliesStopRestore(true) |
-        lateMemoryTerminatorCannotPublish() | ordinaryPollLatencyKeepsSafetyFresh() | settlingReadback() | rejectNewUnsafeReadback() | doNotExposeFailedBackup() |
+        lateMemoryTerminatorCannotPublish() | antennaPermissionsLoadWhilePolling() | ordinaryPollLatencyKeepsSafetyFresh() | settlingReadback() | rejectNewUnsafeReadback() | doNotExposeFailedBackup() |
         cancelResetDuringDiagnostic() | canceledMemoryDrainsWithoutTelemetry();
     return failures ? 1 : stateful();
 }

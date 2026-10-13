@@ -559,7 +559,7 @@ void Kat500Applet::refresh()
             if (!s.band ||
                 !m_model->configuration().contains({Kat500::Setting::EnabledAntenna, *s.band, i + 1})) {
                 antennaReason =
-                    tr("Read Advanced configuration to confirm antenna availability for this band.");
+                    tr("Reading antenna availability for this band from the tuner.");
             } else if (m_model->configuration().value({Kat500::Setting::EnabledAntenna, *s.band, i + 1}) ==
                        0) {
                 antennaReason = tr("This antenna is disabled on the confirmed band.");
@@ -595,10 +595,11 @@ void Kat500Applet::refresh()
     const QStringList modes{tr("AUTO"), tr("MANUAL"), tr("BYPASS")};
     const QString mode = s.mode ? modes.value(static_cast<int>(*s.mode)) : tr("MODE ?");
     const QString antenna = s.antenna ? tr("ANT %1").arg(*s.antenna) : tr("ANT ?");
+    const bool bypassed = s.mode == Kat500::Mode::Bypass || s.bypassed == true;
     pill(m_miniState, tr("%1 · %2 · %3").arg(mode, antenna, readiness),
-         tr("Confirmed mode: %1. Antenna: %2. %3")
-             .arg(mode, antenna, m_readiness->accessibleDescription()),
-         ready ? "ok" : "warn");
+         tr("Confirmed mode: %1. Antenna: %2. Physical bypass: %3. %4")
+             .arg(mode, antenna, flag(s.bypassed), m_readiness->accessibleDescription()),
+         ready && !bypassed ? "ok" : "warn");
     text(m_availability, tr("%1\nLast observed SWR: %2 ms since reply.")
                              .arg(ready ? tr("Tuner ready.") : reason)
                              .arg(m_model ? m_model->fieldAgeMs("VSWR") : -1));

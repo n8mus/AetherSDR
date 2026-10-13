@@ -229,7 +229,23 @@ void Kat500Model::tick()
             } else if (fieldAgeMs(QStringLiteral("VRFL")) < 0 || fieldAgeMs(QStringLiteral("VRFL")) >= 3000) {
                 query("VRFL;");
             } else {
-                query(kPolls[m_pollIndex++ % kPolls.size()]);
+                // Antenna availability belongs to normal operation, independent
+                // of opening Advanced. Read one missing permission per poll so
+                // safety telemetry keeps priority while the band is populated.
+                if (m_status.identity == QStringLiteral("KAT500") && m_status.band) {
+                    for (int antenna = 1; antenna <= 3; ++antenna) {
+                        const SettingKey key{Setting::EnabledAntenna, *m_status.band, antenna};
+                        if (m_configuration.contains(key)) { continue; }
+                        enqueue({configurationQuery(key), [key](const QByteArray& frame) {
+                            return configurationValue(key, frame).has_value();
+                        }, [this,key](const QByteArray& frame) {
+                            m_configuration[key] = *configurationValue(key, frame);
+                            emit configurationRead(m_configuration);
+                        }});
+                        break;
+                    }
+                }
+                if (m_queue.isEmpty()) { query(kPolls[m_pollIndex++ % kPolls.size()]); }
             }
             m_nextPoll = now + 200;
         }
