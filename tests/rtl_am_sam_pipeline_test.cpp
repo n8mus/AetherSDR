@@ -333,7 +333,10 @@ void gainNoiseAndNotches()
             noiseState = 1664525u * noiseState + 1013904223u;
             return (double(noiseState) / 4294967296.0 - .5) * .05;
         };
-        return am(t, 20000, 1500, .04, .3) + std::complex<double>(noise(), noise());
+        // Explicit sequencing gives every compiler the same complex noise fixture.
+        const double noiseQ = noise();
+        const double noiseI = noise();
+        return am(t, 20000, 1500, .04, .3) + std::complex<double>(noiseI, noiseQ);
     });
     const auto snr = [](const auto& pcm) {
         const double signal = std::pow(magnitude(pcm, 1500), 2) / 2;
