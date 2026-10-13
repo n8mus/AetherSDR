@@ -2,6 +2,7 @@
 #include "core/AppSettings.h"
 #include "core/ThemeManager.h"
 #include "gui/Kat500Applet.h"
+#include "gui/HGauge.h"
 #include "models/Kat500Model.h"
 #include <QApplication>
 #include <QCheckBox>
@@ -42,6 +43,11 @@ class Kat500ModelTest
         model.m_status.mode = Kat500::Mode::Auto;
         model.m_status.capacitorMask = 4;
         model.m_status.frequencyKhz = 14096;
+        model.m_status.countedFrequencyKhz = 14088;
+        model.m_status.catFrequencyKhz = 14090;
+        model.m_status.frequencyBin = "14080-14099";
+        model.m_status.side = Kat500::CapacitorSide::Transmitter;
+        model.m_status.inductorMask = 3;
         model.m_status.swr = 1.33;
         model.m_status.bypassSwr = 1.0;
         model.m_status.faultCode = 0;
@@ -55,6 +61,17 @@ class Kat500ModelTest
     {
         model.m_status.mode = mode;
         model.m_status.bypassed = bypassed;
+        emit model.statusUpdated(model.m_status);
+    }
+    static void rf(Kat500Model& model, bool present)
+    {
+        model.m_status.forwardAdc = present ? 100 : 0;
+        model.m_received["VSWR"] = model.m_received["VFWD"] = 100;
+        emit model.statusUpdated(model.m_status);
+    }
+    static void interrupt(Kat500Model& model, bool blocked)
+    {
+        model.m_status.ampKeyInterrupted = blocked;
         emit model.statusUpdated(model.m_status);
     }
     static void antennas(Kat500Model& model)
@@ -102,7 +119,7 @@ int main(int argc, char** argv)
     auto* scroll = widget.findChild<QScrollArea*>("katScroll");
     CHECK(scroll);
     for (const int width : {238, 248, 254, 300, 360}) {
-        widget.resize(width, 196);
+        widget.resize(width, 170);
         CHECK(widget.width() == width);
         QTest::qWait(30);
         CHECK(scroll->verticalScrollBar()->maximum() == 0);
@@ -127,7 +144,7 @@ int main(int argc, char** argv)
         CHECK(control && control->isVisible());
     }
     for (const char* name : {"katAuto", "katManual", "katBypass", "katAntenna1", "katAntenna2", "katAntenna3",
-                             "katClearFault", "katBypassSwr", "katPhysicalState", "katManualPane"}) {
+                             "katClearFault", "katPhysicalState", "katManualPane"}) {
         CHECK(!widget.findChild<QWidget*>(name)->isVisible());
     }
     mini->setChecked(false);
@@ -161,6 +178,59 @@ int main(int argc, char** argv)
     CHECK(miniState->property("katTone") == "warn");
     AetherSDR::Kat500ModelTest::bypass(model, AetherSDR::Kat500::Mode::Auto, false);
     CHECK(miniState->property("katTone") == "ok");
+    auto* swr = widget.findChild<QPushButton*>("katSwr");
+    CHECK(swr && swr->isEnabled());
+    auto* gaugeWidget = widget.findChild<QWidget*>("katSwrGauge");
+    CHECK(gaugeWidget);
+    auto* swrGauge = static_cast<AetherSDR::HGauge*>(gaugeWidget);
+    CHECK(swr->text() == "SWR 1.33 held");
+    QSignalSpy writes(&model, &AetherSDR::Kat500Model::operationBusyChanged);
+    QTest::mousePress(swr, Qt::LeftButton);
+    CHECK(swr->text() == "BYP 1.00 held" && swrGauge->value() == 1.0f);
+    QTest::mouseRelease(swr, Qt::LeftButton);
+    CHECK(swr->text() == "SWR 1.33 held" && qFuzzyCompare(swrGauge->value(), 1.33f));
+    swr->setFocus();
+    QTest::keyPress(swr, Qt::Key_Space);
+    CHECK(swr->text() == "BYP 1.00 held");
+    QTest::keyRelease(swr, Qt::Key_Space);
+    CHECK(swr->text() == "SWR 1.33 held");
+    QTest::mousePress(swr, Qt::LeftButton);
+    QFocusEvent focusOut(QEvent::FocusOut);
+    QApplication::sendEvent(swr, &focusOut);
+    CHECK(!swr->isDown() && swr->text() == "SWR 1.33 held");
+    QTest::mouseRelease(swr, Qt::LeftButton);
+    AetherSDR::Kat500ModelTest::rf(model, true);
+    CHECK(swr->text() == "SWR 1.33");
+    AetherSDR::Kat500ModelTest::rf(model, false);
+    CHECK(swr->text() == "SWR 1.33 held" && writes.isEmpty());
+    auto* key = widget.findChild<QLabel*>("katAmpInterruptStatus");
+    CHECK(key->text() == "KEY PASS");
+    AetherSDR::Kat500ModelTest::interrupt(model, true);
+    CHECK(key->text() == "KEY BLOCK");
+    AetherSDR::Kat500ModelTest::interrupt(model, false);
+    for (const char* name : {"katManualToggle", "katSettings", "katHistory", "katDebug"}) {
+        auto* toggle = widget.findChild<QPushButton*>(name);
+        toggle->setChecked(false);
+        CHECK(toggle->text().startsWith(QStringLiteral("▸")));
+        toggle->setChecked(true);
+        CHECK(toggle->text().startsWith(QStringLiteral("▾")));
+        toggle->setChecked(false);
+    }
+    widget.findChild<QPushButton*>("katManualToggle")->setChecked(true);
+    for (const char* name : {"katCapacitorSide", "katManualState0", "katManualState1", "katManualState2"}) {
+        CHECK(!widget.findChild<QCheckBox*>(name)->isVisible());
+    }
+    auto* memory = widget.findChild<QSpinBox*>("katRecallFrequency");
+    CHECK(memory->suffix() == " kHz");
+    CHECK(widget.findChild<QLabel*>("katRecallFrequencyLabel")->buddy() == memory);
+    widget.findChild<QPushButton*>("katSettings")->setChecked(true);
+    for (const char* name : {"katCapacitorSide", "katManualState0", "katManualState1", "katManualState2"}) {
+        auto* control = widget.findChild<QCheckBox*>(name);
+        CHECK(control->isVisible() && control->isEnabled());
+    }
+    const QString observed = widget.findChild<QLabel*>("katLastObserved")->text();
+    CHECK(observed.contains("14096 kHz") && observed.contains("14088 kHz") &&
+          observed.contains("14090 kHz") && observed.contains("14080-14099 kHz"));
     CHECK(widget.findChild<QLabel*>("katAvailability")->isVisible());
     CHECK(widget.findChild<QLabel*>("katAvailability")->text().contains("ms since reply"));
     CHECK(!widget.findChild<QPushButton*>("katAntenna1")->isEnabled());
@@ -171,7 +241,7 @@ int main(int argc, char** argv)
     for (const char* name : {"katManualToggle", "katSettings", "katHistory"}) {
         widget.findChild<QPushButton*>(name)->setChecked(false);
     }
-    widget.resize(248, 196);
+    widget.resize(248, 170);
     QTest::qWait(20);
     CHECK(scroll->verticalScrollBar()->maximum() == 0);
     const QString capture = qEnvironmentVariable("AETHER_KAT500_GRAB");
@@ -190,6 +260,19 @@ int main(int argc, char** argv)
     widget.findChild<QPushButton*>("katManualToggle")->setChecked(true);
     widget.findChild<QPushButton*>("katSettings")->setChecked(true);
     widget.resize(700, 1400);
+    if (!capture.isEmpty()) {
+        widget.findChild<QPushButton*>("katSettings")->setChecked(false);
+        widget.resize(248, 540);
+        QTest::qWait(30);
+        CHECK(widget.grab().save(capture + "/applet-manual.png"));
+        widget.findChild<QPushButton*>("katManualToggle")->setChecked(false);
+        widget.findChild<QPushButton*>("katSettings")->setChecked(true);
+        widget.resize(248, 720);
+        QTest::qWait(30);
+        CHECK(widget.grab().save(capture + "/applet-settings.png"));
+        widget.findChild<QPushButton*>("katManualToggle")->setChecked(true);
+        widget.resize(700, 1400);
+    }
     auto* capacitance = widget.findChild<QSpinBox*>("katCapacitance");
     capacitance->setValue(1000);
     emit model.availabilityChanged();
@@ -210,6 +293,9 @@ int main(int argc, char** argv)
         emit model.telemetryReceived(command, sample);
     }
     emit model.availabilityChanged();
+    const QString summary = widget.findChild<QLabel*>("katHistoryGraph")->accessibleDescription();
+    CHECK(summary.contains("SWR") && summary.contains("Forward") && summary.contains("Reflected"));
+    CHECK(summary.contains("250") && summary.contains("5 minutes"));
     const QImage image = widget.findChild<QLabel*>("katHistoryGraph")->pixmap().toImage();
     const QColor cyan = AetherSDR::ThemeManager::instance().color(&widget, "color.canon.cyan");
     const QColor aqua = AetherSDR::ThemeManager::instance().color(&widget, "color.canon.aqua");
@@ -225,12 +311,23 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "FAIL missing visible history traces: cyan=%d aqua=%d\n", cyanPixels,
                      aquaPixels);
     }
+    if (!capture.isEmpty()) {
+        widget.findChild<QPushButton*>("katSettings")->setChecked(false);
+        widget.findChild<QPushButton*>("katManualToggle")->setChecked(false);
+        widget.resize(248, 450);
+        QTest::qWait(30);
+        CHECK(widget.grab().save(capture + "/applet-history.png"));
+    }
     for (int condition = 0; condition < 3; ++condition) {
         AetherSDR::Kat500ModelTest::blocked(model, condition);
         auto* selectedMode = widget.findChild<QPushButton*>("katAuto");
         auto* selectedAntenna = widget.findChild<QPushButton*>("katAntenna1");
         CHECK(selectedMode->isChecked() && selectedAntenna->isChecked());
         CHECK(!selectedMode->isEnabled() && !selectedAntenna->isEnabled());
+        for (const char* name : {"katCapacitorSide", "katManualState0", "katManualState1", "katManualState2"}) {
+            auto* control = widget.findChild<QCheckBox*>(name);
+            CHECK(!control->isEnabled() && !control->accessibleDescription().isEmpty());
+        }
         // Render each disabled button in both states: selection must change its
         // background/border as well as retaining the checked property.
         for (QPushButton* selected : {selectedMode, selectedAntenna}) {

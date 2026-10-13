@@ -46,7 +46,6 @@ class Kat500Applet : public CanonApplet
     QWidget* m_content;
     QWidget* m_modesPane;
     QWidget* m_antennasPane;
-    QWidget* m_bypassPane;
     QWidget* m_physicalPane;
     QWidget* m_manualPane;
     QWidget* m_settingsPane;
@@ -70,18 +69,17 @@ class Kat500Applet : public CanonApplet
     QSpinBox* m_ind;
     QSpinBox* m_frequencyRecall;
     QLabel* m_frequency;
-    QLabel* m_swr;
-    QLabel* m_bypassSwr;
+    QPushButton* m_swr;
     std::array<QLabel*, 3> m_physical{};
     QLabel* m_readiness;
     QLabel* m_miniState;
     QLabel* m_fault;
     QLabel* m_identity;
+    QLabel* m_observed;
     QLabel* m_availability;
     QLabel* m_result;
     QLabel* m_graph;
     HGauge* m_swrGauge;
-    HGauge* m_bypassGauge;
     QPlainTextEdit* m_debug;
     struct Point {
         qint64 time;
@@ -92,5 +90,6 @@ class Kat500Applet : public CanonApplet
     QTimer m_timer;
     std::array<std::optional<int>, 2> m_lastRelayMasks{};
     bool m_floating = false;
+    bool m_showingBypass = false;
 };
 } // namespace AetherSDR

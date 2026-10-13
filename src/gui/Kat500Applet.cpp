@@ -45,7 +45,8 @@ QString reading(std::optional<double> value)
 {
     return value ? QString::number(*value, 'f', 2) : QStringLiteral("—");
 }
-void text(QLabel* label, const QString& value)
+template <typename TextWidget>
+void text(TextWidget* label, const QString& value)
 {
     if (label->text() == value) {
         return;
@@ -55,7 +56,8 @@ void text(QLabel* label, const QString& value)
     QAccessibleEvent event(label, QAccessible::NameChanged);
     QAccessible::updateAccessibility(&event);
 }
-void pill(QLabel* label, const QString& value, const QString& detail, const char* tone)
+template <typename TextWidget>
+void pill(TextWidget* label, const QString& value, const QString& detail, const char* tone)
 {
     text(label, value);
     label->setToolTip(detail);
@@ -67,6 +69,44 @@ void pill(QLabel* label, const QString& value, const QString& detail, const char
         label->style()->polish(label);
         label->update();
     }
+}
+QString checkRules()
+{
+    auto& theme = ThemeManager::instance();
+    QString rules = canonIndicatorRules();
+    for (bool enabled : {true, false}) {
+        for (bool checked : {false, true}) {
+            const bool active = enabled && checked;
+            const QColor fill = theme.color(active ? "color.accessory.key.meffa.active.background"
+                                                   : "color.canon.control");
+            const QColor edge = theme.color(enabled ? "color.canon.inkSoft" : "color.canon.muted");
+            const QColor ink = theme.color(active ? "color.accessory.key.meffa.active.foreground"
+                                                  : "color.canon.muted");
+            const QString key = fill.name(QColor::HexArgb) + edge.name(QColor::HexArgb) +
+                                ink.name(QColor::HexArgb);
+            const QString path = themedImagePath(
+                "kat-checks", checked ? "checked" : "unchecked", key, QSize(18, 18), 3,
+                [fill, edge, ink, checked](QPainter& painter) {
+                    painter.setPen(QPen(edge, 1.5));
+                    painter.setBrush(fill);
+                    painter.drawRoundedRect(QRectF(1.5, 1.5, 15, 15), 3, 3);
+                    if (checked) {
+                        QPainterPath tick;
+                        tick.moveTo(5, 9);
+                        tick.lineTo(8, 12);
+                        tick.lineTo(13, 6);
+                        painter.setBrush(Qt::NoBrush);
+                        painter.setPen(QPen(ink, 2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+                        painter.drawPath(tick);
+                    }
+                });
+            if (!path.isEmpty()) {
+                rules += QStringLiteral("QCheckBox::indicator:%1:%2 { image: url(\"%3\"); }")
+                             .arg(checked ? "checked" : "unchecked", enabled ? "enabled" : "disabled", path);
+            }
+        }
+    }
+    return rules;
 }
 QJsonObject preferences()
 {
@@ -180,23 +220,19 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
     }
     root->addWidget(m_antennasPane);
     auto* swrRow = new QHBoxLayout;
-    m_swr = statusPill("katSwr", swrRow);
+    m_swr = button(tr("SWR —"), "katSwr", swrRow);
+    m_swr->setProperty("katPill", true);
+    m_swr->setFixedHeight(18);
+    m_swr->installEventFilter(this);
+    connect(m_swr, &QPushButton::pressed, this, &Kat500Applet::refresh);
+    connect(m_swr, &QPushButton::released, this, &Kat500Applet::refresh);
     m_swr->setFixedWidth(82);
     swrRow->setSpacing(4);
     m_swrGauge = new HGauge(1, 5, 5, "", "", {{1, "1"}, {5, "5"}}, this);
     m_swrGauge->setFixedHeight(24);
+    m_swrGauge->setObjectName("katSwrGauge");
     swrRow->addWidget(m_swrGauge, 1);
     root->addLayout(swrRow);
-    m_bypassPane = new QWidget(this);
-    auto* bypassRow = new QHBoxLayout(m_bypassPane);
-    bypassRow->setContentsMargins(0, 0, 0, 0);
-    m_bypassSwr = statusPill("katBypassSwr", bypassRow);
-    m_bypassSwr->setFixedWidth(82);
-    bypassRow->setSpacing(4);
-    m_bypassGauge = new HGauge(1, 5, 5, "", "", {{1, "1"}, {5, "5"}}, this);
-    m_bypassGauge->setFixedHeight(24);
-    bypassRow->addWidget(m_bypassGauge, 1);
-    root->addWidget(m_bypassPane);
     m_physicalPane = new QWidget(this);
     m_physicalPane->setObjectName("katPhysicalState");
     auto* states = new QHBoxLayout(m_physicalPane);
@@ -272,43 +308,20 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
         }
         manual->addLayout(bits);
     }
-    m_side = new QCheckBox(tr("Capacitor on antenna side"), this);
-    m_side->setObjectName("katCapacitorSide");
-    manual->addWidget(m_side);
-    connect(m_side, &QCheckBox::clicked, this, [this](bool on) {
-        if (m_model) {
-            m_model->setCapacitorSide(on ? Kat500::CapacitorSide::Antenna
-                                         : Kat500::CapacitorSide::Transmitter);
-        }
-        refresh();
-    });
-    const QStringList stateNames{tr("Physical bypass"), tr("Attenuator"), tr("Amp key interrupt")};
-    for (int i = 0; i < 3; ++i) {
-        auto* c = new QCheckBox(stateNames[i], this);
-        c->setObjectName(QStringLiteral("katManualState%1").arg(i));
-        c->setAccessibleName(stateNames[i]);
-        m_manualStates[i] = c;
-        manual->addWidget(c);
-        connect(c, &QCheckBox::clicked, this, [this, i](bool on) {
-            if (m_model) {
-                if (i == 0) {
-                    m_model->setBypassed(on);
-                } else if (i == 1) {
-                    m_model->setAttenuator(on);
-                } else {
-                    m_model->setAmpKeyInterrupted(on);
-                }
-            }
-            refresh();
-        });
-    }
     auto* frequencyRow = new QHBoxLayout;
     m_frequencyRecall = new QSpinBox(this);
     m_frequencyRecall->setObjectName("katRecallFrequency");
     m_frequencyRecall->setAccessibleName(tr("Memory frequency in kHz"));
     m_frequencyRecall->setRange(1, 99999);
-    manual->addWidget(m_frequencyRecall);
-    auto* recall = button(tr("Recall kHz"), "katRecall", frequencyRow);
+    m_frequencyRecall->setSuffix(tr(" kHz"));
+    auto* memoryRow = new QHBoxLayout;
+    auto* memoryLabel = new QLabel(tr("Match frequency"), this);
+    memoryLabel->setObjectName("katRecallFrequencyLabel");
+    memoryLabel->setBuddy(m_frequencyRecall);
+    memoryRow->addWidget(memoryLabel);
+    memoryRow->addWidget(m_frequencyRecall, 1);
+    manual->addLayout(memoryRow);
+    auto* recall = button(tr("Recall"), "katRecall", frequencyRow);
     auto* memorize = button(tr("Memorize"), "katMemorize", frequencyRow);
     manual->addLayout(frequencyRow);
     auto* ftns = button(tr("Full tune without saving"), "katFullTuneNoSave", manual);
@@ -352,13 +365,50 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
            "only; it does not key a radio. Default off."));
     m_follow->setChecked(prefs.value("FollowTx").toBool(false));
     settings->addWidget(m_follow);
+    auto* signalPathTitle = label("katSignalPathTitle", settings);
+    signalPathTitle->setText(tr("Signal path"));
+    auto* signalPath = new QVBoxLayout;
+    signalPath->setSpacing(2);
+    settings->addLayout(signalPath);
+    m_side = new QCheckBox(tr("Capacitor on antenna side"), this);
+    m_side->setObjectName("katCapacitorSide");
+    signalPath->addWidget(m_side);
+    connect(m_side, &QCheckBox::clicked, this, [this](bool on) {
+        if (m_model) {
+            m_model->setCapacitorSide(on ? Kat500::CapacitorSide::Antenna
+                                         : Kat500::CapacitorSide::Transmitter);
+        }
+        refresh();
+    });
+    const QStringList stateNames{tr("Physical bypass"), tr("Attenuator"), tr("Block amplifier keying")};
+    for (int i = 0; i < 3; ++i) {
+        auto* c = new QCheckBox(stateNames[i], this);
+        c->setObjectName(QStringLiteral("katManualState%1").arg(i));
+        c->setAccessibleName(stateNames[i]);
+        m_manualStates[i] = c;
+        signalPath->addWidget(c);
+        connect(c, &QCheckBox::clicked, this, [this, i](bool on) {
+            if (m_model) {
+                if (i == 0) {
+                    m_model->setBypassed(on);
+                } else if (i == 1) {
+                    m_model->setAttenuator(on);
+                } else {
+                    m_model->setAmpKeyInterrupted(on);
+                }
+            }
+            refresh();
+        });
+    }
     m_identity = label("katIdentity", settings);
+    m_observed = label("katLastObserved", settings);
     m_availability = label("katAvailability", settings);
     m_result = label("katOperationResult", settings);
     auto* help = label("katHistoryHelp", settings);
     help->setText(tr("History: SWR and forward/reflected ADC counts, last observed, 5 minutes. Gaps mean "
                      "missing replies; ADC counts are not watts. SWR may describe an earlier RF measurement. "
-                     "Debug TX means serial writes, not RF."));
+                     "Hold the SWR pill (or Space) to compare bypass SWR; release to return. Held means "
+                     "a retained measurement, not current RF. Debug TX means serial writes, not RF."));
     auto* advanced = button(tr("Open Advanced settings"), "katAdvancedSettings", settings);
     connect(advanced, &QPushButton::clicked, this, &Kat500Applet::advancedSettingsRequested);
     m_debugToggle = button(tr("▸ Debug"), "katDebug", settings);
@@ -441,7 +491,7 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
     connect(&m_timer, &QTimer::timeout, this, &Kat500Applet::refresh);
     m_timer.start();
     applyCanonSheet(bodyWidget(), [] {
-        return QStringLiteral(
+        return checkRules() + QStringLiteral(
             "QWidget#katContent, QWidget#katViewport, QScrollArea#katScroll { background: {{color.canon.ground}}; border: none; }"
             "QLabel, QCheckBox { color: {{color.canon.muted}}; font-size: 10px; }"
             "QLabel[katPill=true] { font-size: 9px; font-weight: bold; background: {{color.canon.nested}}; "
@@ -453,7 +503,15 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
             "color: {{color.canon.inkSoft}}; background: {{color.canon.control}}; "
             "border-radius: 3px; border: 1px solid {{color.canon.lineHi}}; } "
             "QPushButton:hover { background: {{color.canon.nested}}; color: {{color.canon.aqua}}; } "
-            "QSpinBox { font-size: 10px; min-height: 18px; } "
+            "QSpinBox { font-size: 10px; min-height: 18px; color: {{color.canon.inkSoft}}; "
+            "background: {{color.canon.nested}}; border: 1px solid {{color.canon.inkSoft}}; border-radius: 3px; } "
+            "QSpinBox:focus { border-color: {{color.canon.cyan}}; } "
+            "QSpinBox:disabled { color: {{color.canon.muted}}; border-color: {{color.canon.muted}}; } "
+            "QPushButton[katPill=true] { font-size: 9px; padding: 0 2px; color: {{color.canon.muted}}; "
+            "background: {{color.canon.nested}}; } "
+            "QPushButton[katPill=true]:focus { border-color: {{color.canon.cyan}}; } "
+            "QPushButton[katTone=warn] { color: {{color.accent.warning}}; } "
+            "QPushButton[katTone=live] { color: {{color.canon.inkSoft}}; } "
             "QPlainTextEdit { font-size: 10px; font-family: monospace; color: {{color.canon.inkSoft}}; } "
             "QPushButton:checked:enabled { background: "
             "{{color.accessory.key.meffa.active.background}}; color: "
@@ -572,18 +630,46 @@ void Kat500Applet::refresh()
                              : tr("FAULT ?"),
          s.faultCode ? Kat500::currentFaultName(*s.faultCode) : tr("Fault unknown"),
          s.faultCode ? (*s.faultCode == 0 ? "ok" : "error") : "muted");
-    text(m_swr, tr("SWR %1").arg(reading(s.swr)));
-    text(m_bypassSwr, tr("BYP SWR %1").arg(reading(s.bypassSwr)));
-    m_swrGauge->setValue(s.swr.value_or(1));
-    m_bypassGauge->setValue(s.bypassSwr.value_or(1));
-    const std::array<std::optional<bool>, 3> physical{s.bypassed, s.attenuator, s.ampKeyInterrupted};
-    const QStringList shortNames{tr("BYP"), tr("ATT"), tr("KEY")};
-    const QStringList fullNames{tr("Physical bypass"), tr("Attenuator"), tr("Amplifier key interrupt")};
-    for (int i = 0; i < 3; ++i) {
+    const bool preview = m_swr->isDown();
+    const auto swr = preview ? s.bypassSwr : s.swr;
+    const auto fresh = [this](const char* command) {
+        const qint64 age = m_model ? m_model->fieldAgeMs(command) : -1;
+        return age >= 0 && age <= 5000;
+    };
+    const bool rf = m_model && m_model->isResponding() && s.powerOn == true &&
+                    s.forwardAdc.value_or(0) > 0 && fresh("VFWD") && fresh("VSWR");
+    const bool held = swr && (preview || !rf);
+    const QString swrText = tr("%1 %2%3").arg(preview ? tr("BYP") : tr("SWR"), reading(swr),
+                                             held ? tr(" held") : QString());
+    const QString swrHelp =
+        tr("%1. Hold this pill or Space to view the last bypass SWR; release to return to adjusted SWR. "
+           "This only changes the display, not the tuner. Held readings are retained measurements, "
+           "not current RF.").arg(preview ? tr("Bypass SWR: %1").arg(reading(swr))
+                                          : tr("Adjusted SWR: %1").arg(reading(swr)));
+    pill(m_swr, swrText, swrHelp, preview ? "warn" : rf ? "live" : "muted");
+    if (preview != m_showingBypass) {
+        m_swrGauge->setValueImmediate(swr.value_or(1));
+    } else {
+        m_swrGauge->setValue(swr.value_or(1));
+    }
+    m_showingBypass = preview;
+    m_swrGauge->setAccessibleName(swrText);
+    m_swrGauge->setAccessibleDescription(swrHelp);
+    const std::array<std::optional<bool>, 2> physical{s.bypassed, s.attenuator};
+    const QStringList shortNames{tr("BYP"), tr("ATT")};
+    const QStringList fullNames{tr("Physical bypass"), tr("Attenuator")};
+    for (int i = 0; i < 2; ++i) {
         pill(m_physical[i], tr("%1 %2").arg(shortNames[i], physical[i] ? flag(physical[i]) : tr("?")),
              tr("%1: %2").arg(fullNames[i], flag(physical[i])),
              physical[i].value_or(false) ? "warn" : "muted");
     }
+    pill(m_physical[2], s.ampKeyInterrupted ? (*s.ampKeyInterrupted ? tr("KEY BLOCK") : tr("KEY PASS"))
+                                          : tr("KEY ?"),
+         tr("KAT500 amplifier key-line relay: %1. This affects the amplifier only when its key line "
+            "passes through the tuner; it does not indicate amplifier transmission.")
+             .arg(s.ampKeyInterrupted ? (*s.ampKeyInterrupted ? tr("blocked") : tr("connected"))
+                                     : tr("unknown")),
+         s.ampKeyInterrupted.value_or(false) ? "warn" : "muted");
     const bool responding = m_model && m_model->isResponding();
     const QString readiness = !m_model || !m_model->isDetected() ? tr("OFFLINE")
                               : !responding ? tr("STALE")
@@ -610,6 +696,22 @@ void Kat500Applet::refresh()
                                     s.forwardAdc ? QString::number(*s.forwardAdc) : QStringLiteral("—"),
                                     s.reflectedAdc ? QString::number(*s.reflectedAdc) : QStringLiteral("—"))
                          : tr("No tuner connected."));
+    const auto frequency = [](std::optional<int> khz) {
+        return khz ? QString::number(*khz) + QStringLiteral(" kHz") : QStringLiteral("—");
+    };
+    text(m_observed, tr("Last observed\nATU selection (F): %1\nXCVR / CAT (FX): %2\n"
+                        "RF counter (FC): %3\nATU bin (FY): %4\nAdjusted / bypass SWR: %5 / %6")
+                         .arg(frequency(s.frequencyKhz), frequency(s.catFrequencyKhz),
+                              frequency(s.countedFrequencyKhz),
+                              s.frequencyBin.isEmpty() ? QStringLiteral("—")
+                                                       : s.frequencyBin + QStringLiteral(" kHz"),
+                              reading(s.swr), reading(s.bypassSwr)));
+    m_observed->setToolTip(tr("F selects the stored match. FX is the last frequency received by the "
+                             "tuner through CAT or AUXBUS. FC is the last measured RF frequency, "
+                             "in 8 kHz steps. FY is the selected memory bin's frequency range. "
+                             "Zero is a raw device value, not a usable frequency. These values may "
+                             "remain after RF stops."));
+    m_observed->setAccessibleDescription(m_observed->toolTip());
     for (auto* control : m_manualPane->findChildren<QWidget*>()) {
         if (qobject_cast<QPushButton*>(control) || qobject_cast<QSpinBox*>(control) ||
             qobject_cast<QCheckBox*>(control)) {
@@ -635,6 +737,7 @@ void Kat500Applet::refresh()
     }
     {
         const QSignalBlocker b(m_side);
+        availability(m_side, reason);
         m_side->setChecked(s.side == Kat500::CapacitorSide::Antenna);
         if (!s.side) {
             availability(m_side, tr("Wait for confirmed capacitor side."));
@@ -643,6 +746,7 @@ void Kat500Applet::refresh()
     const std::array<std::optional<bool>, 3> values{s.bypassed, s.attenuator, s.ampKeyInterrupted};
     for (int i = 0; i < 3; ++i) {
         const QSignalBlocker b(m_manualStates[i]);
+        availability(m_manualStates[i], reason);
         m_manualStates[i]->setChecked(values[i].value_or(false));
         if (!values[i]) {
             availability(m_manualStates[i], tr("Wait for confirmed state."));
@@ -658,12 +762,16 @@ void Kat500Applet::refresh()
 }
 void Kat500Applet::presentation()
 {
+    const QStringList titles{tr("Manual"), tr("History"), tr("Settings"), tr("Debug")};
+    const std::array<QPushButton*, 4> drawers{m_manualToggle, m_historyToggle, m_settings, m_debugToggle};
+    for (int i = 0; i < 4; ++i) {
+        drawers[i]->setText(QStringLiteral("%1 %2").arg(drawers[i]->isChecked() ? "▾" : "▸", titles[i]));
+    }
     const bool mini = m_mini->isChecked();
     m_mini->setText(mini ? tr("Full") : tr("Mini"));
     m_mini->setAccessibleName(mini ? tr("Show full tuner controls") : tr("Show mini tuner controls"));
     m_modesPane->setVisible(!mini);
     m_antennasPane->setVisible(!mini);
-    m_bypassPane->setVisible(!mini);
     m_physicalPane->setVisible(!mini);
     findChild<QPushButton*>("katClearFault")->setVisible(!mini);
     m_miniState->setVisible(mini);
@@ -698,10 +806,15 @@ QSize Kat500Applet::sizeHint() const
 }
 QSize Kat500Applet::minimumSizeHint() const
 {
-    return QSize(238, m_mini && m_mini->isChecked() ? 98 : 196);
+    return QSize(238, m_mini && m_mini->isChecked() ? 98 : 170);
 }
 bool Kat500Applet::eventFilter(QObject* watched, QEvent* event)
 {
+    if (watched == m_swr && (event->type() == QEvent::FocusOut || event->type() == QEvent::Hide ||
+                             event->type() == QEvent::WindowDeactivate) && m_swr->isDown()) {
+        m_swr->setDown(false);
+        refresh();
+    }
     if (watched == m_graph && event->type() == QEvent::Resize) {
         renderHistory();
     }
@@ -713,28 +826,52 @@ void Kat500Applet::renderHistory()
     if (size.isEmpty()) {
         return;
     }
-    QPixmap pixmap(size);
+    const qreal dpr = m_graph->devicePixelRatioF();
+    QPixmap pixmap(size * dpr);
+    pixmap.setDevicePixelRatio(dpr);
     auto& theme = ThemeManager::instance();
-    pixmap.fill(theme.color("color.background.0"));
+    pixmap.fill(theme.color(this, "color.canon.ground"));
     QPainter p(&pixmap);
-    const QStringList names{tr("SWR (last observed)"), tr("Forward ADC counts"), tr("Reflected ADC counts")};
+    QFont font = m_graph->font();
+    font.setPixelSize(9);
+    p.setFont(font);
+    const QStringList names{tr("SWR · last observed"), tr("Forward · ADC counts"), tr("Reflected · ADC counts")};
     const qint64 now = m_clock.elapsed();
+    QStringList description{tr("Telemetry history, last 5 minutes. ADC counts are not watts. "
+                               "SWR is last observed, not proof of RF. Gaps mean missing replies.")};
     for (int i = 0; i < 3; ++i) {
-        const QRectF area(42, i * size.height() / 3.0 + 22, size.width() - 48, size.height() / 3.0 - 28);
-        p.setPen(theme.color("color.text.secondary"));
-        p.drawText(4, i * size.height() / 3 + 15, names[i]);
-        p.drawRect(area);
+        const qreal top = i * size.height() / 3.0;
+        const QRectF area(4, top + 20, size.width() - 38, size.height() / 3.0 - 37);
+        const double minimum = i == 0 ? 1 : 0;
         double maximum = i == 0 ? 5 : 1;
-        if (i != 0) {
-            for (const Point& point : m_history[i]) {
-                if (point.value) {
+        std::optional<double> latest;
+        for (const Point& point : m_history[i]) {
+            if (point.time >= now - 300000) {
+                latest = point.value;
+                if (i != 0 && point.value) {
                     maximum = std::max(maximum, *point.value);
                 }
             }
         }
+        const QColor trace = theme.color(this, i == 0 ? "color.canon.cyan" : "color.canon.aqua");
+        const QString current = latest ? QString::number(*latest, 'f', i == 0 ? 2 : 0) : QStringLiteral("—");
+        p.setPen(QPen(trace, 2));
+        p.drawLine(QPointF(4, top + 10), QPointF(13, top + 10));
+        p.drawText(QRectF(18, top, size.width() - 65, 18), Qt::AlignVCenter, names[i]);
+        p.drawText(QRectF(size.width() - 46, top, 42, 18), Qt::AlignVCenter | Qt::AlignRight, current);
+        p.setPen(theme.color(this, "color.canon.lineHi"));
+        p.drawRect(area);
+        p.drawLine(QPointF(area.center().x(), area.top()), QPointF(area.center().x(), area.bottom()));
+        p.drawLine(QPointF(area.left(), area.center().y()), QPointF(area.right(), area.center().y()));
+        p.setPen(theme.color(this, "color.canon.muted"));
+        p.drawText(QRectF(area.right() + 3, area.top() - 5, 30, 12), Qt::AlignLeft, QString::number(maximum));
+        p.drawText(QRectF(area.right() + 3, area.bottom() - 8, 30, 12), Qt::AlignLeft, QString::number(minimum));
+        p.drawText(QRectF(area.left(), area.bottom() + 2, area.width(), 12), Qt::AlignLeft, tr("−5 min"));
+        p.drawText(QRectF(area.left(), area.bottom() + 2, area.width(), 12), Qt::AlignRight, tr("now"));
         QPainterPath path;
         bool segment = false;
         qint64 prior = -10000;
+        p.setPen(QPen(trace, 1.5));
         for (const Point& point : m_history[i]) {
             if (point.time < now - 300000) {
                 continue;
@@ -744,18 +881,22 @@ void Kat500Applet::renderHistory()
                 continue;
             }
             const QPointF pos(area.left() + area.width() * (point.time - (now - 300000)) / 300000.0,
-                              area.bottom() - area.height() * std::clamp(*point.value / maximum, 0.0, 1.0));
+                              area.bottom() - area.height() *
+                                  std::clamp((*point.value - minimum) / (maximum - minimum), 0.0, 1.0));
             if (!segment || point.time - prior > 5000) {
                 path.moveTo(pos);
+                p.drawPoint(pos);
             } else {
                 path.lineTo(pos);
             }
             segment = true;
             prior = point.time;
         }
-        p.setPen(QPen(theme.color(this, i == 0 ? "color.canon.cyan" : "color.canon.aqua"), 1.5));
         p.drawPath(path);
+        description.append(tr("%1: latest %2; scale %3 to %4.")
+                               .arg(names[i], current, QString::number(minimum), QString::number(maximum)));
     }
+    m_graph->setAccessibleDescription(description.join(QLatin1Char(' ')));
     m_graph->setPixmap(pixmap);
 }
 void Kat500Applet::saveDebug()
