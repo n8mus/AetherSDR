@@ -656,6 +656,14 @@ void TitleBar::setRadioTabs(const QList<RadioTabEntry>& radios)
     if (m_radioTabs) {
         m_radioTabs->setRadios(radios);
     }
+    // Confirmed connections finish discovery even without network heartbeats.
+    // Only a real heartbeat or an intentional disconnect clears a link alarm.
+    for (const RadioTabEntry& radio : radios) {
+        if (radio.status == RadioTabStatus::Connected) {
+            setDiscovering(false);
+            break;
+        }
+    }
 }
 
 void TitleBar::setActiveRadio(const QString& id)
