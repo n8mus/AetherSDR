@@ -531,6 +531,21 @@ static void sidebandControlsAndPersistence()
     check(slice->mode() == "CW" && slice->agcMode() == "slow" && slice->agcThreshold() == 35,
         "accepted CW restore reports actual AGC recipe");
     const auto caps = backend.capabilities();
+    check(caps.receiveDspControl.has_value(), "RTL declares receive DSP controls");
+    if (caps.receiveDspControl) {
+        using Feature = ReceiveDspControl::Feature;
+        for (const QString& mode : {QStringLiteral("AM"), QStringLiteral("SAM"),
+                                   QStringLiteral("USB"), QStringLiteral("LSB"),
+                                   QStringLiteral("CW"), QStringLiteral("CWR")}) {
+            check(caps.receiveDspControl->supports(Feature::Apf, mode)
+                      == (mode == "CW" || mode == "CWR"),
+                  "APF capability matches the CW-only backend dispatch contract");
+            check(caps.receiveDspControl->supports(Feature::Nr, mode),
+                  "APF restriction does not disable NR in other analog modes");
+        }
+        check(!caps.receiveDspControl->supports(Feature::Apf, QStringLiteral("FM")),
+              "APF is unavailable outside the qualified receive modes");
+    }
     check(caps.maxNotchFilters == 32 && caps.notchMinWidthHz == 200
         && caps.notchMaxWidthHz == 12000 && !caps.notchHasDepth,
         "adopted sideband advertises measured tracking-notch capacity and width limits");

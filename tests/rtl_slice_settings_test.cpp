@@ -634,6 +634,11 @@ int main(int argc, char** argv)
         check(!settings.patch(100'000'000, 2'400'000, {slice(0)}, {}, notches)
             && scope.featureExact(RtlSliceSettings::featureName()) == original,
             "invalid notch bank cannot overwrite accepted settings");
+        notches.entries[0].widthHz = 200;
+        notches.entries[1].id = notches.entries[0].id;
+        check(!settings.patch(100'000'000, 2'400'000, {slice(0)}, {}, notches)
+            && scope.featureExact(RtlSliceSettings::featureName()) == original,
+            "duplicate caller-supplied notch IDs cannot overwrite accepted settings");
         notches.entries.clear(); notches.enabled = true;
         check(settings.patch(100'000'000, 2'400'000, {slice(0)}, {}, notches)
             && settings.load().document.trackingNotches == notches,

@@ -909,6 +909,22 @@ int main(int argc, char** argv)
         check(tabs->state().value(QStringLiteral("linkOverrideColor")).toString().isEmpty(),
               "reconnecting clears discovery without a heartbeat");
 
+        // Rescanning while connected must survive repeated status snapshots.
+        bar->setDiscovering(true);
+        bar->setRadioTabs({connected});
+        check(tabs->state().value(QStringLiteral("linkOverrideColor")).toString() == warning,
+              "an unchanged connected snapshot preserves a newly requested scan");
+        RadioTabEntry renamed = connected;
+        renamed.name = QStringLiteral("Renamed connected radio");
+        bar->setRadioTabs({renamed});
+        check(tabs->state().value(QStringLiteral("linkOverrideColor")).toString() == warning,
+              "a connected radio metadata refresh does not end discovery");
+        RadioTabEntry secondConnection = connected;
+        secondConnection.id = QStringLiteral("SECOND-CONNECTION");
+        bar->setRadioTabs({renamed, secondConnection});
+        check(tabs->state().value(QStringLiteral("linkOverrideColor")).toString().isEmpty(),
+              "a newly confirmed connection ends discovery with another radio already connected");
+
         // A lost link raises the alarm; an operator disconnect clears it.
         for (int miss = 0; miss < 3; ++miss) {
             bar->onHeartbeatLost();

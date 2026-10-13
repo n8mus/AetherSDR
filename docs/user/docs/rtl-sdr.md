@@ -46,7 +46,7 @@ The **RX ANT** controls show the dongle's fixed **RX** input. They do not offer 
 
 ### SSB and CW
 
-Select **USB** or **LSB** for single-sideband reception, or **CW** / **CWR** for Morse. These modes use independent receive DSP and 48 kHz audio. Filter presets and draggable edges change the actual receive passband. The CW marker remains on the station carrier; **Pitch** changes the audio tone without moving the dial frequency. Pitch is shared by the RTL session's CW receivers.
+Select **USB** or **LSB** for single-sideband reception, or **CW** / **CWR** (reverse CW) for Morse. These modes use independent receive DSP and 48 kHz audio. Filter presets and draggable edges change the actual receive passband. The CW marker remains on the station carrier; **Pitch** changes the audio tone without moving the dial frequency. Pitch is shared by the RTL session's CW receivers.
 
 **AGC** offers Off, Slow, Med and Fast. **AGC-T** sets the local DSP's maximum gain; with AGC Off, **Off Level** controls fixed gain. These are local receiver controls, not a calibrated match for a FlexRadio's AGC-T scale. **NB** operates on receiver IQ; **APF** narrows CW audio around the selected pitch. **RIT** offsets reception while keeping the displayed dial frequency. These settings belong to each slice, except the shared CW pitch, and survive parking and reconnecting.
 

@@ -74,6 +74,25 @@ int main(int argc, char** argv)
     RadioModel model;                       // not connected
     ControlAvailabilityRegistry registry(model);
 
+    // Feature-specific mode restrictions can narrow, never expand, a record.
+    {
+        using Feature = ReceiveDspControl::Feature;
+        ReceiveDspControl control{{QStringLiteral("USB"), QStringLiteral("CW")},
+                                  {Feature::Nr, Feature::Apf}};
+        check(control.supports(Feature::Apf, QStringLiteral("USB")),
+              "an absent per-feature restriction retains the common mode list");
+        control.featureModes.insert(Feature::Apf, {QStringLiteral("CW"), QStringLiteral("FM")});
+        check(!control.supports(Feature::Apf, QStringLiteral("USB"))
+                  && control.supports(Feature::Apf, QStringLiteral("CW"))
+                  && !control.supports(Feature::Apf, QStringLiteral("FM"))
+                  && control.supports(Feature::Nr, QStringLiteral("USB")),
+              "a per-feature restriction narrows only its declared feature and modes");
+        control.featureModes.insert(Feature::Apf, {});
+        control.featureModes.insert(Feature::Anf, {QStringLiteral("CW")});
+        check(!control.supports(Feature::Apf, QStringLiteral("CW"))
+                  && !control.supports(Feature::Anf, QStringLiteral("CW")),
+              "an empty restriction disables support and cannot add an undeclared feature");
+    }
     const QString reason = QStringLiteral("Not supported by this radio");
 
     // ---- permissive while disconnected ----

@@ -992,6 +992,11 @@ pitch into an engine declaring this record.
 signal controls (AGC, NB, NR, ANF, manual notch, APF and RIT). This can expose host
 DSP without claiming `hasRadioSideDsp`. An absent record retains existing family
 capability behavior; a present record makes unlisted features/modes unavailable.
+The optional entries in `featureModes` restrict an individual feature to a
+subset of those modes: RTL declares APF only for CW/CWR while its other receive
+controls cover AM/SAM/USB/LSB/CW/CWR. A missing entry preserves the common mode
+list; an empty entry makes the feature unavailable. A restriction cannot add a
+mode or feature absent from the common lists.
 The VFO and RX applet retain accepted state while a confirmed engine prepares a
 request. AGC/DSP requests identify the changed field: a confirmed backend merges
 that field into its pending recipe rather than overwriting independent pending

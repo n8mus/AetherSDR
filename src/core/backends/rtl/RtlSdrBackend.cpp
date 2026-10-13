@@ -269,7 +269,8 @@ RadioCapabilities RtlSdrBackend::capabilities() const
         {QStringLiteral("AM"), QStringLiteral("SAM"), QStringLiteral("USB"), QStringLiteral("LSB"), QStringLiteral("CW"), QStringLiteral("CWR")},
         {ReceiveDspControl::Feature::Agc, ReceiveDspControl::Feature::Nb,
          ReceiveDspControl::Feature::Apf, ReceiveDspControl::Feature::Rit,
-         ReceiveDspControl::Feature::Nr, ReceiveDspControl::Feature::Anf, ReceiveDspControl::Feature::ManualNotch}};
+         ReceiveDspControl::Feature::Nr, ReceiveDspControl::Feature::Anf, ReceiveDspControl::Feature::ManualNotch},
+        {{ReceiveDspControl::Feature::Apf, {QStringLiteral("CW"), QStringLiteral("CWR")}}}};
     if (m_lastPublished && hasAnalogDsp(m_lastPublished->receivers)) {
         c.maxNotchFilters = RtlTrackingNotches::kCapacity;
         c.notchMinWidthHz = 200.0;

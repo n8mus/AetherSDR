@@ -66,9 +66,14 @@ struct ReceiveDspControl {
     enum class Feature { Agc, Nb, Nr, Anf, ManualNotch, Apf, Rit };
     QStringList modes;
     QList<Feature> features;
+    // An entry narrows a declared feature to a subset of the qualified modes.
+    // An absent entry uses all modes; an empty entry disables that feature.
+    QMap<Feature, QStringList> featureModes;
     bool supports(Feature feature, const QString& mode) const
     {
-        return features.contains(feature) && modes.contains(mode);
+        const auto restriction = featureModes.constFind(feature);
+        return features.contains(feature) && modes.contains(mode)
+            && (restriction == featureModes.cend() || restriction.value().contains(mode));
     }
 };
 

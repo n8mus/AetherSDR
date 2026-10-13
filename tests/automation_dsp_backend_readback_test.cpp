@@ -310,7 +310,7 @@ int main(int argc, char** argv)
         fm.mode = QStringLiteral("FM");
         emit source->sliceChanged(1, fm);
         source->requests.clear();
-        for (const QByteArray& argument : {QByteArray("nr on 50"), QByteArray("anf off 57"),
+        for (const QByteArray& argument : {QByteArray("nr on 50"), QByteArray("anf on 57"),
                                          QByteArray("nb on 30"), QByteArray("nb2 on 30 4")}) {
             const QJsonObject reply = command(argument);
             check(!reply.value(QStringLiteral("ok")).toBool()
@@ -318,6 +318,15 @@ int main(int argc, char** argv)
                       && source->requests.isEmpty(),
                   "unsupported selected mode refuses DSP before any level or enable intent");
         }
+        for (const QByteArray& argument : {QByteArray("nr off"), QByteArray("anf off"),
+                                         QByteArray("nb off"), QByteArray("nb2 off")}) {
+            source->requests.clear();
+            const QJsonObject reply = command(argument);
+            check(reply.value(QStringLiteral("ok")).toBool()
+                      && source->requests.size() == 1 && !source->requests.first().enabled,
+                  "unsupported selected mode still admits an idempotent DSP off intent");
+        }
+        source->requests.clear();
         fm.mode = QStringLiteral("CWR");
         emit source->sliceChanged(1, fm);
         check(command("nb2 on 30 4").value(QStringLiteral("ok")).toBool()

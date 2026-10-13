@@ -6820,7 +6820,7 @@ void VfoWidget::setRadioModel(RadioModel* radioModel)
                 case LvlNR: return signalAvailable(connected, caps, Feature::Nr);
                 case LvlAnf: return signalAvailable(connected, caps, Feature::Anf);
                 case LvlMn: return signalAvailable(connected, caps, Feature::ManualNotch);
-                default: return false;
+                default: return true; // Client-chain targets have their own availability rules.
                 }
             });
         for (QWidget* widget : m_ritControls) { registerSignalControl(widget, Feature::Rit); }

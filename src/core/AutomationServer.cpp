@@ -7887,7 +7887,7 @@ QJsonObject AutomationServer::doSlice(const QString& action, const QString& arg)
             using Feature = ReceiveDspControl::Feature;
             const Feature feature = which == QLatin1String("nr") ? Feature::Nr
                 : which == QLatin1String("anf") ? Feature::Anf : Feature::Nb;
-            if (!receiveDsp->supports(feature, s->mode())) {
+            if (on && !receiveDsp->supports(feature, s->mode())) {
                 return err(QStringLiteral("refused: %1 is unavailable in receive mode %2")
                            .arg(which, s->mode()));
             }

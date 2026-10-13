@@ -49,6 +49,7 @@
 #include <QNetworkReply>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <utility>
 #include "core/VersionNumber.h"
 #include "core/ThemeManager.h"
 
@@ -658,14 +659,18 @@ void TitleBar::setRadioTabs(const QList<RadioTabEntry>& radios)
     if (m_radioTabs) {
         m_radioTabs->setRadios(radios);
     }
-    // Confirmed connections finish discovery even without network heartbeats.
-    // Only a real heartbeat or an intentional disconnect clears a link alarm.
+    // A new connection finishes discovery without requiring a heartbeat.
+    // Repeated snapshots must not cancel a rescan begun while already connected.
+    QList<QString> connectedIds;
     for (const RadioTabEntry& radio : radios) {
         if (radio.status == RadioTabStatus::Connected) {
-            setDiscovering(false);
-            break;
+            connectedIds.append(radio.id);
+            if (!m_connectedRadioIds.contains(radio.id)) {
+                setDiscovering(false);
+            }
         }
     }
+    m_connectedRadioIds = std::move(connectedIds);
 }
 
 void TitleBar::setActiveRadio(const QString& id)
