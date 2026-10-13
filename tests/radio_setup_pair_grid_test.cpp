@@ -13,6 +13,10 @@
 #include "TestSettingsProfile.h"
 #include "gui/RadioSetupDialog.h"
 #include "models/RadioModel.h"
+#include "models/Kat500Model.h"
+#include "core/PeripheralSettings.h"
+#include <QListWidget>
+#include <QPushButton>
 
 #include <QApplication>
 #include <QLabel>
@@ -75,6 +79,24 @@ void grab(QWidget* dialog, const char* name)
 class RadioSetupPairGridTest : public QObject {
     Q_OBJECT
 private slots:
+
+    void kat500AdvancedShortcutSelectsAndReveals()
+    {
+        AppSettings::instance().load();
+        PeripheralSettings::setVisibleDeviceIds({QStringLiteral("kat500")});
+        RadioModel model;
+        Kat500Model tuner;
+        RadioSetupDialog dialog(&model, nullptr, nullptr, nullptr, nullptr, nullptr,
+                                nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &tuner);
+        dialog.show();
+        dialog.revealKat500AdvancedSettings();
+        auto* devices = dialog.findChild<QListWidget*>("peripheralDeviceList");
+        QVERIFY(devices && devices->currentItem());
+        QCOMPARE(devices->currentItem()->data(Qt::UserRole).toString(), QStringLiteral("kat500"));
+        auto* toggle = dialog.findChild<QPushButton*>("peripheralAdvanced_kat500");
+        QVERIFY(toggle && toggle->isChecked() && toggle->isVisible());
+        QVERIFY(dialog.findChild<QWidget*>("kat500Advanced")->isVisible());
+    }
 
     void gpsPairsSpreadAndStayTogether()
     {

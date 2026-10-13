@@ -10,7 +10,7 @@ description: "the station accessories it talks to directly, over the network or 
 the station accessories it talks to directly, over the network or a serial
 port, rather than through the radio. It covers the 4O3A Tuner Genius XL
 (TGXL), Power Genius XL (PGXL) and Antenna Genius (AG), the ShackSwitch, ACOM,
-SPE Expert, VK3AMP and Elecraft KPA1500 amplifiers, and the TelePost LP-100A
+SPE Expert, VK3AMP and Elecraft KPA1500 amplifiers, the Elecraft KAT500 tuner, and the TelePost LP-100A
 wattmeter.
 
 Each device has its own applet once it is connected. Those are described on
@@ -266,6 +266,7 @@ The fields are locked while the device is connected.
 - [Radio Setup](./radio-setup.md)
 - [Amplifiers](./amplifiers.md)
 - [TGXL Tuner Control](./tgxl-tuner-control.md)
+- [KAT500 Tuner Control](./kat500-tuner-control.md)
 - [ShackSwitch](./shackswitch.md)
 - [Green Heron Everyware](./green-heron-everyware.md)
 - [AetherSweep](./aethersweep.md)

@@ -1612,5 +1612,17 @@
   "note": "Pure decoder for the KPA500 peripheral stored fault ring; no radio-family transport. See docs/architecture/elecraft-kpa500-kat500-design.md.",
   "split": "",
   "confidence": "high"
+ },
+ "models/Kat500Model.h": {
+  "tag": "peripheral(elecraft)",
+  "note": "Typed model facade for the independent Elecraft KAT500 serial/raw-TCP tuner, with confirmed operating/configuration state and bounded maintenance operations. No radio-family wire or carrier commands are exposed to GUI.",
+  "split": "",
+  "confidence": "high"
+ },
+ "models/Kat500Types.h": {
+  "tag": "peripheral(elecraft)",
+  "note": "Model-owned KAT500 status, configuration and maintenance value types for the typed peripheral facade. No transport or raw command path in GUI.",
+  "split": "",
+  "confidence": "high"
  }
 }

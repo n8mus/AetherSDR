@@ -43,6 +43,7 @@
 #include "Kpa1500Applet.h"
 #include "LpMeterApplet.h"
 #include "Kpa500Applet.h"
+#include "Kat500Applet.h"
 #include "HealthApplet.h"
 #include "ImageFileDialog.h"
 #include "MeterApplet.h"
@@ -1781,6 +1782,12 @@ void MainWindow::refreshTunerPortFrequency()
             if (kpaBand >= 0) { break; }
         }
         kpaSource = QStringLiteral("%1 · %2 MHz").arg(kpaTx->letter()).arg(mhz, 0, 'f', 6);
+    }
+    if (kpaTx) {
+        const double mhz = kpaTx->frequency()
+            + ((kpaTx->mode() == "FM" || kpaTx->mode() == "NFM") ? kpaTx->txOffsetFreq() : 0.0)
+            + (kpaTx->xitOn() ? kpaTx->xitFreq() / 1.0e6 : 0.0);
+        m_kat500Model.setEffectiveTxFrequencyHz(qRound64(mhz * 1.0e6));
     }
     const bool transmitting = m_radioModel.transmitModel().isTransmitting();
     m_kpa500Conn.setTxContext(kpaBand, kpaSource, transmitting);
@@ -6623,6 +6630,7 @@ void MainWindow::wireMeters()
         m_lpMeterConn.setAutoReconnect(ar);
         m_kpa500Conn.setAutoReconnect(
             ar && PeripheralSettings::autoConnect(QStringLiteral("kpa500")));
+        m_kat500Model.setAutoReconnect(ar && PeripheralSettings::autoConnect(QStringLiteral("kat500")));
     }
 
     // Wire TgxlConnection to TunerModel
@@ -7512,6 +7520,39 @@ void MainWindow::wireMeters()
             if (!port.isEmpty()) {
                 const int baud = PeripheralSettings::deviceInt("Kpa500", "BaudRate", 4800);
                 m_kpa500Conn.connectSerial(port, baud);
+            }
+        }
+#endif
+    }
+
+    auto* kat = m_appletPanel->kat500Applet();
+    kat->setModel(&m_kat500Model);
+    connect(&m_kat500Model, &Kat500Model::detectedChanged, m_appletPanel, &AppletPanel::setKat500Visible);
+    connect(kat, &Kat500Applet::advancedSettingsRequested, this, [this] {
+        if (RadioSetupDialog* dialog = openRadioSetupPage(QStringLiteral("Peripherals"))) {
+            dialog->revealKat500AdvancedSettings();
+        }
+    });
+    connect(kat, &Kat500Applet::followTxChanged, this, [this] { refreshTunerPortFrequency(); });
+    connect(&m_kat500Model, &Kat500Model::availabilityChanged, this, [this] {
+        if (m_kat500Model.followTxFrequency() && m_kat500Model.unavailableReason(true).isEmpty()) {
+            refreshTunerPortFrequency();
+        }
+    });
+    if (PeripheralSettings::autoConnect(QStringLiteral("kat500"))) {
+        const QString mode = PeripheralSettings::deviceString("Kat500", "ConnectionMode", "Serial");
+        if (mode == "Network") {
+            const QString host = PeripheralSettings::deviceString("Kat500", "ManualIp").trimmed();
+            const int port = PeripheralSettings::deviceInt("Kat500", "ManualPort", 2000);
+            if (!host.isEmpty() && port > 0 && port <= 65535) {
+                m_kat500Model.connectToHost(host, static_cast<quint16>(port));
+            }
+        }
+#ifdef HAVE_SERIALPORT
+        else if (mode == "Serial") {
+            const QString port = PeripheralSettings::deviceString("Kat500", "SerialPort");
+            if (!port.isEmpty()) {
+                m_kat500Model.connectSerial(port, PeripheralSettings::deviceInt("Kat500", "BaudRate", 38400));
             }
         }
 #endif

@@ -3577,6 +3577,7 @@ add_executable(firmware_close_dialog_test
     src/gui/RtlReceiverSettingsWidget.cpp
     src/gui/ControlAvailabilityRegistry.cpp
     src/gui/RadioSetupDialog_Peripherals.cpp
+    src/gui/Kat500AdvancedWidget.cpp  # Kat500Model links through aetherdesktop_support -> aethercore
     src/gui/Kpa500AdvancedWidget.cpp
     src/gui/PersistentDialog.cpp
     src/gui/FramelessResizer.cpp
@@ -3603,6 +3604,7 @@ add_executable(flex_control_visibility_test
     src/gui/RtlReceiverSettingsWidget.cpp
     src/gui/ControlAvailabilityRegistry.cpp
     src/gui/RadioSetupDialog_Peripherals.cpp
+    src/gui/Kat500AdvancedWidget.cpp  # Kat500Model links through aetherdesktop_support -> aethercore
     src/gui/Kpa500AdvancedWidget.cpp
     src/gui/PersistentDialog.cpp
     src/gui/FramelessResizer.cpp
@@ -3640,6 +3642,7 @@ add_executable(radio_setup_region_field_test
     src/gui/RtlReceiverSettingsWidget.cpp
     src/gui/ControlAvailabilityRegistry.cpp
     src/gui/RadioSetupDialog_Peripherals.cpp
+    src/gui/Kat500AdvancedWidget.cpp  # Kat500Model links through aetherdesktop_support -> aethercore
     src/gui/Kpa500AdvancedWidget.cpp
     src/gui/PersistentDialog.cpp
     src/gui/FramelessResizer.cpp
@@ -3671,6 +3674,7 @@ add_executable(radio_setup_label_theme_token_test
     src/gui/RtlReceiverSettingsWidget.cpp
     src/gui/ControlAvailabilityRegistry.cpp
     src/gui/RadioSetupDialog_Peripherals.cpp
+    src/gui/Kat500AdvancedWidget.cpp  # Kat500Model links through aetherdesktop_support -> aethercore
     src/gui/Kpa500AdvancedWidget.cpp
     src/gui/PersistentDialog.cpp
     src/gui/FramelessResizer.cpp
@@ -3696,6 +3700,7 @@ add_executable(radio_setup_window_size_test
     src/gui/RtlReceiverSettingsWidget.cpp
     src/gui/ControlAvailabilityRegistry.cpp
     src/gui/RadioSetupDialog_Peripherals.cpp
+    src/gui/Kat500AdvancedWidget.cpp  # Kat500Model links through aetherdesktop_support -> aethercore
     src/gui/Kpa500AdvancedWidget.cpp
     src/gui/PersistentDialog.cpp
     src/gui/FramelessResizer.cpp
@@ -3721,6 +3726,7 @@ add_executable(radio_setup_pair_grid_test
     src/gui/RtlReceiverSettingsWidget.cpp
     src/gui/ControlAvailabilityRegistry.cpp
     src/gui/RadioSetupDialog_Peripherals.cpp
+    src/gui/Kat500AdvancedWidget.cpp  # Kat500Model links through aetherdesktop_support -> aethercore
     src/gui/Kpa500AdvancedWidget.cpp
     src/gui/PersistentDialog.cpp
     src/gui/FramelessResizer.cpp
@@ -3752,6 +3758,7 @@ add_executable(radio_setup_max_power_field_test
     src/gui/RtlReceiverSettingsWidget.cpp
     src/gui/ControlAvailabilityRegistry.cpp
     src/gui/RadioSetupDialog_Peripherals.cpp
+    src/gui/Kat500AdvancedWidget.cpp  # Kat500Model links through aetherdesktop_support -> aethercore
     src/gui/Kpa500AdvancedWidget.cpp
     src/gui/PersistentDialog.cpp
     src/gui/FramelessResizer.cpp
@@ -3780,6 +3787,7 @@ add_executable(radio_setup_tx_timing_fields_test
     src/gui/RtlReceiverSettingsWidget.cpp
     src/gui/ControlAvailabilityRegistry.cpp
     src/gui/RadioSetupDialog_Peripherals.cpp
+    src/gui/Kat500AdvancedWidget.cpp  # Kat500Model links through aetherdesktop_support -> aethercore
     src/gui/Kpa500AdvancedWidget.cpp
     src/gui/PersistentDialog.cpp
     src/gui/FramelessResizer.cpp
@@ -3809,6 +3817,7 @@ add_executable(radio_setup_recording_mode_dim_test
     src/gui/RtlReceiverSettingsWidget.cpp
     src/gui/ControlAvailabilityRegistry.cpp
     src/gui/RadioSetupDialog_Peripherals.cpp
+    src/gui/Kat500AdvancedWidget.cpp  # Kat500Model links through aetherdesktop_support -> aethercore
     src/gui/Kpa500AdvancedWidget.cpp
     src/gui/PersistentDialog.cpp
     src/gui/FramelessResizer.cpp
@@ -3839,6 +3848,7 @@ add_executable(radio_setup_headphone_output_gate_test
     src/gui/RtlReceiverSettingsWidget.cpp
     src/gui/ControlAvailabilityRegistry.cpp
     src/gui/RadioSetupDialog_Peripherals.cpp
+    src/gui/Kat500AdvancedWidget.cpp  # Kat500Model links through aetherdesktop_support -> aethercore
     src/gui/Kpa500AdvancedWidget.cpp
     src/gui/PersistentDialog.cpp
     src/gui/FramelessResizer.cpp
@@ -3867,6 +3877,7 @@ add_executable(radio_setup_show_tx_waterfall_test
     src/gui/RtlReceiverSettingsWidget.cpp
     src/gui/ControlAvailabilityRegistry.cpp
     src/gui/RadioSetupDialog_Peripherals.cpp
+    src/gui/Kat500AdvancedWidget.cpp  # Kat500Model links through aetherdesktop_support -> aethercore
     src/gui/Kpa500AdvancedWidget.cpp
     src/gui/PersistentDialog.cpp
     src/gui/FramelessResizer.cpp
@@ -4610,6 +4621,25 @@ if(TARGET Qt6::SerialPort)
 endif()
 add_test(NAME kat500_model_test COMMAND kat500_model_test)
 
+add_executable(kat500_applet_test tests/kat500_applet_test.cpp
+    src/gui/Kat500Applet.cpp src/models/Kat500Model.cpp src/models/Kat500Model.h
+    src/core/Kat500Protocol.cpp src/core/Kat500Maintenance.cpp
+    src/gui/CanonSurface.cpp src/gui/CanonWindow.cpp src/gui/DragValuePopup.cpp
+    src/core/ThemeManager.cpp src/core/ThemeSeedGenerated.cpp
+    $<TARGET_OBJECTS:aether_test_settings> $<TARGET_OBJECTS:aether_test_log_manager>
+    $<TARGET_OBJECTS:aether_test_async_log_writer> ${THEME_TEST_RESOURCES})
+target_include_directories(kat500_applet_test PRIVATE src tests)
+target_link_libraries(kat500_applet_test PRIVATE Qt6::Core Qt6::Network Qt6::Gui Qt6::Widgets Qt6::Test)
+add_test(NAME kat500_applet_test COMMAND kat500_applet_test)
+set_tests_properties(kat500_applet_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+add_executable(kat500_advanced_widget_test tests/kat500_advanced_widget_test.cpp
+    src/gui/Kat500AdvancedWidget.cpp src/models/Kat500Model.cpp src/models/Kat500Model.h
+    src/core/Kat500Protocol.cpp src/core/Kat500Maintenance.cpp)
+target_include_directories(kat500_advanced_widget_test PRIVATE src tests)
+target_link_libraries(kat500_advanced_widget_test PRIVATE Qt6::Core Qt6::Network Qt6::Widgets Qt6::Test)
+add_test(NAME kat500_advanced_widget_test COMMAND kat500_advanced_widget_test)
+set_tests_properties(kat500_advanced_widget_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(kpa500_protocol_test
     tests/kpa500_protocol_test.cpp
     src/core/Kpa500Protocol.cpp
@@ -5131,6 +5161,7 @@ add_executable(peripheral_auth_dialog_test
     src/gui/RtlReceiverSettingsWidget.cpp
     src/gui/ControlAvailabilityRegistry.cpp
     src/gui/RadioSetupDialog_Peripherals.cpp
+    src/gui/Kat500AdvancedWidget.cpp  # Kat500Model links through aetherdesktop_support -> aethercore
     src/gui/Kpa500AdvancedWidget.cpp
     src/gui/AntennaGeniusApplet.cpp
     src/gui/ShackSwitchApplet.cpp
@@ -8745,6 +8776,7 @@ set(AETHER_SETTINGS_CONSUMERS
     canon_window_test
     canon_surface_test
     kpa500_applet_test
+    kat500_applet_test
     panadapter_header_test
     theme_seed_test
     panadapter_message_overlay_test
