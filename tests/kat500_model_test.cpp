@@ -34,6 +34,12 @@ static int settlingReadback() {
  CHECK(model.setAntenna(2)); model.tick(); model.receiveBytes("AN1;");
  model.query("VFWD;"); model.tick(); model.receiveBytes("VFWD1;"); now+=100; const int before=wire.size(); model.tick();
  CHECK(!model.operationBusy() && wire.size()==before);
+ now+=2100;model.m_lastIo=now;model.m_lastReply=now;model.m_received["TP"]=now;model.m_received["VFWD"]=now;model.m_status.forwardAdc=0;
+ CHECK(model.setAntenna(3));model.tick();model.receiveBytes("AN1;");
+ now+=1900;model.m_lastIo=now;model.tick();CHECK(wire.last()=="AN;");
+ const int beforeLate=wire.size(),beforeFinished=finished.size();now+=150;model.receiveBytes("AN3;");
+ CHECK(!model.operationBusy() && finished.size()==beforeFinished && wire.size()==beforeLate);
+
 
  return 0;
 }

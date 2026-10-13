@@ -375,6 +375,9 @@ bool Kat500Model::requestValue(const QByteArray& setter, const QByteArray& gette
 void Kat500Model::confirmRequestedValue()
 {
     if (m_settleGetter.isEmpty() || m_settleGeneration != m_generation || !operationBusy()) { return; }
+    if (m_now() >= m_settleDeadline) {
+        fail(QStringLiteral("Requested value arrived after the readback deadline; no write retry was sent.")); return;
+    }
     if (m_settleVerify && m_settleVerify(m_status)) { finish(QStringLiteral("Device readback confirmed.")); return; }
     // Firmware 02.16 may return the previous relay/antenna state immediately
     // after SET. Wait for GET confirmation without repeating the mutation.
