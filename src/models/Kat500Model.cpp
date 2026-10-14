@@ -23,6 +23,7 @@ QByteArray hexMask(int mask) { return QByteArray::number(mask,16).rightJustified
 Kat500Model::Kat500Model(QObject* parent) : QObject(parent), m_parser(std::make_unique<FrameParser>()),
     m_socket(std::make_unique<QTcpSocket>())
 {
+    m_socket->setReadBufferSize(4096);
     m_clock.start(); m_now = [this] { return m_clock.elapsed(); };
     m_timer.setInterval(100); m_reconnectTimer.setSingleShot(true); m_reconnectTimer.setInterval(5000);
     connect(&m_timer,&QTimer::timeout,this,&Kat500Model::tick);
@@ -47,8 +48,18 @@ Kat500Model::Kat500Model(QObject* parent) : QObject(parent), m_parser(std::make_
 Kat500Model::~Kat500Model() { m_autoReconnect = false; disconnectDevice(); }
 void Kat500Model::connectToHost(const QString& host, quint16 port)
 {
-    if (m_connected || m_connecting || host.trimmed().isEmpty() || !port) { return; }
-    m_network = true; m_host = host.trimmed(); m_port = port; m_connecting = true;
+    if (m_connected || m_connecting) { return; }
+    m_reconnectTimer.stop();
+    const QString trimmedHost = host.trimmed();
+    bool invalidHost = trimmedHost.isEmpty() || trimmedHost.size() > 253 || trimmedHost.contains('/');
+    for (QChar character : trimmedHost) {
+        invalidHost = invalidHost || character.isSpace() || !character.isPrint();
+    }
+    if (invalidHost || port == 0) {
+        emit connectionFailed(tr("Enter a TCP host and a port from 1 to 65535."));
+        return;
+    }
+    m_network = true; m_host = trimmedHost; m_port = port; m_connecting = true;
     m_deliberateDisconnect = false; m_connectStarted = m_now(); m_timer.start();
     m_socket->connectToHost(m_host,m_port); emit availabilityChanged();
 }

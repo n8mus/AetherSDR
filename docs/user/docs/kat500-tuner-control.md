@@ -26,6 +26,8 @@ Use a local USB serial port or a raw TCP serial bridge such as ser2net or aether
 3. Click **Connect**. **Auto-connect** reconnects using the saved client connection preferences when enabled.
 4. The **KT500** button appears after KAT500 identification. It remains available during logical power-off or stale replies and disappears when the transport closes.
 
+For **Network**, enter a hostname or IP address without a URL scheme, path, spaces or control characters, and a port from 1 to 65535. Invalid entries are rejected before connecting.
+
 ## Using the applet
 
 **ON/OFF** shows confirmed power. Click it to request the opposite state; the label changes after readback. Silence is stale, not OFF. **Tune** requests tuner search only after your explicit click; supply RF according to the Elecraft manual. **Cancel** requests cancellation while the tuner reports an active search. AetherSDR does not generate a radio carrier for these controls.
