@@ -7487,7 +7487,8 @@ void MainWindow::wireMeters()
     connect(&m_kpa500Conn, &Kpa500Connection::statusUpdated, this,
             [this](const AetherSDR::Kpa500::Status& s) {
         m_appletPanel->kpa500Applet()->applyStatus(s);
-        if (m_kpa500Conn.isConnected() && m_kpa500Conn.isResponding()
+        if (!(m_radioModel.amplifier().present() && m_radioModel.amplifier().operate())
+            && m_kpa500Conn.isConnected() && m_kpa500Conn.isResponding()
             && s.operate.value_or(false) && s.forwardPowerW.has_value()) {
             applyAmpTxMeters(s.forwardPowerW.value(), s.swr.value_or(1.0f),
                              /*fromRelay=*/false);
