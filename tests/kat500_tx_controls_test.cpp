@@ -1,4 +1,5 @@
 #include "TestSettingsProfile.h"
+#include "core/TxKeyingMarker.h"
 #include "gui/TxApplet.h"
 #include "gui/AtuPreTuneDialog.h"
 #include "models/Kat500Model.h"
@@ -74,6 +75,13 @@ public:
     static void frame(Kat500Model& k, const QByteArray& reply) { k.receiveBytes(reply); }
     static void advance(Kat500Model& k, qint64 now) { k.m_now=[now] { return now; }; k.m_lastIo=now; k.m_lastReply=now; }
     static void drop(Kat500Model& k) { k.transportClosed(); }
+    static void stale(Kat500Model& k) {
+        k.m_now=[] { return qint64(6000); };
+        emit k.availabilityChanged();
+    }
+    static void reopen(Kat500Model& k) {
+        k.transportOpened(); k.m_timer.stop();
+    }
 };
 }
 namespace {
@@ -161,6 +169,16 @@ void routingAndCycle() {
 }
 void cancellationAndFences() {
     {
+        Fixture f;
+        Kat500ModelTest::stale(f.kat);
+        check(f.routing->selected() && !f.routing->unavailableReason().isEmpty(),
+            "stale readback on an open connection blocks actions without changing tuner route");
+        Kat500ModelTest::drop(f.kat);
+        check(!f.routing->selected(),"closing a stale connection restores the radio route");
+        Kat500ModelTest::reopen(f.kat);
+        check(!f.routing->selected(),"reconnect waits for fresh tuner mode before selecting KAT500");
+    }
+    {
         Fixture f; f.bypass(); f.start(); f.acknowledgeSearch(); f.routing->cancel(); f.routing->cancel();
         Kat500ModelTest::step(f.kat);
         Kat500ModelTest::advance(f.kat,2100); Kat500ModelTest::step(f.kat);
@@ -207,7 +225,8 @@ void cancellationAndFences() {
         Fixture f; f.bypass(); f.start(); f.acknowledgeSearch();
         Kat500ModelTest::drop(f.kat);
         check(f.backend->wire.contains("tune:off") && !f.routing->busy(),"disconnect stops carrier");
-        check(f.routing->selected() && !f.routing->unavailableReason().isEmpty(),"lost external tuner cannot silently fall back to internal ATU");
+        check(!f.routing->selected(),"closed tuner connection releases the external route");
+        check(!f.backend->wire.contains("atu:on"),"disconnect never starts the internal ATU");
     }
     {
         Fixture f; f.bypass(); f.start(); f.acknowledgeSearch();
@@ -402,8 +421,9 @@ void contextMenu() {
     QMenu disconnected;
     applet.buildAtuContextMenu(disconnected);
     check(disconnected.actions().size() == 2
-        && !disconnected.actions()[0]->isEnabled() && !disconnected.actions()[1]->isEnabled(),
-        "lost KAT500 leaves its menu disabled without internal memory fallback");
+        && !disconnected.actions()[0]->text().contains("KAT500")
+        && !disconnected.actions()[1]->text().contains("KAT500"),
+        "disconnected KAT500 restores the radio context menu");
 }
 void presentation() {
     Fixture f; f.routing.reset();
@@ -419,6 +439,42 @@ void presentation() {
     Kat500ModelTest::mode(f.kat,Kat500::Mode::Bypass);
     check(atu->text()=="ATU" && save->text()=="MEM" && save->isCheckable(),"Bypass restores existing ATU/MEM presentation");
     check(!atu->accessibleDescription().contains("KAT500"), "Bypass restores radio ATU accessible description");
+    auto* tune=button(applet,"Tune");
+    check(tune && atu->styleSheet()==tune->styleSheet(),"Bypass restores the original radio button style");
+    Kat500ModelTest::mode(f.kat,Kat500::Mode::Auto);
+    TransmitDelta power; power.rfPower=50; power.tunePower=7;
+    f.radio.transmitModel().applyChanges(power);
+    const auto hasLabel = [&applet](const QString& text) {
+        for (auto* label : applet.findChildren<QLabel*>()) { if (label->text()==text) { return true; } }
+        return false;
+    };
+    check(hasLabel("50%") && hasLabel("7%"),"selected KAT500 keeps percentage power readouts");
+    const TxKeyingAction::Prepared pending = prepareTxKeyingAction(atu, f.input, "click", {});
+    check(bool(pending), "external ATU click can be captured before disconnect");
+    f.backend->wire.clear();
+    f.kat.disconnectDevice();
+    check(atu->text()=="ATU" && save->text()=="MEM" && save->isCheckable(),
+        "disconnect restores ATU and checkable MEM immediately");
+    pill=false;
+    bool memory=false;
+    for (auto* label : applet.findChildren<QLabel*>()) {
+        pill |= label->text()=="KAT500";
+        memory |= label->text()=="Mem";
+    }
+    check(!pill && memory,"disconnect replaces the KAT500 pill with radio memory status");
+    check(tune && atu->styleSheet()==tune->styleSheet(),"disconnect restores the original radio button style");
+    check(hasLabel("50") && hasLabel("7") && !hasLabel("50%") && !hasLabel("7%"),
+        "disconnect restores plain radio power readouts without another meter update");
+    if (pending) { pending(); }
+    Kat500ModelTest::step(f.kat);
+    check(!f.backend->wire.contains("atu:on") && !f.backend->wire.contains("tune:on")
+        && f.serial.isEmpty(),"captured external click cannot key either tuner after disconnect");
+    f.bypass();
+    f.backend->wire.clear();
+    const TxKeyingAction::Prepared fresh = prepareTxKeyingAction(atu, f.input, "click", {});
+    if (fresh) { fresh(); }
+    check(f.backend->wire.contains("atu:on") && !f.backend->wire.contains("tune:on")
+        && f.serial.isEmpty(),"a new operator click after disconnect uses only the radio ATU");
 }
 }
 int main(int argc,char** argv) {

@@ -137,7 +137,7 @@ void Kat500TxController::refresh()
     if (m_refreshing) { return; }
     QScopedValueRollback guard(m_refreshing, true);
     const bool previouslySelected = m_selected;
-    if (!m_tuner || !m_tuner->useTxControls()) { m_selected = false; }
+    if (!m_tuner || !m_tuner->isConnected() || !m_tuner->useTxControls()) { m_selected = false; }
     else if (m_tuner->isResponding() && m_tuner->status().mode) {
         // Physical BYP can be a successful match in Auto; only MD selects the route.
         m_selected = m_tuner->status().mode != Kat500::Mode::Bypass;

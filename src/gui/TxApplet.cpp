@@ -27,8 +27,16 @@
 
 namespace AetherSDR {
 
+static const char* const kRadioTxButtonStyle =
+    "QPushButton { background: #1a3a5a; border: 1px solid #205070; "
+    "border-radius: 3px; color: #c8d8e8; font-size: 10px; font-weight: bold; "
+    "padding: 2px; }"
+    "QPushButton:hover { background: #204060; }"
+    "QPushButton:disabled { background-color: #1a1a2a; color: #556070; "
+    "border: 1px solid #2a3040; }";
+
 // MOX idle "this is the transmit button" accent — amber border/text, distinct
-// from the neutral btnStyle of its TUNE/ATU/MEM neighbors (#3663).  Tokenized
+// from the neutral style of its TUNE/ATU/MEM neighbors (#3663).  Tokenized
 // (color.tx.mox.*) so the accent is editable in the Theme Editor, mirroring the
 // waterfall LIVE chip (#3761).  Shared between construction and the moxChanged
 // return-to-idle branch so the two can't drift; background / hover-background /
@@ -95,6 +103,11 @@ static void setIndicatorState(QLabel* lbl, IndicatorState state,
 static QString percentText(int value)
 {
     return QStringLiteral("%1%").arg(value);
+}
+
+static QString powerText(int value, bool external)
+{
+    return external ? percentText(value) : QString::number(value);
 }
 
 // ── TxApplet ────────────────────────────────────────────────────────────────
@@ -198,7 +211,7 @@ void TxApplet::buildUI()
         m_rfPowerSlider->setAccessibleDescription("Transmit RF power level, 0 to 100 percent of maximum");
         row->addWidget(m_rfPowerSlider, 1);
 
-        m_rfPowerLabel = new QLabel("100%");
+        m_rfPowerLabel = new QLabel("100");
         AetherSDR::ThemeManager::instance().applyStyleSheet(m_rfPowerLabel, "QLabel { color: {{color.text.primary}}; font-size: 10px; }");
         m_rfPowerLabel->setFixedWidth(30);
         m_rfPowerLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
@@ -223,7 +236,7 @@ void TxApplet::buildUI()
         m_tunePowerSlider->setAccessibleDescription("Tune carrier power level, 0 to 100 percent of maximum");
         row->addWidget(m_tunePowerSlider, 1);
 
-        m_tunePowerLabel = new QLabel("10%");
+        m_tunePowerLabel = new QLabel("10");
         AetherSDR::ThemeManager::instance().applyStyleSheet(m_tunePowerLabel, "QLabel { color: {{color.text.primary}}; font-size: 10px; }");
         m_tunePowerLabel->setFixedWidth(30);
         m_tunePowerLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
@@ -260,16 +273,9 @@ void TxApplet::buildUI()
         auto* row = new QHBoxLayout;
         row->setSpacing(2);
 
-        const char* btnStyle =
-            "QPushButton { background: #1a3a5a; border: 1px solid #205070; "
-            "border-radius: 3px; color: #c8d8e8; font-size: 10px; font-weight: bold; "
-            "padding: 2px; }"
-            "QPushButton:hover { background: #204060; }"
-            "QPushButton:disabled { background-color: #1a1a2a; color: #556070; "
-            "border: 1px solid #2a3040; }";
         m_tuneBtn = new QPushButton("TUNE");
         markTxKeying(m_tuneBtn);   // emits a tune carrier — keys TX (#3646)
-        m_tuneBtn->setStyleSheet(btnStyle);
+        m_tuneBtn->setStyleSheet(kRadioTxButtonStyle);
         m_tuneBtn->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
         m_tuneBtn->setFixedHeight(22);
         m_tuneBtn->setAccessibleName("Tune");
@@ -293,7 +299,7 @@ void TxApplet::buildUI()
 
         m_atuBtn = new QPushButton("ATU");
         markTxKeying(m_atuBtn);    // starts ATU tune — keys TX (#3646)
-        m_atuBtn->setStyleSheet(btnStyle);
+        m_atuBtn->setStyleSheet(kRadioTxButtonStyle);
         m_atuBtn->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
         m_atuBtn->setFixedHeight(22);
         m_atuBtn->setAccessibleName("ATU tune");
@@ -307,7 +313,7 @@ void TxApplet::buildUI()
         row->addWidget(m_atuBtn);
 
         m_memBtn = new QPushButton("MEM");
-        m_memBtn->setStyleSheet(btnStyle);
+        m_memBtn->setStyleSheet(kRadioTxButtonStyle);
         m_memBtn->setCheckable(true);
         m_memBtn->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
         m_memBtn->setFixedHeight(22);
@@ -379,14 +385,14 @@ void TxApplet::buildUI()
 
     // ── Slider → label + command connections ────────────────────────────────
     connect(m_rfPowerSlider, &QSlider::valueChanged, this, [this](int v) {
-        m_rfPowerLabel->setText(percentText(v));
+        m_rfPowerLabel->setText(powerText(v, m_katTx && m_katTx->selected()));
         if (!m_updatingFromModel && m_model)
             m_model->setRfPower(v);
     });
     connect(m_rfPowerSlider, &QSlider::sliderReleased,
             this, &TxApplet::syncFromModel);
     connect(m_tunePowerSlider, &QSlider::valueChanged, this, [this](int v) {
-        m_tunePowerLabel->setText(percentText(v));
+        m_tunePowerLabel->setText(powerText(v, m_katTx && m_katTx->selected()));
         if (!m_updatingFromModel && m_model)
             m_model->setTunePower(v);
     });
@@ -690,6 +696,8 @@ void TxApplet::updateAtuAvailability()
         return;
     const bool external = m_katTx && m_katTx->selected();
     const bool busy = m_katTx && m_katTx->busy();
+    m_rfPowerLabel->setText(powerText(m_model ? m_model->rfPower() : m_rfPowerSlider->value(), external));
+    m_tunePowerLabel->setText(powerText(m_model ? m_model->tunePower() : m_tunePowerSlider->value(), external));
     if (external || busy) {
         const QString reason = m_tgxlOperate ? tr("Disabled — TGXL is in OPERATE mode") : m_katTx->unavailableReason();
         const QString action = busy ? tr("Cancel the KAT500 operation and stop its tune carrier")
@@ -717,10 +725,7 @@ void TxApplet::updateAtuAvailability()
         return;
     }
     m_atuBtn->setText(tr("ATU"));
-    ThemeManager::instance().applyStyleSheet(m_atuBtn,
-        "QPushButton { background: {{color.background.2}}; color: {{color.text.primary}}; border: 1px solid {{color.background.2}}; border-radius: 3px; font-size: 10px; font-weight: bold; padding: 2px; }"
-        "QPushButton:hover { background: {{color.background.1}}; }"
-        "QPushButton:disabled { color: {{color.text.disabled}}; }");
+    ThemeManager::instance().applyStyleSheet(m_atuBtn, kRadioTxButtonStyle);
     { const QSignalBlocker blocker(m_memBtn); m_memBtn->setCheckable(true); }
     m_memBtn->setText(tr("MEM"));
     m_memBtn->setAccessibleDescription(tr("Toggle radio ATU memory recall"));
@@ -779,13 +784,13 @@ void TxApplet::syncFromModel()
         && m_rfPowerSlider->value() != m_model->rfPower()) {
         m_rfPowerSlider->setValue(m_model->rfPower());
     }
-    m_rfPowerLabel->setText(percentText(m_model->rfPower()));
+    m_rfPowerLabel->setText(powerText(m_model->rfPower(), m_katTx && m_katTx->selected()));
 
     if (!m_tunePowerSlider->isSliderDown()
         && m_tunePowerSlider->value() != m_model->tunePower()) {
         m_tunePowerSlider->setValue(m_model->tunePower());
     }
-    m_tunePowerLabel->setText(percentText(m_model->tunePower()));
+    m_tunePowerLabel->setText(powerText(m_model->tunePower(), m_katTx && m_katTx->selected()));
 
     // Active profile — update combo selection
     if (!m_model->activeProfile().isEmpty()) {

@@ -1064,7 +1064,7 @@ void testMemButtonResyncsOnResetState()
     report("MEM clears on disconnect", !mem->isChecked());
 }
 
-static void percentageLabels()
+static void nativePowerLabels()
 {
     TransmitModel model;
     TxApplet applet;
@@ -1073,7 +1073,7 @@ static void percentageLabels()
     values.rfPower = 50;
     values.tunePower = 7;
     model.applyChanges(values);
-    report("power slider readouts explicitly show percent", labelWithText(applet, "50%") && labelWithText(applet, "7%"));
+    report("radio power readouts retain their original labels", labelWithText(applet, "50") && labelWithText(applet, "7"));
 }
 
 int main(int argc, char** argv)
@@ -1090,7 +1090,7 @@ int main(int argc, char** argv)
     qputenv("AETHER_AUTOMATION", "1");
 
     QApplication app(argc, argv);
-    percentageLabels();
+    nativePowerLabels();
 
     std::printf("TxApplet power reconciliation test harness\n\n");
 

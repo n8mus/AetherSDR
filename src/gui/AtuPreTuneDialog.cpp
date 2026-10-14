@@ -85,10 +85,9 @@ constexpr int kMaxConsecutiveFailBypass = 3;
 // unattended. (#2649 #4)
 constexpr int kMaxPointsSoftCap = 100;
 
-// Equipment guardrail: warn if tune power exceeds this watts when entering
-// Auto mode. Some amps need higher drive, so the gate is a warning rather
-// than a refusal — Principle XIII (the operator outranks the agent). (#2649 #5)
-constexpr int kAutoModeTunePowerWarnPercent = 20;
+// Warn above this radio tune-power level in Auto mode. Some amplifiers need
+// higher drive, so the operator can confirm the warning and continue. (#2649)
+constexpr int kAutoModeTunePowerWarnLevel = 20;
 
 // AppSettings key for the operator's licence class code (e.g. "G" for
 // General). Stored as a single nested-JSON-equivalent flat string per
@@ -707,13 +706,13 @@ void AtuPreTuneDialog::startSweep(const std::shared_ptr<TxController>& controlle
     // force a deliberate choice before unattended TX.
     if (m_mode == Mode::Auto && m_radio) {
         const int tunePower = m_radio->transmitModel().tunePower();
-        if (tunePower > kAutoModeTunePowerWarnPercent) {
+        if (tunePower > kAutoModeTunePowerWarnLevel) {
             ScopedChildWidget<QMessageBox> boxOwner(
                 QMessageBox::Warning, "High Tune Power",
-                QString("Tune power is %1% — higher than the recommended "
-                        "%2% ceiling for unattended Auto mode.\n\n"
-                        "Continue?")
-                    .arg(tunePower).arg(kAutoModeTunePowerWarnPercent),
+                QString(m_externalTuner
+                    ? "Tune power is %1% — higher than the recommended %2% ceiling for unattended Auto mode.\n\nContinue?"
+                    : "Tune power is %1 W — higher than the recommended %2 W ceiling for unattended Auto mode.\n\nContinue?")
+                    .arg(tunePower).arg(kAutoModeTunePowerWarnLevel),
                 QMessageBox::Ok | QMessageBox::Cancel, this);
             boxOwner.get()->setDefaultButton(QMessageBox::Cancel);
             const int reply = boxOwner.get()->exec();

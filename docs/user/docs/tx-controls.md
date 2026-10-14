@@ -31,7 +31,7 @@ transmit. Before you key up for the first time, read [Before You Transmit](./bef
   can train its predistortion against the output of an external linear
   amplifier rather than its own PA.
 
-Both power slider readouts include **%**: they set radio drive, not amplifier output watts.
+When a connected KAT500 is selected for TX Controls, both power slider readouts include **%** for radio drive, not amplifier output watts. With no KAT500 connection, in Bypass, or with **Use KAT500 for TX Controls** off, the radio controls retain their normal labels and appearance.
 
 Hover **RF Pwr** or **SWR** for a floating badge with the exact value
 (for example `12 W` or `1.12:1`). Forward power drops to zero as soon as you
@@ -78,7 +78,7 @@ channelised bands such as US 60 m it uses one point per channel.
 - **License class** limits the points to sub-bands your class may use, where
   the active band plan has class data (the ARRL US plan has T/G/E).
 - Safety nets: a warning with an estimated duration above 100 points; a
-  warning when Auto-mode tune power is above 20%; an audible cue on a
+  warning when the Auto-mode **Tune Pwr** setting is above 20; an audible cue on a
   per-point timeout; and after 3 consecutive failed or bypassed results on one
   band, the sweep skips the rest of that band and moves on.
 - **The sweep keys the transmitter repeatedly. Make sure the bands are clear
