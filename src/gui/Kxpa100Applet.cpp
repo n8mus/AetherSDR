@@ -720,8 +720,8 @@ void Kxpa100Applet::setRadioContext(const QString& radioName, int txFrequencyKhz
 {
     m_txFrequencyKhz = txFrequencyKhz; m_associated = associated;
     text(m_association,radioName.isEmpty() ? tr("No radio selected.") : associated
-        ? tr("Associated with %1. TX Controls and shared meters apply only to this radio.").arg(radioName)
-        : tr("Selected radio: %1. Associate it to enable integration.").arg(radioName));
+        ? tr("Associated with %1. VU/PWR metering and frequency context apply only to this radio.").arg(radioName)
+        : tr("Selected radio: %1. Associate it for VU/PWR metering and frequency context.").arg(radioName));
     availability(m_associate,radioName.isEmpty() ? tr("Select a radio first.") : QString());
     m_associate->setText(associated ? tr("Remove radio association") : tr("Use with current radio"));
     refresh();
