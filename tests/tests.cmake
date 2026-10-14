@@ -4642,6 +4642,17 @@ if(TARGET Qt6::SerialPort)
 endif()
 add_test(NAME kat500_model_test COMMAND kat500_model_test)
 
+add_executable(kxpa100_applet_test tests/kxpa100_applet_test.cpp
+    src/gui/Kxpa100Applet.cpp src/models/Kxpa100Model.cpp src/models/Kxpa100Model_Maintenance.cpp src/models/Kxpa100Model.h
+    src/core/Kxpa100Protocol.cpp src/core/Kxpa100Maintenance.cpp
+    src/gui/CanonSurface.cpp src/gui/CanonWindow.cpp src/gui/DragValuePopup.cpp
+    src/core/ThemeManager.cpp src/core/ThemeSeedGenerated.cpp
+    $<TARGET_OBJECTS:aether_test_settings> $<TARGET_OBJECTS:aether_test_log_manager>
+    $<TARGET_OBJECTS:aether_test_async_log_writer> ${THEME_TEST_RESOURCES})
+target_include_directories(kxpa100_applet_test PRIVATE src tests)
+target_link_libraries(kxpa100_applet_test PRIVATE Qt6::Core Qt6::Network Qt6::Gui Qt6::Widgets Qt6::Test)
+add_test(NAME kxpa100_applet_test COMMAND kxpa100_applet_test)
+set_tests_properties(kxpa100_applet_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 add_executable(kat500_applet_test tests/kat500_applet_test.cpp
     src/gui/Kat500Applet.cpp src/models/Kat500Model.cpp src/models/Kat500Model.h
     src/core/Kat500Protocol.cpp src/core/Kat500Maintenance.cpp
@@ -4653,6 +4664,18 @@ target_include_directories(kat500_applet_test PRIVATE src tests)
 target_link_libraries(kat500_applet_test PRIVATE Qt6::Core Qt6::Network Qt6::Gui Qt6::Widgets Qt6::Test)
 add_test(NAME kat500_applet_test COMMAND kat500_applet_test)
 set_tests_properties(kat500_applet_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+add_executable(kxpa100_advanced_widget_test tests/kxpa100_advanced_widget_test.cpp
+    src/gui/Kxpa100AdvancedWidget.cpp src/models/Kxpa100Model.cpp src/models/Kxpa100Model_Maintenance.cpp src/models/Kxpa100Model.h
+    src/core/Kxpa100Protocol.cpp src/core/Kxpa100Maintenance.cpp
+    src/core/ThemeManager.cpp src/core/ThemeSeedGenerated.cpp
+    $<TARGET_OBJECTS:aether_test_settings> $<TARGET_OBJECTS:aether_test_log_manager>
+    $<TARGET_OBJECTS:aether_test_async_log_writer> ${THEME_TEST_RESOURCES})
+target_include_directories(kxpa100_advanced_widget_test PRIVATE src tests)
+target_link_libraries(kxpa100_advanced_widget_test PRIVATE Qt6::Core Qt6::Network Qt6::Widgets Qt6::Test)
+add_test(NAME kxpa100_advanced_widget_test COMMAND kxpa100_advanced_widget_test)
+set_tests_properties(kxpa100_advanced_widget_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+target_compile_definitions(kxpa100_advanced_widget_test PRIVATE KXPA100_FIXTURE_PATH="${CMAKE_SOURCE_DIR}/tests/fixtures/kxpa100/synthetic.KXPAConfig")
 add_executable(kat500_advanced_widget_test tests/kat500_advanced_widget_test.cpp
     src/gui/Kat500AdvancedWidget.cpp src/models/Kat500Model.cpp src/models/Kat500Model.h
     src/core/Kat500Protocol.cpp src/core/Kat500Maintenance.cpp
@@ -8814,7 +8837,9 @@ set(AETHER_SETTINGS_CONSUMERS
     canon_window_test
     canon_surface_test
     kpa500_applet_test
+    kxpa100_applet_test
     kat500_applet_test
+    kxpa100_advanced_widget_test
     kat500_advanced_widget_test
     panadapter_header_test
     theme_seed_test
