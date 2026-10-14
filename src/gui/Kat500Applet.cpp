@@ -22,6 +22,9 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSaveFile>
+#include <QScopedValueRollback>
+#include <QResizeEvent>
+#include <QShowEvent>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSignalBlocker>
@@ -32,6 +35,55 @@
 #include <algorithm>
 namespace AetherSDR
 {
+class Kat500DebugOutput : public QPlainTextEdit
+{
+  public:
+    explicit Kat500DebugOutput(QWidget* parent) : QPlainTextEdit(parent)
+    {
+        connect(verticalScrollBar(), &QScrollBar::valueChanged, this, [this](int value) {
+            if (!m_updating) {
+                m_followLatest = value == verticalScrollBar()->maximum();
+            }
+        });
+    }
+    void appendDiagnostic(const QString& line)
+    {
+        const QScopedValueRollback<bool> guard(m_updating, true);
+        appendPlainText(line);
+        followLatest();
+    }
+    void showLatest(const QString& content)
+    {
+        const QScopedValueRollback<bool> guard(m_updating, true);
+        m_followLatest = true;
+        setPlainText(content);
+        followLatest();
+    }
+
+  protected:
+    void resizeEvent(QResizeEvent* event) override
+    {
+        const QScopedValueRollback<bool> guard(m_updating, true);
+        QPlainTextEdit::resizeEvent(event);
+        followLatest();
+    }
+    void showEvent(QShowEvent* event) override
+    {
+        const QScopedValueRollback<bool> guard(m_updating, true);
+        QPlainTextEdit::showEvent(event);
+        followLatest();
+    }
+
+  private:
+    void followLatest()
+    {
+        if (m_followLatest) {
+            verticalScrollBar()->setValue(verticalScrollBar()->maximum());
+        }
+    }
+    bool m_followLatest = true;
+    bool m_updating = false;
+};
 namespace
 {
 class HistoryGraphLabel : public QLabel
@@ -42,14 +94,6 @@ class HistoryGraphLabel : public QLabel
     QSize sizeHint() const override { return QSize(220, 270); }
     QSize minimumSizeHint() const override { return sizeHint(); }
 };
-void updateDebugText(QPlainTextEdit* output, const QString& content, bool followLatest = false)
-{
-    QScrollBar* scroll = output->verticalScrollBar();
-    const int position = scroll->value();
-    followLatest = followLatest || position == scroll->maximum();
-    output->setPlainText(content);
-    scroll->setValue(followLatest ? scroll->maximum() : position);
-}
 void availability(QWidget* widget, const QString& reason)
 {
     widget->setEnabled(reason.isEmpty());
@@ -476,7 +520,7 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
     auto* save = button(tr("Save…"), "katDebugSave", debugActions);
     auto* clearDebug = button(tr("Clear"), "katDebugClear", debugActions);
     debug->addLayout(debugActions);
-    m_debug = new QPlainTextEdit(this);
+    m_debug = new Kat500DebugOutput(this);
     m_debug->setObjectName("katDebugOutput");
     m_debug->setAccessibleName(tr("Tuner protocol diagnostics"));
     m_debug->setReadOnly(true);
@@ -529,7 +573,7 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
     });
     connect(m_pause, &QCheckBox::toggled, this, [this](bool paused) {
         if (!paused && m_model) {
-            updateDebugText(m_debug, m_model->debugText(), true);
+            m_debug->showLatest(m_model->debugText());
         }
     });
     connect(copy, &QPushButton::clicked, this,
@@ -609,7 +653,7 @@ void Kat500Applet::setModel(Kat500Model* model)
     }
     m_model = model;
     if (!m_pause->isChecked()) {
-        updateDebugText(m_debug, model ? model->debugText() : QString(), true);
+        m_debug->showLatest(model ? model->debugText() : QString());
     }
     m_frequencyEdited = false;
     { const QSignalBlocker blocker(m_frequencyRecall); m_frequencyRecall->setValue(0); }
@@ -629,9 +673,14 @@ void Kat500Applet::setModel(Kat500Model* model)
                 [this](const QString& message) { text(m_result, message); });
         connect(model, &Kat500Model::availabilityChanged, this, &Kat500Applet::refresh);
         connect(model, &Kat500Model::configurationRead, this, &Kat500Applet::refresh);
+        connect(model, &Kat500Model::diagnostic, this, [this](const QString& line) {
+            if (!m_pause->isChecked()) {
+                m_debug->appendDiagnostic(line);
+            }
+        });
         connect(model, &Kat500Model::debugChanged, this, [this] {
-            if (m_model && !m_pause->isChecked()) {
-                updateDebugText(m_debug, m_model->debugText());
+            if (m_model && !m_pause->isChecked() && m_model->debugText().isEmpty()) {
+                m_debug->showLatest(QString());
             }
         });
         connect(model, &Kat500Model::telemetryReceived, this,

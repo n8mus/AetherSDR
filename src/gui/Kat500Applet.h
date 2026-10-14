@@ -9,13 +9,13 @@
 class QLabel;
 class QPushButton;
 class QCheckBox;
-class QPlainTextEdit;
 class QScrollArea;
 class QSpinBox;
 class QFileDialog;
 namespace AetherSDR
 {
 class Kat500Model;
+class Kat500DebugOutput;
 class HGauge;
 class Kat500Applet : public CanonApplet
 {
@@ -80,7 +80,7 @@ class Kat500Applet : public CanonApplet
     QLabel* m_result;
     QLabel* m_graph;
     HGauge* m_swrGauge;
-    QPlainTextEdit* m_debug;
+    Kat500DebugOutput* m_debug;
     struct Point {
         qint64 time;
         std::optional<double> value;

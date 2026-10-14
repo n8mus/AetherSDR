@@ -160,10 +160,17 @@ class Kat500ModelTest
         auto* output = widget.findChild<QPlainTextEdit*>("katDebugOutput");
         CHECK(output);
         QScrollBar* scroll = output->verticalScrollBar();
+        model.report(QString(80, QLatin1Char('x')));
         for (int i = 0; i < 80; ++i) {
             model.report(QStringLiteral("Diagnostic %1").arg(i));
         }
         CHECK(scroll->maximum() > 0);
+        CHECK(scroll->value() == scroll->maximum());
+        widget.resize(800, 1000);
+        QTest::qWait(20);
+        widget.resize(400, 1000);
+        QTest::qWait(20);
+        model.report(QStringLiteral("Newest entry after resizing"));
         CHECK(scroll->value() == scroll->maximum());
         scroll->setValue(10);
         model.report(QStringLiteral("New entry while reading older diagnostics"));
