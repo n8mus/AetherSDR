@@ -3,6 +3,10 @@
 #include "core/Kat500Protocol.h"
 #include "core/Kat500Maintenance.h"
 #include <QCoreApplication>
+#include <QTcpSocket>
+#ifdef HAVE_SERIALPORT
+#include <QSerialPort>
+#endif
 #include <QSignalSpy>
 #include <QFile>
 #include <QJsonDocument>
@@ -556,8 +560,32 @@ static int rejectUnsupportedMemoryFrequency()
     CHECK(peer.wire.isEmpty() && peer.model.isConnected());
     return 0;
 }
+static int transportBoundaries()
+{
+    Kat500Model model;
+    CHECK(model.m_socket->readBufferSize() > 0 && model.m_socket->readBufferSize() <= 4096);
+    QSignalSpy failed(&model, &Kat500Model::connectionFailed);
+    const QList<QString> invalidHosts{QString(), QString(254, QLatin1Char('a')),
+        QStringLiteral("bridge/path"), QStringLiteral("bridge host"),
+        QStringLiteral("bridge\nhost"), QStringLiteral("bridge") + QChar(0)};
+    for (const QString& host : invalidHosts) {
+        model.connectToHost(host, 4001);
+        CHECK(!model.isConnected() && !model.m_connecting && !model.m_timer.isActive());
+        CHECK(model.m_socket->state() == QAbstractSocket::UnconnectedState);
+    }
+    model.connectToHost(QStringLiteral("bridge"), 0);
+    CHECK(failed.size() == invalidHosts.size() + 1 && !model.m_connecting);
+#ifdef HAVE_SERIALPORT
+    CHECK(model.m_serial && !model.m_serial->isOpen());
+    model.connectSerial(QString(), 38400);
+    model.connectSerial(QStringLiteral("unused-port"), 12345);
+    CHECK(!model.m_serial->isOpen() && !model.isConnected());
+#endif
+    return 0;
+}
 static int run()
 {
+    CHECK(transportBoundaries() == 0);
     Kat500Model model;
     qint64 now = 0; QList<QByteArray> sent;
     model.m_now = [&] { return now; };
