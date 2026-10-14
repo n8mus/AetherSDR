@@ -4609,6 +4609,13 @@ target_compile_definitions(kxpa100_maintenance_test PRIVATE
     KXPA100_INVALID_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/kxpa100")
 add_test(NAME kxpa100_maintenance_test COMMAND kxpa100_maintenance_test)
 
+add_executable(kxpa100_model_test tests/kxpa100_model_test.cpp
+    src/models/Kxpa100Model.cpp src/models/Kxpa100Model_Maintenance.cpp src/models/Kxpa100Model.h
+    src/core/Kxpa100Protocol.cpp src/core/Kxpa100Maintenance.cpp)
+target_include_directories(kxpa100_model_test PRIVATE src)
+target_link_libraries(kxpa100_model_test PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+add_test(NAME kxpa100_model_test COMMAND kxpa100_model_test)
+
 add_executable(kat500_protocol_test tests/kat500_protocol_test.cpp src/core/Kat500Protocol.cpp)
 target_include_directories(kat500_protocol_test PRIVATE src)
 target_link_libraries(kat500_protocol_test PRIVATE Qt6::Core)

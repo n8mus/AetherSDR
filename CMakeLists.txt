@@ -1066,6 +1066,8 @@ set(CORE_SOURCES
     src/core/SpeConnection.cpp
     src/models/Kat500TxController.cpp
     src/models/Kat500TxController.h
+    src/models/Kxpa100Model.cpp
+    src/models/Kxpa100Model_Maintenance.cpp
     src/models/Kat500Model.cpp
     src/core/Kxpa100Protocol.cpp
     src/core/Kxpa100Maintenance.cpp
