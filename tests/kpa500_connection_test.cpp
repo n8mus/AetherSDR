@@ -60,6 +60,7 @@ public:
         Kpa500::applyMessage("SP", "2", speaker);
         check("Malformed speaker response cannot overwrite confirmed state", speaker.speakerOn == true);
         Kpa500TestStream stream;
+        QStringList diagnostics;
         Kpa500Connection connection;
         connection.m_device = &stream;
         Kpa500::Status latest;
@@ -85,6 +86,24 @@ public:
         check("Malformed and unknown replies cannot establish liveness",
               !connection.isResponding() && !connection.isDetected()
               && detectionChanges.isEmpty() && updates == 0);
+
+        QObject::connect(&connection, &Kpa500Connection::diagnostic,
+                         [&diagnostics](const QString& line) { diagnostics.append(line); });
+        bool rejectedUnsafeBytes = true;
+        for (int value = 0; value <= 255; ++value) {
+            if (value >= 0x20 && value <= 0x7e) { continue; }
+            diagnostics.clear();
+            stream.incoming = QByteArray("^OS1") + char(value) + ";";
+            connection.onReadyRead();
+            rejectedUnsafeBytes &= !diagnostics.isEmpty() && !connection.isResponding();
+            for (const QString& line : diagnostics) {
+                for (const QChar c : line) {
+                    rejectedUnsafeBytes &= c.unicode() >= 0x20 && c.unicode() <= 0x7e;
+                }
+            }
+        }
+        check("Malformed serial bytes cannot inject control characters into diagnostics",
+              rejectedUnsafeBytes);
 
         connection.m_parser.feed("^ON1;^OS1;^WS500 015;^SN12345;^FC00;");
         check("Accepted replies establish liveness and populate the snapshot",

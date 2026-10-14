@@ -159,6 +159,25 @@ int main()
                frames.size() == 1 && frames[0].first == "OS");
     }
 
+    {
+        bool rejectedUnsafeBytes = true;
+        for (int value = 0; value <= 255; ++value) {
+            if (value >= 0x20 && value <= 0x7e) { continue; }
+            QList<QPair<QString, QString>> frames;
+            FrameParser parser;
+            parser.setCallback([&](const QString& cmd, const QString& arg) {
+                frames.append({cmd, arg});
+            });
+            int errors = 0;
+            parser.setErrorCallback([&](const QString&) { ++errors; });
+            parser.feed(QByteArray("^OS1") + char(value) + ";^OS0;");
+            rejectedUnsafeBytes &= errors == 1 && frames.size() == 1
+                && frames[0].first == "OS" && frames[0].second == "0";
+        }
+        report("Non-printable frames are discarded and the next ASCII frame recovers",
+               rejectedUnsafeBytes);
+    }
+
     // ── applyMessage: ^WS power + SWR ────────────────────────────────────────
     // Source: §^WS — ppp plain integer watts; sss implied decimal after 2nd
     // digit, so "015" → 1.5, "150" → 15.0.

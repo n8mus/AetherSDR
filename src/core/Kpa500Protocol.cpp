@@ -2,8 +2,6 @@
 
 #include <QStringList>
 
-#include <cctype>
-
 namespace AetherSDR {
 namespace Kpa500 {
 
@@ -41,6 +39,11 @@ void FrameParser::feed(const QByteArray& bytes)
             m_buf.clear();
             continue;
         }
+        if (static_cast<unsigned char>(byte) < 0x20 || static_cast<unsigned char>(byte) > 0x7e) {
+            if (m_error) { m_error(QStringLiteral("Non-printable frame discarded")); }
+            m_buf.clear();
+            continue;
+        }
         if (byte != ';') {
             m_buf.append(byte);
             continue;
@@ -50,7 +53,8 @@ void FrameParser::feed(const QByteArray& bytes)
         m_buf.clear();
         int tokenLength = 0;
         while (tokenLength < body.size()
-               && std::isalpha(static_cast<unsigned char>(body[tokenLength]))) {
+               && ((body[tokenLength] >= 'A' && body[tokenLength] <= 'Z')
+                   || (body[tokenLength] >= 'a' && body[tokenLength] <= 'z'))) {
             ++tokenLength;
         }
         if (tokenLength < 2 || tokenLength > 3) {

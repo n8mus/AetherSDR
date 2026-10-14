@@ -197,6 +197,8 @@ reply age, firmware and serial number, plus an explanation of history gaps and
 scales. **Debug** normally shows connection and
 power transitions, control requests, errors and pending band changes. Enable
 **Verbose** to include routine queries, raw amplifier replies and decoded telemetry.
+Non-printable replies are discarded before they reach device status or diagnostics.
+Raw received bytes are escaped in Verbose so they cannot insert log lines or control sequences.
 **TX** in this log means protocol writes, not RF transmission. Switching Verbose
 changes the displayed history; polling chatter does not displace normal events. **Pause** freezes the display while each bounded 2,000-line view
 continues collecting; **Resume** catches up. **Copy** and **Save…** export the
