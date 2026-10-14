@@ -468,12 +468,10 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
            "only; it does not key a radio. Default off."));
     m_follow->setChecked(prefs.value("FollowTx").toBool(false));
     settings->addWidget(m_follow);
-    auto* preTune = new QPushButton(tr("Pre-tune bands…"), this);
-    preTune->setObjectName("katPreTuneBands");
+    auto* preTune = button(tr("Pre-tune bands…"), "katPreTuneBands", settings);
     preTune->setAccessibleName(tr("KAT500 pre-tune bands"));
     preTune->setToolTip(tr("Open the KAT500 band sweep. Starting a sweep transmits at the radio's Tune Pwr; opening it does not transmit or change the radio tuner."));
     preTune->setAccessibleDescription(preTune->toolTip());
-    settings->addWidget(preTune);
     connect(preTune, &QPushButton::clicked, this, &Kat500Applet::preTuneRequested);
     auto* signalPathTitle = label("katSignalPathTitle", settings);
     signalPathTitle->setText(tr("Signal path"));
