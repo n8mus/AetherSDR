@@ -103,6 +103,10 @@ Read its tooltip or open Settings for the reason. Wait for identification and fr
 
 Confirm **Use with current radio** was applied to the intended radio, **Use KXPA100 for TX Controls** is checked, and the connected tuner reports Auto or Manual. Bypass and stale/disconnected states restore normal radio controls. A missing physical PA KEY cable cannot be fixed by association.
 
+### The TX Controls preference returns to its previous value
+
+If the settings store rejects a save, the selected **Use KXPA100 for TX Controls** value applies only to the current session. The `aether.kxpa100` warning log identifies the failed preference save. Reloading the association or restarting restores the last saved value. After resolving a read-only or busy settings store, change the checkbox again and verify the preference after restarting; a rejected write is not retried automatically.
+
 ### An operation fails or the connection closes
 
 A timeout closes the stream to prevent a late response from confirming a later request. Reconnect, inspect the current state and make a new deliberate request. Writes are not replayed automatically. A canceled restore can leave some confirmed blocks applied; use the retained backup to recover deliberately.

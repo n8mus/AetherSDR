@@ -2,11 +2,16 @@
 #include "Kxpa100Model.h"
 #include "RadioModel.h"
 #include "SliceModel.h"
+#include <QLoggingCategory>
 #include <QScopedValueRollback>
 #include <cmath>
 #include <utility>
 
 namespace AetherSDR {
+namespace {
+Q_LOGGING_CATEGORY(lcKxpa100Tx, "aether.kxpa100")
+}
+
 int Kxpa100TxController::effectiveTxFrequencyKhz(RadioModel* radio)
 {
     const SliceModel* slice = radio && radio->isConnected() ? radio->txSlice() : nullptr;
@@ -127,7 +132,10 @@ void Kxpa100TxController::savePreference(bool enabled)
     QJsonObject doc = scope.featureExact("kxpa100", &version, &state);
     if (version != 1 || state != AppSettings::FeatureReadStatus::Present) { return; }
     doc["useTxControls"] = enabled;
-    scope.setFeature("kxpa100", 1, doc);
+    if (!scope.setFeature("kxpa100", 1, doc)) {
+        qCWarning(lcKxpa100Tx) << "KXPA100: TX Controls preference could not be saved;"
+                                " change applies only to this session";
+    }
 }
 Kxpa100TxController::~Kxpa100TxController()
 {

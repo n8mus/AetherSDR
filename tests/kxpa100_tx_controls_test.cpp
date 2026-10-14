@@ -1,4 +1,7 @@
 #include "TestSettingsProfile.h"
+#include "core/AppSettings.h"
+#include "core/RadioSettingsScope.h"
+#include "core/SettingsDatabase.h"
 #include "gui/TxApplet.h"
 #include "models/Kxpa100Model.h"
 #include "models/Kxpa100TxController.h"
@@ -6,12 +9,25 @@
 #include "models/SliceModel.h"
 #include <QApplication>
 #include <QPushButton>
+#include <QScopeGuard>
+#include <QStringList>
 #include <QLabel>
 #include <QTimer>
 #include <QTest>
 #include <cstdio>
 using namespace AetherSDR;
 #define CHECK(x) do { if (!(x)) { std::fprintf(stderr,"FAIL %d: %s\n",__LINE__,#x); return 1; } } while (false)
+namespace {
+QStringList preferenceWarnings;
+void capturePreferenceWarning(QtMsgType type, const QMessageLogContext& context,
+                              const QString& message)
+{
+    if (type == QtWarningMsg && QString::fromLatin1(context.category) == "aether.kxpa100") {
+        preferenceWarnings.append(message);
+    }
+}
+}
+
 namespace AetherSDR {
 class TxOperationIntegrationTestAccess {
 public:
@@ -90,6 +106,37 @@ int main(int argc,char** argv) {
     CHECK(routing.associated());
     CHECK(wire.isEmpty());
     CHECK(b->wire.isEmpty());
+    {
+        const RadioSettingsScope scope = radio.settingsScope();
+        const QJsonObject original = scope.featureExact("kxpa100");
+        CHECK(original.value("useTxControls").toBool());
+        SettingsDatabase locker;
+        CHECK(locker.open(AppSettings::instance().filePath()) && locker.begin());
+        const QtMessageHandler previous = qInstallMessageHandler(capturePreferenceWarning);
+        const auto restoreHandler = qScopeGuard([previous] { qInstallMessageHandler(previous); });
+        k.setUseTxControls(false);
+        CHECK(!k.useTxControls() && !routing.selected());
+        CHECK(scope.featureExact("kxpa100") == original);
+        CHECK(preferenceWarnings.size() == 1);
+        CHECK(preferenceWarnings.first().contains("TX Controls preference could not be saved"));
+        CHECK(preferenceWarnings.first().contains("only to this session"));
+        locker.rollback();
+        locker.close();
+
+        // Reload uses the last durable preference, not the rejected session change.
+        TxOperationIntegrationTestAccess::identity(radio);
+        CHECK(k.useTxControls() && routing.selected());
+        k.setUseTxControls(false);
+        QJsonObject disabled = original;
+        disabled["useTxControls"] = false;
+        CHECK(scope.featureExact("kxpa100") == disabled);
+        TxOperationIntegrationTestAccess::identity(radio);
+        CHECK(!k.useTxControls() && !routing.selected());
+        CHECK(preferenceWarnings.size() == 1);
+        k.setUseTxControls(true);
+        CHECK(scope.featureExact("kxpa100") == original);
+        CHECK(b->wire.isEmpty() && wire.isEmpty());
+    }
     {
         TxApplet applet; applet.setRadioModel(&radio); applet.setTransmitModel(&radio.transmitModel()); applet.setKxpa100Model(&k);
         QPushButton* atu=nullptr; QPushButton* save=nullptr;
