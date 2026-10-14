@@ -1081,7 +1081,7 @@ static void nativePowerLabels()
     values.rfPower = 50;
     values.tunePower = 7;
     model.applyChanges(values);
-    report("radio power readouts retain their original labels", labelWithText(applet, "50") && labelWithText(applet, "7"));
+    report("radio power readouts include percent units", labelWithText(applet, "50%") && labelWithText(applet, "7%"));
 }
 
 int main(int argc, char** argv)

@@ -10,7 +10,7 @@ namespace AetherSDR {
 class Kat500Model;
 class RadioModel;
 
-// TX Controls' external-tuner sequence. A captured Tune input is carried through
+// Dedicated KAT500 pre-tune sequence. A captured Tune input is carried through
 // every asynchronous step; status and timers can never manufacture TX authority.
 class Kat500TxController final : public QObject {
     Q_OBJECT

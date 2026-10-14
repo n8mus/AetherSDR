@@ -1411,17 +1411,6 @@ void RadioSetupDialog::buildKat500Device(PeripheralDeviceUi& ui, QWidget* stackP
     auto* advanced = new Kat500AdvancedWidget(m_kat500, ui.page);
     advanced->hide();
     auto* layout = qobject_cast<QVBoxLayout*>(ui.page->layout());
-    auto* txControls = new QCheckBox(tr("Use KAT500 for TX Controls"), ui.page);
-    txControls->setObjectName(QStringLiteral("katUseTxControls"));
-    txControls->setAccessibleName(txControls->text());
-    txControls->setToolTip(tr("Default on. Auto/Manual route TX Controls to KAT500; Bypass restores the radio ATU. Internal ATU bypass is confirmed before external tuning."));
-    txControls->setAccessibleDescription(txControls->toolTip());
-    txControls->setChecked(m_kat500->useTxControls());
-    connect(txControls, &QCheckBox::toggled, m_kat500, &Kat500Model::setUseTxControls);
-    connect(m_kat500, &Kat500Model::useTxControlsChanged, txControls, [txControls](bool on) {
-        const QSignalBlocker blocker(txControls); txControls->setChecked(on);
-    });
-    layout->insertWidget(layout->count() - 1, txControls);
     layout->insertWidget(layout->count() - 1, advancedToggle, 0, Qt::AlignLeft);
     layout->insertWidget(layout->count() - 1, advanced);
     connect(advancedToggle, &QPushButton::toggled, advanced, &QWidget::setVisible);

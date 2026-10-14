@@ -34,7 +34,6 @@ Kat500TxController::Kat500TxController(RadioModel* radio, Kat500Model* tuner, QO
     if (tuner) {
         connect(tuner, &Kat500Model::statusUpdated, this, &Kat500TxController::refresh);
         connect(tuner, &Kat500Model::availabilityChanged, this, &Kat500TxController::refresh);
-        connect(tuner, &Kat500Model::useTxControlsChanged, this, &Kat500TxController::refresh);
         connect(tuner, &Kat500Model::operationFinished, this, &Kat500TxController::operationFinished);
         connect(tuner, &Kat500Model::operationFailed, this, [this](const QString& reason) {
             if (m_ownsOperation) { stop(reason, m_phase != Phase::Saving && m_phase != Phase::Result && m_phase != Phase::Cancelling); }
@@ -80,7 +79,7 @@ bool Kat500TxController::internalBypassed() const
 }
 void Kat500TxController::ensureBypass()
 {
-    if (!m_selected || !m_radio || !m_radio->isConnected()) { return; }
+    if (m_phase != Phase::Bypass || !m_selected || !m_radio || !m_radio->isConnected()) { return; }
     if (internalBypassed()) { m_bypassRequested = false; return; }
     const auto& tx = m_radio->transmitModel();
     if (!m_bypassRequested && !tx.isTransmitting() && !tx.isTuning()) {
@@ -90,7 +89,7 @@ void Kat500TxController::ensureBypass()
 }
 QString Kat500TxController::unavailableReason() const
 {
-    if (!m_selected || !m_tuner) { return tr("KAT500 is not selected for TX Controls."); }
+    if (!m_selected || !m_tuner) { return tr("KAT500 pre-tuning requires Auto or Manual mode."); }
     if (!m_radio || !m_radio->isConnected()) { return tr("Connect a radio first."); }
     if (busy()) { return tr("KAT500 operation in progress; click to cancel."); }
     const auto& tx = m_radio->transmitModel();
@@ -126,7 +125,7 @@ bool Kat500TxController::originalIntentValid() const
     const auto& tx = m_radio->transmitModel();
     if (m_phase != Phase::Carrier && (tx.isTransmitting() || tx.isTuning())) { return false; }
     return m_selected && m_radio && m_radio->isConnected() && m_tuner && m_tuner->isResponding()
-        && m_tuner->useTxControls() && m_tuner->status().powerOn == true
+        && m_tuner->status().powerOn == true
         && m_tuner->status().mode && m_tuner->status().mode != Kat500::Mode::Bypass
         && m_tuner->status().serial == m_serial && m_tuner->status().faultCode == 0
         && frequencyKhz(m_radio) == m_frequencyKhz && m_carrier.valid()
@@ -137,7 +136,7 @@ void Kat500TxController::refresh()
     if (m_refreshing) { return; }
     QScopedValueRollback guard(m_refreshing, true);
     const bool previouslySelected = m_selected;
-    if (!m_tuner || !m_tuner->isConnected() || !m_tuner->useTxControls()) { m_selected = false; }
+    if (!m_tuner || !m_tuner->isConnected()) { m_selected = false; }
     else if (m_tuner->isResponding() && m_tuner->status().mode) {
         // Physical BYP can be a successful match in Auto; only MD selects the route.
         m_selected = m_tuner->status().mode != Kat500::Mode::Bypass;

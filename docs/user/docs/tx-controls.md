@@ -13,6 +13,8 @@ transmit. Before you key up for the first time, read [Before You Transmit](./bef
 
 *The TX Controls applet.*
 
+These controls operate the radio. External Elecraft tuners have their own applets and maintenance controls. **RF Power** and **Tune Pwr** display percentages; the meters show measured radio watts and SWR.
+
 ## Using the TX applet
 
 - **Fwd Power gauge** (0–200 W barefoot, 0–2000 W with a PGXL amplifier), with
@@ -31,7 +33,6 @@ transmit. Before you key up for the first time, read [Before You Transmit](./bef
   can train its predistortion against the output of an external linear
   amplifier rather than its own PA.
 
-When a connected KAT500 is selected for TX Controls, both power slider readouts include **%** for radio drive, not amplifier output watts. With no KAT500 connection, in Bypass, or with **Use KAT500 for TX Controls** off, the radio controls retain their normal labels and appearance.
 
 Hover **RF Pwr** or **SWR** for a floating badge with the exact value
 (for example `12 W` or `1.12:1`). Forward power drops to zero as soon as you
@@ -55,9 +56,7 @@ the Tuner Genius XL.
 
 ### ATU, MEM and pre-tuning
 
-With **Use KAT500 for TX Controls** enabled (the default), a connected KAT500 in Auto or Manual takes over these controls. **AUTO** is gold in Auto and requests a fresh tune without changing mode; Manual uses **ATU**. **SAVE** replaces MEM and stores the current match without RF. A **KAT500** pill replaces the Mem indicator, while the SWR meter remains the radio's measurement. Bypass mode restores the normal radio controls. See [KAT500 TX Controls integration](./kat500-tuner-control.md#tx-controls-integration).
 
-When KAT500 is selected, right-click **AUTO**/**ATU** for **Pre-tune bands…** (KAT500 sweep) or **Clear all KAT500 memories…** (confirmation required). These act on the external tuner. The normal radio menu returns in KAT500 Bypass mode.
 
 
 - **MEM** shows the tuner's real memory state as the radio reports it, not

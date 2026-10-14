@@ -44,6 +44,8 @@
 #include "LpMeterApplet.h"
 #include "Kpa500Applet.h"
 #include "Kat500Applet.h"
+#include "AtuPreTuneDialog.h"
+#include "models/Kat500TxController.h"
 #include "HealthApplet.h"
 #include "ImageFileDialog.h"
 #include "MeterApplet.h"
@@ -7546,13 +7548,20 @@ void MainWindow::wireMeters()
 #endif
     }
 
-    m_kat500Model.setUseTxControls(PeripheralSettings::deviceString("Kat500", "UseTxControls", "True") != "False");
-    connect(&m_kat500Model, &Kat500Model::useTxControlsChanged, this, [](bool on) {
-        PeripheralSettings::setDeviceString("Kat500", "UseTxControls", on ? "True" : "False");
-    });
-    m_appletPanel->txApplet()->setKat500Model(&m_kat500Model);
     auto* kat = m_appletPanel->kat500Applet();
     kat->setModel(&m_kat500Model);
+    connect(kat, &Kat500Applet::preTuneRequested, this, [this] {
+        if (!m_kat500PreTuneDialog) {
+            auto* controller = new Kat500TxController(&m_radioModel, &m_kat500Model, this);
+            auto* dialog = new AtuPreTuneDialog(&m_radioModel, m_bandPlanMgr, this, controller);
+            controller->setParent(dialog);
+            dialog->setAttribute(Qt::WA_DeleteOnClose);
+            m_kat500PreTuneDialog = dialog;
+        }
+        m_kat500PreTuneDialog->show();
+        m_kat500PreTuneDialog->raise();
+        m_kat500PreTuneDialog->activateWindow();
+    });
     connect(&m_kat500Model, &Kat500Model::detectedChanged, m_appletPanel, &AppletPanel::setKat500Visible);
     connect(kat, &Kat500Applet::advancedSettingsRequested, this, [this] {
         if (RadioSetupDialog* dialog = openRadioSetupPage(QStringLiteral("Peripherals"))) {
