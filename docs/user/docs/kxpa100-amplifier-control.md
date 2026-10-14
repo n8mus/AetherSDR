@@ -64,6 +64,10 @@ The **ATU BYP** pill toggles the physical matching-network bypass relay. It leav
 
 The shared **VU** and **PWR** meters use associated KXPA100 output on the amplifier scale when PA Operate and idle-tuner readback are fresh. This does not require an installed KXAT100. An operating radio-integrated amplifier has priority, followed by an operating KPA500; confirmed KAT500 KEY BLOCK retains the radio fallback for that KPA500 path. Otherwise fresh eligible KXPA100 telemetry is used, falling back to the radio when unavailable. The KX100 applet always shows the amplifier's own readings. **TX Controls** keeps radio watts/SWR and the radio scale; its RF Power and Tune Pwr readouts show percentages.
 
+<img src="/img/kxpa100/tx-controls-radio-only.png" width="300" alt="Radio-side TX Controls with ATU/MEM, radio power and SWR scales, and percentage power sliders." />
+
+*Current Mac capture while disconnected; no RF or simulated meter values.*
+
 ## Using Advanced
 
 Open **Peripherals → Elecraft KXPA100 → Advanced**, or the applet shortcut. Opening the page performs no maintenance action.
