@@ -219,7 +219,8 @@ void Kat500TxController::operationFinished()
             stop(tr("KAT500 did not confirm a pending tune."), true); return;
         }
         m_message = tr("KAT500 tuning; click to cancel.");
-        // Set the phase before start: the radio publishes Tune state synchronously.
+        // TransmitModel::startTune publishes local Tune state synchronously for every
+        // backend, before dispatch; backend status later reconciles that state.
         setPhase(Phase::Carrier, 30000);
         if (!m_carrier.start()) { stop(tr("Radio refused the tune carrier."), true); }
         break;

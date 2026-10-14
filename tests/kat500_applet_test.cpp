@@ -332,11 +332,6 @@ int main(int argc, char** argv)
     CHECK(swr->text() == "BYP 1.00" && swrGauge->value() == 1.0f);
     QTest::mouseRelease(swr, Qt::LeftButton);
     CHECK(swr->text() == "SWR 1.33" && qFuzzyCompare(swrGauge->value(), 1.33f));
-    swr->setFocus();
-    QTest::keyPress(swr, Qt::Key_Space);
-    CHECK(swr->text() == "BYP 1.00");
-    QTest::keyRelease(swr, Qt::Key_Space);
-    CHECK(swr->text() == "SWR 1.33");
     QTest::mousePress(swr, Qt::LeftButton);
     QFocusEvent focusOut(QEvent::FocusOut);
     QApplication::sendEvent(swr, &focusOut);

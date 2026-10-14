@@ -500,7 +500,7 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
     auto* help = label("katHistoryHelp", settings);
     help->setText(tr("History: SWR and forward/reflected ADC counts, last observed, 5 minutes. Gaps mean "
                      "missing replies; ADC counts are not watts. SWR may describe an earlier RF measurement. "
-                     "Hold the SWR pill (or Space) to compare bypass SWR; release to return. Readings remain "
+                     "Press and hold the SWR pill with the mouse to compare bypass SWR; release to return. Readings remain "
                      "after RF stops. Debug TX means serial writes, not RF."));
     auto* advanced = button(tr("Open Advanced settings"), "katAdvancedSettings", settings);
     connect(advanced, &QPushButton::clicked, this, &Kat500Applet::advancedSettingsRequested);
@@ -763,7 +763,7 @@ void Kat500Applet::refresh()
                     s.forwardAdc.value_or(0) > 0 && fresh("VFWD") && fresh("VSWR");
     const QString swrText = tr("%1 %2").arg(preview ? tr("BYP") : tr("SWR"), reading(swr));
     const QString swrHelp =
-        tr("%1. Hold this pill or Space to view the last bypass SWR; release to return to adjusted SWR. "
+        tr("%1. Press and hold this pill with the mouse to view the last bypass SWR; release to return to adjusted SWR. "
            "This only changes the display, not the tuner. Readings can remain after RF stops. "
            "The meter spans 1–3, amber from 2 and red from 2.5; values above 3 remain exact in the pill.")
             .arg(preview ? tr("Last bypass SWR: %1").arg(reading(swr))

@@ -11,7 +11,7 @@
 #include <cmath>
 #include <utility>
 
-Q_LOGGING_CATEGORY(lcKat500, "aethersdr.kat500")
+Q_LOGGING_CATEGORY(lcKat500, "aether.kat500")
 
 namespace AetherSDR {
 using namespace Kat500;

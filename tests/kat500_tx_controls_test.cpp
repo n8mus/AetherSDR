@@ -14,6 +14,7 @@
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QTimer>
+#include <QTest>
 #include <cstdio>
 
 using namespace AetherSDR;
@@ -142,6 +143,10 @@ void routingAndCycle() {
     check(f.serial.contains("F 14100;F;") && f.serial.contains("T;TP;"),"tune targets current TX frequency then full search");
     check(f.backend->wire.count("tune:on")==1 && !f.backend->wire.contains("atu:on"),"one captured radio carrier; internal ATU never starts");
     check(f.kat.status().mode==Kat500::Mode::Auto,"fresh tune preserves Auto mode");
+    QTest::qWait(220);
+    check(f.routing->busy() && f.radio.transmitModel().isTuning()
+          && !f.backend->wire.contains("tune:off"),
+          "watchdog retains the carrier when the backend provides no Tune readback");
     Kat500ModelTest::frame(f.kat,"FT;");
     check(f.backend->wire.count("tune:off")==1,"completion stops its carrier immediately");
     f.readResult();
