@@ -154,7 +154,7 @@ AtuPreTuneDialog::AtuPreTuneDialog(RadioModel* radio,
     : QDialog(parent),
       m_radio(radio),
       m_kat500(kat500),
-      m_externalTuner(kat500 && kat500->selected()),
+      m_externalTuner(kat500 != nullptr),
       m_bandPlan(bandPlan)
 {
     theme::setContainer(this, QStringLiteral("dialog/atuPreTune"));

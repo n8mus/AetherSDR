@@ -29,6 +29,7 @@ class Kat500Applet : public CanonApplet
     QSize minimumSizeHint() const override;
   signals:
     void advancedSettingsRequested();
+    void preTuneRequested();
     void followTxChanged(bool enabled);
 
   protected:
@@ -62,7 +63,6 @@ class Kat500Applet : public CanonApplet
     std::array<QCheckBox*, 8> m_capBits{}, m_indBits{};
     QCheckBox* m_side;
     QCheckBox* m_follow;
-    QCheckBox* m_txControls;
     QCheckBox* m_verbose;
     QCheckBox* m_pause;
     QSpinBox* m_cap;

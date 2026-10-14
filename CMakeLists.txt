@@ -1065,8 +1065,8 @@ set(CORE_SOURCES
     src/core/AcomConnection.cpp
     src/core/SpeProtocol.cpp
     src/core/SpeConnection.cpp
-    src/models/Kxpa100TxController.cpp
-    src/models/Kxpa100TxController.h
+    src/models/Kxpa100RadioAssociation.cpp
+    src/models/Kxpa100RadioAssociation.h
     src/models/Kat500TxController.cpp
     src/models/Kat500TxController.h
     src/models/Kxpa100Model.cpp

@@ -327,10 +327,15 @@ Kat500AdvancedWidget::Kat500AdvancedWidget(Kat500Model* model, QWidget* parent)
                                            : check->text());
         connect(check, &QCheckBox::toggled, this, &Kat500AdvancedWidget::refreshAvailability);
     }
-    const auto targetChanged = [this, eraseTarget] {
+    const auto targetChanged = [this, eraseTarget, erase] {
         m_eraseConfirm->setChecked(false);
         const QString target = tr("Erase target: %1 / %2").arg(m_eraseBand->currentText(), m_eraseAntenna->currentText());
         eraseTarget->setText(target);
+        const bool all = m_eraseBand->currentData().toInt() == -1
+            && m_eraseAntenna->currentData().toInt() == 0;
+        erase->setText(all ? tr("Clear all ATU memories…") : tr("Erase selected memories"));
+        erase->setAccessibleName(erase->text());
+        m_eraseConfirm->setText(all ? tr("Confirm erasing all KAT500 matches") : tr("Confirm selected erase"));
         m_eraseConfirm->setAccessibleName(tr("Confirm selected erase. %1").arg(target));
         refreshAvailability();
     };

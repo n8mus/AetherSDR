@@ -49,8 +49,6 @@ public:
     bool clearFault();
     // Explicit operator intent only. No command here keys a radio/carrier.
     bool startTune(bool saveMatch = true, std::function<bool()> permit = {});
-    bool useTxControls() const { return m_useTxControls; }
-    void setUseTxControls(bool enabled);
     bool cancelTune();
     // Retain stop intent if its controller goes away while a serial request drains.
     void cancelTuneAfterPendingOperation();
@@ -86,7 +84,6 @@ public:
     void clearDebug() { m_debug.clear(); emit debugChanged(); }
 
 signals:
-    void useTxControlsChanged(bool enabled);
     void connected();
     void disconnected();
     void connectionFailed(const QString& reason);
@@ -215,7 +212,6 @@ private:
     qint64 m_tuneResultDeadline = 0;
     bool m_deferredTuneCancel = false;
     bool m_tuneCompleted = false;
-    bool m_useTxControls = true;
     std::function<bool()> m_tunePermit;
     bool m_regionExternal = false;
     int m_regionAddress = 0;

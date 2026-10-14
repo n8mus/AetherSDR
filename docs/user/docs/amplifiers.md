@@ -176,7 +176,10 @@ setting, or amplifier output. The scale is **0–100 W**; the pill retains readi
 above the scale. **DRV —** means the radio is disconnected or its forward-power
 measurement is missing or more than two seconds old. Other fresh meters cannot
 keep an old drive reading alive. The source stays radio forward power when the
-shared **VU** and **PWR** meters switch to **AMP**. **Mini** has no DRV row.
+shared **VU** and **PWR** meters switch to **AMP**. **TX Controls** continues
+to show the radio’s forward power and SWR on the radio scale, so drive remains
+visible. Its **RF Power** and **Tune Pwr** sliders show percentages.
+**Mini** has no DRV row.
 
 The KPA500 SWR scale runs from **1 to 5**, matching the amplifier faceplate;
 its display turns amber at 2 and red at 2.5. No RF means SWR is unmeasured.

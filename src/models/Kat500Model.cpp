@@ -501,12 +501,6 @@ bool Kat500Model::setBypassed(bool bypassed) { return requestValue(bypassed ? "B
 bool Kat500Model::setAttenuator(bool enabled) { return requestValue(enabled ? "ATTN1;" : "ATTN0;","ATTN;",[enabled](const Status& s) { return s.attenuator == enabled; },QStringLiteral("Set attenuator")); }
 bool Kat500Model::setAmpKeyInterrupted(bool interrupted) { return requestValue(interrupted ? "AMPI1;" : "AMPI0;","AMPI;",[interrupted](const Status& s) { return s.ampKeyInterrupted == interrupted; },QStringLiteral("Set amplifier key interrupt")); }
 bool Kat500Model::clearFault() { return requestValue("FLTC;","FLT;",[](const Status& s) { return s.faultCode == 0; },QStringLiteral("Clear current fault")); }
-void Kat500Model::setUseTxControls(bool enabled)
-{
-    if (m_useTxControls == enabled) { return; }
-    m_useTxControls = enabled;
-    emit useTxControlsChanged(enabled);
-}
 bool Kat500Model::startTune(bool saveMatch, std::function<bool()> permit)
 {
     if (permit && !permit()) { return false; }

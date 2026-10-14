@@ -4,6 +4,7 @@
 #include "models/Kat500Model.h"
 #include <QApplication>
 #include <QComboBox>
+#include <QCheckBox>
 #include <QFileDialog>
 #include <QPointer>
 #include <QPushButton>
@@ -47,6 +48,15 @@ class Kat500AdvancedWidgetTest
         CHECK(widget.m_configuration->font().pixelSize() == 10);
         CHECK(widget.m_configuration->horizontalScrollBar()->maximum() == 0);
         CHECK(widget.findChild<QTableWidget*>("katConfiguration"));
+        auto* erase = widget.findChild<QPushButton*>("katEraseMemories");
+        CHECK(erase->text() == QStringLiteral("Clear all ATU memories…"));
+        CHECK(!erase->isEnabled());
+        widget.m_eraseConfirm->setChecked(true);
+        widget.m_eraseBand->setCurrentIndex(1);
+        CHECK(!widget.m_eraseConfirm->isChecked());
+        CHECK(erase->text() == QStringLiteral("Erase selected memories"));
+        widget.m_eraseBand->setCurrentIndex(0);
+
         CHECK(!widget.findChild<QPushButton*>("katApplyConfiguration")->isEnabled());
         Kat500::Configuration config;
         for (const auto key : Kat500::configurationKeys()) {

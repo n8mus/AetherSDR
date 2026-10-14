@@ -146,11 +146,7 @@ bool Kxpa100Model::amplifierMeterEligible() const
     return m_connected && m_detected && isResponding() && m_status.operate == true && m_status.tuning == false &&
         fresh(QStringLiteral("^OP")) && fresh(QStringLiteral("^TP")) && fresh(QStringLiteral("^PF"));
 }
-void Kxpa100Model::setUseTxControls(bool enabled)
-{
-    if (m_useTxControls == enabled) { return; }
-    m_useTxControls = enabled; emit useTxControlsChanged(enabled); emit availabilityChanged();
-}
+
 void Kxpa100Model::report(const QString& text, bool polling)
 {
     if (polling && !m_verbose) { return; }

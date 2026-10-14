@@ -144,8 +144,8 @@ struct Fixture {
 };
 void routingAndCycle() {
     Fixture f;
-    check(f.kat.useTxControls() && f.routing->selected(),"default-on routing selects confirmed Auto");
-    check(f.backend->wire==QStringList{"atu:off"},"selecting external ATU requests internal bypass without RF");
+    check(f.routing->selected(),"confirmed Auto is eligible for dedicated pre-tune");
+    check(f.backend->wire.isEmpty(),"opening external pre-tune leaves the internal ATU untouched");
     check(f.start(),"explicit click captures a tune request");
     Kat500ModelTest::step(f.kat);
     check(f.serial.isEmpty() && !f.backend->wire.contains("tune:on"),"wait for confirmed internal bypass before tuner or RF start");
@@ -166,8 +166,6 @@ void routingAndCycle() {
     check(!f.routing->selected(),"explicit Bypass restores internal route");
     Kat500ModelTest::mode(f.kat,Kat500::Mode::Manual);
     check(f.routing->selected(),"Manual selects external route");
-    f.kat.setUseTxControls(false);
-    check(!f.routing->selected(),"preference off restores internal route");
 }
 void cancellationAndFences() {
     {
@@ -263,20 +261,15 @@ void saving() {
     check(!f.backend->wire.contains("tune:on") && !f.serial.contains("T;TP;"), "SAVE never requests a search or carrier");
 }
 void nativeSweepRouteFence() {
-    for (const bool paused : {false, true}) {
-        Fixture f;
-        Kat500ModelTest::mode(f.kat, Kat500::Mode::Bypass);
-        AtuPreTuneDialog dialog(&f.radio, nullptr, nullptr, f.routing.get());
-        check(!dialog.usesKat500(), "Bypass captures the native pre-tune route");
-        TxAppletPowerReconciliationTestAccess::prepare(dialog, f.input);
-        if (paused) { TxAppletPowerReconciliationTestAccess::pause(dialog); }
-        Kat500ModelTest::mode(f.kat, Kat500::Mode::Auto);
-        Kat500ModelTest::mode(f.kat, Kat500::Mode::Bypass);
-        TxAppletPowerReconciliationTestAccess::settle(dialog);
-        check(!TxAppletPowerReconciliationTestAccess::active(dialog)
-            && !f.backend->wire.contains("atu:on") && !f.backend->wire.contains("tune:on"),
-            "route change invalidates native sweep even if Bypass returns before settle");
-    }
+    Fixture f;
+    AtuPreTuneDialog dialog(&f.radio, nullptr);
+    check(!dialog.usesKat500(), "radio sweep never adopts a connected external tuner");
+    TxAppletPowerReconciliationTestAccess::prepare(dialog, f.input);
+    Kat500ModelTest::mode(f.kat, Kat500::Mode::Bypass);
+    Kat500ModelTest::mode(f.kat, Kat500::Mode::Auto);
+    TxAppletPowerReconciliationTestAccess::settle(dialog);
+    check(f.backend->wire.contains("atu:on") && f.serial.isEmpty(),
+          "external mode changes leave native radio sweep routing unchanged");
 }
 void externalSweep() {
     {
@@ -375,128 +368,44 @@ void externalSweep() {
     }
 }
 void contextMenu() {
-    Fixture f; f.routing.reset();
+    Fixture f;
     TxApplet applet;
     applet.setRadioModel(&f.radio);
     applet.setTransmitModel(&f.radio.transmitModel());
-    applet.setKat500Model(&f.kat);
     QMenu menu;
     applet.buildAtuContextMenu(menu);
-    const auto actions = menu.actions();
-    check(actions.size() == 2 && actions[0]->text().startsWith("Pre-tune bands")
-        && actions[1]->text().startsWith("Clear all KAT500 memories"),
-        "KAT500 context menu offers its sweep and all-memory erase only");
-    if (actions.size() == 2) {
-        check(actions[1]->isEnabled(), "ready KAT500 exposes confirmed erase action");
-        QTimer::singleShot(0, [] {
-            for (QWidget* widget : QApplication::topLevelWidgets()) {
-                if (auto* box = qobject_cast<QMessageBox*>(widget)) {
-                    check(box->text().contains("KAT500"), "erase confirmation identifies external tuner");
-                    box->reject();
-                }
-            }
-        });
-        actions[1]->trigger();
-        Kat500ModelTest::step(f.kat);
-        check(f.serial.isEmpty(), "canceling erase confirmation sends no tuner command");
-        QTimer::singleShot(0, [] {
-            for (QWidget* widget : QApplication::topLevelWidgets()) {
-                if (auto* box = qobject_cast<QMessageBox*>(widget)) {
-                    for (auto* b : box->buttons()) {
-                        if (box->buttonRole(b) == QMessageBox::DestructiveRole) { b->click(); return; }
-                    }
-                }
-            }
-        });
-        actions[1]->trigger();
-        for (int band = 0; band < 11; ++band) {
-            for (const QByteArray& reply : {QByteArray("KAT500;"), QByteArray("RV02.16;"),
-                 QByteArray("SN00222;"), QByteArray("PS1;"), QByteArray("TP0;"),
-                 QByteArray("VFWD0;"), QByteArray("RV02.16;")}) { Kat500ModelTest::step(f.kat, reply); }
-            check(f.serial.count("EM" + QByteArray::number(band).rightJustified(2, '0') + "0;RV;") == 1,
-                "confirmed clear targets all antennas of each KAT500 band once");
-        }
-        check(!f.kat.operationBusy() && !f.backend->wire.contains("tune:on"),
-            "all-memory clear completes without any radio carrier");
+    check(menu.actions().size() == 2, "radio retains pre-tune and erase context actions");
+    for (QAction* action : menu.actions()) {
+        check(!action->text().contains("KAT500"), "TX Controls context menu stays radio-side");
     }
-    Kat500ModelTest::drop(f.kat);
-    QMenu disconnected;
-    applet.buildAtuContextMenu(disconnected);
-    check(disconnected.actions().size() == 2
-        && !disconnected.actions()[0]->text().contains("KAT500")
-        && !disconnected.actions()[1]->text().contains("KAT500"),
-        "disconnected KAT500 restores the radio context menu");
 }
 void presentation() {
-    Fixture f; f.routing.reset();
-    TxApplet applet; applet.setRadioModel(&f.radio); applet.setTransmitModel(&f.radio.transmitModel()); applet.setKat500Model(&f.kat);
-    auto* atu=button(applet,"ATU tune"); auto* save=button(applet,"ATU memories");
-    check(atu && save,"existing TX Controls retain accessible identities"); if(!atu || !save) { return; }
-    check(atu->contextMenuPolicy() == Qt::CustomContextMenu, "external AUTO retains right-click menu access");
-    check(atu->text()=="AUTO" && save->text()=="SAVE" && !save->isCheckable(),"Auto uses AUTO and momentary SAVE");
-    bool pill=false; for(auto* l:applet.findChildren<QLabel*>()) { pill|=l->text()=="KAT500"; }
-    check(pill,"KAT500 occupies existing memory status slot");
-    QLabel* katPill = nullptr;
-    for (auto* label : applet.findChildren<QLabel*>()) {
-        if (label->text() == "KAT500") { katPill = label; }
+    Fixture f;
+    TxApplet applet;
+    applet.setRadioModel(&f.radio);
+    applet.setTransmitModel(&f.radio.transmitModel());
+    auto* atu = button(applet, "ATU tune");
+    auto* mem = button(applet, "ATU memories");
+    check(atu && mem, "radio tuner buttons retain accessible identities");
+    if (!atu || !mem) { return; }
+    for (const auto mode : {Kat500::Mode::Auto, Kat500::Mode::Manual, Kat500::Mode::Bypass}) {
+        Kat500ModelTest::mode(f.kat, mode);
+        check(atu->text() == "ATU" && mem->text() == "MEM" && mem->isCheckable(),
+              "external tuner mode cannot replace radio ATU/MEM");
     }
-    if (katPill) {
-        const QString passStyle = katPill->styleSheet();
-        Kat500ModelTest::observe(f.kat, "AMPI;", "AMPI1;");
-        katPill->ensurePolished();
-        check(katPill->toolTip().contains("KEY BLOCK")
-                  && katPill->accessibleDescription().contains("radio watts")
-                  && katPill->palette().color(QPalette::WindowText)
-                      == ThemeManager::instance().color("color.accent.warning"),
-              "confirmed key block turns the existing KAT500 pill amber with a radio-meter explanation");
-        Kat500ModelTest::observe(f.kat, "AMPI;", "AMPI0;");
-        check(katPill->styleSheet() == passStyle && !katPill->toolTip().contains("KEY BLOCK"),
-              "confirmed key pass restores the normal KAT500 pill");
-        f.serial.clear();
-    }
-
-    Kat500ModelTest::mode(f.kat,Kat500::Mode::Manual);
-    check(atu->text()=="ATU" && save->text()=="SAVE","Manual shows ATU and SAVE");
-    Kat500ModelTest::mode(f.kat,Kat500::Mode::Bypass);
-    check(atu->text()=="ATU" && save->text()=="MEM" && save->isCheckable(),"Bypass restores existing ATU/MEM presentation");
-    check(!atu->accessibleDescription().contains("KAT500"), "Bypass restores radio ATU accessible description");
-    auto* tune=button(applet,"Tune");
-    check(tune && atu->styleSheet()==tune->styleSheet(),"Bypass restores the original radio button style");
-    Kat500ModelTest::mode(f.kat,Kat500::Mode::Auto);
-    TransmitDelta power; power.rfPower=50; power.tunePower=7;
-    f.radio.transmitModel().applyChanges(power);
-    const auto hasLabel = [&applet](const QString& text) {
-        for (auto* label : applet.findChildren<QLabel*>()) { if (label->text()==text) { return true; } }
-        return false;
-    };
-    check(hasLabel("50%") && hasLabel("7%"),"selected KAT500 keeps percentage power readouts");
-    const TxKeyingAction::Prepared pending = prepareTxKeyingAction(atu, f.input, "click", {});
-    check(bool(pending), "external ATU click can be captured before disconnect");
-    f.backend->wire.clear();
-    f.kat.disconnectDevice();
-    check(atu->text()=="ATU" && save->text()=="MEM" && save->isCheckable(),
-        "disconnect restores ATU and checkable MEM immediately");
-    pill=false;
-    bool memory=false;
-    for (auto* label : applet.findChildren<QLabel*>()) {
-        pill |= label->text()=="KAT500";
-        memory |= label->text()=="Mem";
-    }
-    check(!pill && memory,"disconnect replaces the KAT500 pill with radio memory status");
-    check(tune && atu->styleSheet()==tune->styleSheet(),"disconnect restores the original radio button style");
-    check(hasLabel("50") && hasLabel("7") && !hasLabel("50%") && !hasLabel("7%"),
-        "disconnect restores plain radio power readouts without another meter update");
-    if (pending) { pending(); }
-    Kat500ModelTest::step(f.kat);
-    check(!f.backend->wire.contains("atu:on") && !f.backend->wire.contains("tune:on")
-        && f.serial.isEmpty(),"captured external click cannot key either tuner after disconnect");
+    Kat500ModelTest::mode(f.kat, Kat500::Mode::Auto);
+    check(f.backend->wire.isEmpty(), "external connection and mode changes never bypass radio ATU");
     f.bypass();
     f.backend->wire.clear();
-    const TxKeyingAction::Prepared fresh = prepareTxKeyingAction(atu, f.input, "click", {});
-    if (fresh) { fresh(); }
+    const auto click = prepareTxKeyingAction(atu, f.input, "click", {});
+    if (click) { click(); }
     check(f.backend->wire.contains("atu:on") && !f.backend->wire.contains("tune:on")
-        && f.serial.isEmpty(),"a new operator click after disconnect uses only the radio ATU");
+          && f.serial.isEmpty(), "ATU click targets only the radio with an active KAT500 present");
+    bool externalPill = false;
+    for (auto* label : applet.findChildren<QLabel*>()) { externalPill |= label->text() == "KAT500"; }
+    check(!externalPill, "TX Controls has no external tuner status overlay");
 }
+
 }
 int main(int argc,char** argv) {
     TestSettingsProfile profile("kat500-tx-controls"); if(!profile.isValid()) { return 1; }

@@ -71,7 +71,6 @@ class Kxpa100Applet : public CanonApplet
     std::array<QPushButton*, 2> m_antennas{};
     std::array<QCheckBox*, 8> m_capBits{}, m_indBits{};
     QCheckBox* m_side;
-    QCheckBox* m_txControls;
     QCheckBox* m_verbose;
     QCheckBox* m_pause;
     QSpinBox* m_cap;

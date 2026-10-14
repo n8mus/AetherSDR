@@ -494,16 +494,6 @@ Kxpa100Applet::Kxpa100Applet(QWidget* parent) : CanonApplet(parent)
     m_associate = button(tr("Use with current radio"),"kxAssociateRadio",settings);
     availability(m_associate,tr("Select a radio first."));
     connect(m_associate,&QPushButton::clicked,this,&Kxpa100Applet::associateRadioRequested);
-    m_txControls = new QCheckBox(tr("Use KXPA100 for TX Controls"), this);
-    m_txControls->setObjectName("kxUseTxControls");
-    m_txControls->setAccessibleName(m_txControls->text());
-    m_txControls->setToolTip(tr("Enabled after explicit radio association. Auto/Manual use KXPA100 AUTO/ATU and SAVE; Bypass restores the radio ATU/MEM controls."));
-    m_txControls->setAccessibleDescription(m_txControls->toolTip());
-    m_txControls->setChecked(true);
-    settings->addWidget(m_txControls);
-    connect(m_txControls, &QCheckBox::toggled, this, [this](bool on) {
-        if (m_model) { m_model->setUseTxControls(on); }
-    });
     auto* signalPathTitle = label("kxSignalPathTitle", manual);
     signalPathTitle->setText(tr("Signal path"));
     auto* signalPath = new QVBoxLayout;
@@ -677,10 +667,6 @@ void Kxpa100Applet::setModel(Kxpa100Model* model)
     m_frequencyEdited = false;
     { const QSignalBlocker blocker(m_frequencyRecall); m_frequencyRecall->setValue(0); }
     if (model) {
-        { const QSignalBlocker blocker(m_txControls); m_txControls->setChecked(model->useTxControls()); }
-        connect(model, &Kxpa100Model::useTxControlsChanged, this, [this](bool on) {
-            const QSignalBlocker blocker(m_txControls); m_txControls->setChecked(on);
-        });
         model->setVerbose(m_verbose->isChecked());
         connect(model, &Kxpa100Model::statusUpdated, this, &Kxpa100Applet::refresh);
         connect(model, &Kxpa100Model::operationFinished, this,
@@ -827,7 +813,6 @@ void Kxpa100Applet::refresh()
         .arg(m_model ? m_model->fieldAgeMs("^PF") : -1).arg(m_model ? m_model->fieldAgeMs("^SW") : -1));
     text(m_observed,tr("Last RF frequency: %1\nAdjusted / bypass SWR: %2 / %3\nOptional tuner: %4")
         .arg(s.frequencyKhz.value_or(0)>0 ? tr("%1 kHz").arg(*s.frequencyKhz) : tr("Unavailable"),reading(s.swr),reading(s.bypassSwr),flag(s.tunerPresent)));
-    availability(m_txControls,m_associated ? QString() : tr("Associate this amplifier with a radio first."));
     for (auto* control : m_manualPane->findChildren<QWidget*>()) {
         if (qobject_cast<QPushButton*>(control) || qobject_cast<QSpinBox*>(control) || qobject_cast<QCheckBox*>(control)) { availability(control,tunerReason); }
     }

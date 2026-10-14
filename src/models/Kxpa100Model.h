@@ -51,8 +51,6 @@ public:
     bool memorize(int frequencyKhz, std::function<bool()> permit = {});
     bool recallFrequency(int frequencyKhz);
     bool setBand(int band);
-    bool useTxControls() const { return m_useTxControls; }
-    void setUseTxControls(bool enabled);
     const std::optional<Kxpa100::Configuration>& configuration() const { return m_configuration; }
     bool readConfiguration();
     bool applyConfiguration(const Kxpa100::Configuration& configuration);
@@ -83,7 +81,6 @@ signals:
     void statusUpdated(const AetherSDR::Kxpa100::Status& status);
     void telemetryReceived(const QString& command, const AetherSDR::Kxpa100::Status& status);
     void availabilityChanged();
-    void useTxControlsChanged(bool enabled);
     void diagnostic(const QString& line);
     void debugChanged();
     void operationBusyChanged(bool busy);
@@ -151,7 +148,7 @@ private:
     int m_pollIndex = 0;
     bool m_connected = false, m_connecting = false, m_detected = false, m_closing = false;
     bool m_network = true, m_autoReconnect = false, m_deliberateDisconnect = false;
-    bool m_verbose = false, m_useTxControls = true, m_deferredTuneCancel = false, m_tuneEnded = false;
+    bool m_verbose = false, m_deferredTuneCancel = false, m_tuneEnded = false;
     QString m_host, m_portName;
     quint16 m_port = 0;
     int m_baud = 38400;

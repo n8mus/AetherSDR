@@ -16,7 +16,7 @@
 #include "Kpa500AdvancedWidget.h"
 #include "Kxpa100AdvancedWidget.h"
 #include "models/Kxpa100Model.h"
-#include "models/Kxpa100TxController.h"
+#include "models/Kxpa100RadioAssociation.h"
 #include "Kat500AdvancedWidget.h"
 #include "models/Kat500Model.h"
 #include "PeripheralAuthConnectFlow.h"
@@ -1415,17 +1415,6 @@ void RadioSetupDialog::buildKat500Device(PeripheralDeviceUi& ui, QWidget* stackP
     auto* advanced = new Kat500AdvancedWidget(m_kat500, ui.page);
     advanced->hide();
     auto* layout = qobject_cast<QVBoxLayout*>(ui.page->layout());
-    auto* txControls = new QCheckBox(tr("Use KAT500 for TX Controls"), ui.page);
-    txControls->setObjectName(QStringLiteral("katUseTxControls"));
-    txControls->setAccessibleName(txControls->text());
-    txControls->setToolTip(tr("Default on. Auto/Manual route TX Controls to KAT500; Bypass restores the radio ATU. Internal ATU bypass is confirmed before external tuning."));
-    txControls->setAccessibleDescription(txControls->toolTip());
-    txControls->setChecked(m_kat500->useTxControls());
-    connect(txControls, &QCheckBox::toggled, m_kat500, &Kat500Model::setUseTxControls);
-    connect(m_kat500, &Kat500Model::useTxControlsChanged, txControls, [txControls](bool on) {
-        const QSignalBlocker blocker(txControls); txControls->setChecked(on);
-    });
-    layout->insertWidget(layout->count() - 1, txControls);
     layout->insertWidget(layout->count() - 1, advancedToggle, 0, Qt::AlignLeft);
     layout->insertWidget(layout->count() - 1, advanced);
     connect(advancedToggle, &QPushButton::toggled, advanced, &QWidget::setVisible);
@@ -1499,26 +1488,15 @@ void RadioSetupDialog::buildKxpa100Device(PeripheralDeviceUi& ui, QWidget* stack
     auto* advanced = new Kxpa100AdvancedWidget(m_kxpa100, ui.page);
     advanced->hide();
     auto* layout = qobject_cast<QVBoxLayout*>(ui.page->layout());
-    auto* txControls = new QCheckBox(tr("Use KXPA100 for TX Controls"), ui.page);
-    txControls->setObjectName(QStringLiteral("kxUseTxControls"));
-    txControls->setAccessibleName(txControls->text());
-    txControls->setToolTip(tr("Default on. Auto/Manual route TX Controls to KXPA100; Bypass restores the radio ATU. Internal ATU bypass is confirmed before external tuning."));
-    txControls->setAccessibleDescription(txControls->toolTip());
-    txControls->setChecked(m_kxpa100->useTxControls());
-    connect(txControls, &QCheckBox::toggled, m_kxpa100, &Kxpa100Model::setUseTxControls);
-    connect(m_kxpa100, &Kxpa100Model::useTxControlsChanged, txControls, [txControls](bool on) {
-        const QSignalBlocker blocker(txControls); txControls->setChecked(on);
-    });
     auto* associate = new QPushButton(tr("Use with current radio"), ui.page);
     associate->setObjectName("kxAssociateRadio");
     associate->setAccessibleName(tr("Associate KXPA100 with the connected radio"));
-    associate->setToolTip(tr("Bind this KXPA100 serial to this radio for TX Controls and shared power meters."));
+    associate->setToolTip(tr("Bind this KXPA100 serial to this radio for VU/PWR metering and applet frequency context."));
     layout->insertWidget(layout->count() - 1, associate);
     connect(associate, &QPushButton::clicked, this, [this, associate] {
-        const bool saved = Kxpa100TxController::associate(m_model, m_kxpa100);
+        const bool saved = Kxpa100RadioAssociation::associate(m_model, m_kxpa100);
         associate->setToolTip(saved ? tr("Association saved for the current radio.") : tr("Connect an identified radio and KXPA100 before associating them. Settings must be writable."));
     });
-    layout->insertWidget(layout->count() - 1, txControls);
     layout->insertWidget(layout->count() - 1, advancedToggle, 0, Qt::AlignLeft);
     layout->insertWidget(layout->count() - 1, advanced);
     connect(advancedToggle, &QPushButton::toggled, advanced, &QWidget::setVisible);

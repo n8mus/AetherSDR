@@ -45,7 +45,9 @@
 #include "Kpa500Applet.h"
 #include "Kat500Applet.h"
 #include "Kxpa100Applet.h"
-#include "models/Kxpa100TxController.h"
+#include "models/Kxpa100RadioAssociation.h"
+#include "AtuPreTuneDialog.h"
+#include "models/Kat500TxController.h"
 #include "HealthApplet.h"
 #include "ImageFileDialog.h"
 #include "MeterApplet.h"
@@ -1765,8 +1767,8 @@ void MainWindow::refreshTunerPortFrequency()
     if (m_appletPanel && m_appletPanel->kxpa100Applet()) {
         m_appletPanel->kxpa100Applet()->setRadioContext(
             m_radioModel.isConnected() ? m_radioModel.nickname() : QString(),
-            Kxpa100TxController::effectiveTxFrequencyKhz(&m_radioModel),
-            m_appletPanel->txApplet()->kxpa100Associated());
+            Kxpa100RadioAssociation::effectiveTxFrequencyKhz(&m_radioModel),
+            (m_kxpa100Association && m_kxpa100Association->associated()));
     }
     // Match the active plan's segments to the KPA's fixed band selectors.
     // These broad search windows classify bands; the plan owns their edges.
@@ -6446,17 +6448,14 @@ SharedTxMeterSelection MainWindow::sharedTxMeterSelection()
     if (m_radioModel.model().startsWith("AU-") && maxWatts <= 100) {
         maxWatts = 500;
     }
-    if (m_appletPanel && m_appletPanel->txApplet()->kxpa100Associated()) {
-        return m_kxpa100Model.amplifierMeterEligible()
-            ? SharedTxMeterSelection{SharedTxMeterSource::Kxpa100, 100, false}
-            : SharedTxMeterSelection{SharedTxMeterSource::Radio, maxWatts, false};
-    }
     const bool amplifierActive = m_radioModel.amplifier().present()
         && m_radioModel.amplifier().operate();
     const bool kpa500Active = m_kpa500Conn.isConnected() && m_kpa500Conn.isResponding()
         && m_kpa500Conn.lastStatus().operate.value_or(false);
     return selectSharedTxMeters(maxWatts, amplifierActive, kpa500Active,
-                                m_kat500Model.ampKeyBlockConfirmed());
+                                m_kat500Model.ampKeyBlockConfirmed(),
+                                m_kxpa100Association && m_kxpa100Association->associated()
+                                    && m_kxpa100Model.amplifierMeterEligible());
 }
 
 // One owner for amplifier TX meters on the shared readouts (S-Meter,
@@ -7562,13 +7561,20 @@ void MainWindow::wireMeters()
 #endif
     }
 
-    m_kat500Model.setUseTxControls(PeripheralSettings::deviceString("Kat500", "UseTxControls", "True") != "False");
-    connect(&m_kat500Model, &Kat500Model::useTxControlsChanged, this, [](bool on) {
-        PeripheralSettings::setDeviceString("Kat500", "UseTxControls", on ? "True" : "False");
-    });
-    m_appletPanel->txApplet()->setKat500Model(&m_kat500Model);
     auto* kat = m_appletPanel->kat500Applet();
     kat->setModel(&m_kat500Model);
+    connect(kat, &Kat500Applet::preTuneRequested, this, [this] {
+        if (!m_kat500PreTuneDialog) {
+            auto* controller = new Kat500TxController(&m_radioModel, &m_kat500Model, this);
+            auto* dialog = new AtuPreTuneDialog(&m_radioModel, m_bandPlanMgr, this, controller);
+            controller->setParent(dialog);
+            dialog->setAttribute(Qt::WA_DeleteOnClose);
+            m_kat500PreTuneDialog = dialog;
+        }
+        m_kat500PreTuneDialog->show();
+        m_kat500PreTuneDialog->raise();
+        m_kat500PreTuneDialog->activateWindow();
+    });
     connect(&m_kat500Model, &Kat500Model::detectedChanged, m_appletPanel, &AppletPanel::setKat500Visible);
     connect(kat, &Kat500Applet::advancedSettingsRequested, this, [this] {
         if (RadioSetupDialog* dialog = openRadioSetupPage(QStringLiteral("Peripherals"))) {
@@ -7600,7 +7606,9 @@ void MainWindow::wireMeters()
 #endif
     }
 
-    m_appletPanel->txApplet()->setKxpa100Model(&m_kxpa100Model);
+    m_kxpa100Association = new Kxpa100RadioAssociation(&m_radioModel, &m_kxpa100Model, this);
+    connect(m_kxpa100Association, &Kxpa100RadioAssociation::changed,
+            this, &MainWindow::refreshTunerPortFrequency);
     auto* kx = m_appletPanel->kxpa100Applet();
     kx->setModel(&m_kxpa100Model);
     connect(&m_kxpa100Model, &Kxpa100Model::detectedChanged, m_appletPanel, &AppletPanel::setKxpa100Visible);
@@ -7608,10 +7616,10 @@ void MainWindow::wireMeters()
         if (auto* dialog = openRadioSetupPage(QStringLiteral("Peripherals"))) { dialog->revealKxpa100AdvancedSettings(); }
     });
     connect(kx, &Kxpa100Applet::associateRadioRequested, this, [this] {
-        if (m_appletPanel->txApplet()->kxpa100Associated()) {
-            Kxpa100TxController::dissociate(&m_radioModel, &m_kxpa100Model);
+        if ((m_kxpa100Association && m_kxpa100Association->associated())) {
+            Kxpa100RadioAssociation::dissociate(&m_radioModel, &m_kxpa100Model);
         } else {
-            Kxpa100TxController::associate(&m_radioModel, &m_kxpa100Model);
+            Kxpa100RadioAssociation::associate(&m_radioModel, &m_kxpa100Model);
         }
         refreshTunerPortFrequency();
     });
@@ -7646,14 +7654,20 @@ void MainWindow::wireMeters()
             }
 #endif
         }
-        m_appletPanel->txApplet()->setPowerScale(selection.maxWatts, selection.highPowerAmplifier);
-        m_appletPanel->tunerApplet()->setPowerScale(selection.maxWatts, selection.highPowerAmplifier);
+        int radioMaxWatts = m_radioModel.transmitModel().maxPowerLevel();
+        if (m_radioModel.model().startsWith("AU-") && radioMaxWatts <= 100) {
+            radioMaxWatts = 500;
+        }
+        const bool integratedAmp = m_radioModel.amplifier().present()
+            && m_radioModel.amplifier().operate();
+        m_appletPanel->txApplet()->setPowerScale(radioMaxWatts, integratedAmp);
+        m_appletPanel->tunerApplet()->setPowerScale(radioMaxWatts, integratedAmp);
+        m_appletPanel->healthApplet()->setPowerScale(radioMaxWatts, integratedAmp);
         m_appletPanel->setMeterPowerScale(selection.maxWatts, selection.highPowerAmplifier);
-        m_appletPanel->healthApplet()->setPowerScale(selection.maxWatts, selection.highPowerAmplifier);
     };
     connect(&m_kxpa100Model, &Kxpa100Model::statusUpdated, this, updatePowerScale);
     connect(&m_kxpa100Model, &Kxpa100Model::availabilityChanged, this, updatePowerScale);
-    connect(&m_kxpa100Model, &Kxpa100Model::associationChanged, this, updatePowerScale);
+    connect(m_kxpa100Association, &Kxpa100RadioAssociation::changed, this, updatePowerScale);
     connect(&m_kxpa100Model, &Kxpa100Model::statusUpdated, this, [this](const Kxpa100::Status& status) {
         if (sharedTxMeterSelection().source != SharedTxMeterSource::Kxpa100) { return; }
         const float watts = status.forwardWatts.value_or(0);

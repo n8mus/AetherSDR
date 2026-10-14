@@ -468,16 +468,13 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
            "only; it does not key a radio. Default off."));
     m_follow->setChecked(prefs.value("FollowTx").toBool(false));
     settings->addWidget(m_follow);
-    m_txControls = new QCheckBox(tr("Use KAT500 for TX Controls"), this);
-    m_txControls->setObjectName("katUseTxControls");
-    m_txControls->setAccessibleName(m_txControls->text());
-    m_txControls->setToolTip(tr("Default on. Auto/Manual use KAT500 AUTO/ATU and SAVE; Bypass restores the radio ATU/MEM controls."));
-    m_txControls->setAccessibleDescription(m_txControls->toolTip());
-    m_txControls->setChecked(true);
-    settings->addWidget(m_txControls);
-    connect(m_txControls, &QCheckBox::toggled, this, [this](bool on) {
-        if (m_model) { m_model->setUseTxControls(on); }
-    });
+    auto* preTune = new QPushButton(tr("Pre-tune bands…"), this);
+    preTune->setObjectName("katPreTuneBands");
+    preTune->setAccessibleName(tr("KAT500 pre-tune bands"));
+    preTune->setToolTip(tr("Open the KAT500 band sweep. Starting a sweep transmits at the radio's Tune Pwr; opening it does not transmit or change the radio tuner."));
+    preTune->setAccessibleDescription(preTune->toolTip());
+    settings->addWidget(preTune);
+    connect(preTune, &QPushButton::clicked, this, &Kat500Applet::preTuneRequested);
     auto* signalPathTitle = label("katSignalPathTitle", settings);
     signalPathTitle->setText(tr("Signal path"));
     auto* signalPath = new QVBoxLayout;
@@ -658,10 +655,6 @@ void Kat500Applet::setModel(Kat500Model* model)
     m_frequencyEdited = false;
     { const QSignalBlocker blocker(m_frequencyRecall); m_frequencyRecall->setValue(0); }
     if (model) {
-        { const QSignalBlocker blocker(m_txControls); m_txControls->setChecked(model->useTxControls()); }
-        connect(model, &Kat500Model::useTxControlsChanged, this, [this](bool on) {
-            const QSignalBlocker blocker(m_txControls); m_txControls->setChecked(on);
-        });
         model->setFollowTxFrequency(m_follow->isChecked());
         model->setVerbose(m_verbose->isChecked());
         connect(model, &Kat500Model::statusUpdated, this, &Kat500Applet::refresh);

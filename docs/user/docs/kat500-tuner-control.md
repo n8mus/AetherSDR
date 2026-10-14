@@ -58,24 +58,13 @@ F, FX and FC are displayed in kHz; FY is a range in kHz. They can remain after R
 
 **Follow TX frequency** defaults off. Enabling it follows the effective TX slice frequency, including XIT and split offsets. When eligibility returns, a frequency change that has not yet been attempted can proceed. A failed or canceled request is not retried for the same frequency; change the effective TX frequency or switch Follow off and on to authorize a fresh attempt. It does not key a radio. The applet’s own **Tune** button remains a tuner-only request.
 
-### TX Controls integration
+### Dedicated tuner controls and pre-tune
 
-**Use KAT500 for TX Controls** is on by default in both the applet's **Settings** and **Peripherals → Elecraft KAT500**. When the connected tuner reports **Auto** or **Manual**, the TX Controls applet uses it instead of the internal radio ATU. Disconnecting the tuner, selecting **Bypass** mode or switching this option off restores the radio ATU/MEM controls, memory indicator, button appearance and plain power readouts. A pending KAT500 operation is canceled; it never becomes an internal-ATU request. Physical bypass can be the tuner's chosen match in Auto and does not change the selected route.
+**TX Controls** always operates the radio's internal ATU and memories. Connecting a KAT500 or changing its mode does not replace ATU/MEM or bypass the radio tuner. Use this applet for external tuning and **Manual → Memorize** for saving a match.
 
-Right-click **AUTO** or **ATU** for **Pre-tune bands…** and **Clear all KAT500 memories…**. Pre-tune uses the same Step/Auto sweep dialog, with KAT500 memory-bin spacing and the active band plan. Each point runs a fresh KAT500 tune while keeping the radio's internal ATU bypassed. Aborting stops the carrier, cancels the tuner search and restores the original radio frequency. A lost tuner connection or changed route stops the sweep without falling back to the radio ATU. Changing between the radio and KAT500 invalidates an open pre-tune window, including a paused sweep; close and reopen it to use the new tuner.
+Open **Settings → Pre-tune bands…** for a KAT500 Step/Auto sweep using its memory-bin spacing and the active band plan. Opening the window sends no radio or tuner command. Starting a sweep explicitly authorizes a carrier at the existing radio **Tune Pwr**; it first confirms internal ATU bypass, selects the TX frequency, and waits for the KAT500 search request before starting RF. Abort, timeout, lost connection or changed authorization stops the carrier. The sweep restores the original frequency and never falls back to the radio's internal tuner. A new sweep requires a new operator action.
 
-**Clear all KAT500 memories…** asks for confirmation before erasing stored matches on every band and antenna; it preserves configuration and the radio's internal memories. Elecraft does not document single-frequency erasure. Left-click **AUTO** or **ATU** for a fresh tune at the current frequency instead.
-
-- In **Auto**, the gold **AUTO** button starts a fresh tune and leaves the tuner in Auto. In **Manual**, the button reads **ATU**. Clicking either authorizes a radio tune carrier at the existing **Tune Pwr** setting; AetherSDR does not increase that setting.
-- The sequence waits for internal radio ATU bypass readback, selects the TX frequency, then starts the carrier only after the KAT500 confirms the search request. **CANCEL**, completion, timeout, lost connection or changed authorization stops the carrier. A failed attempt is not automatically restarted.
-- **SAVE** replaces **MEM** and stores the current matching network for the selected antenna and TX frequency, with readback verification. SAVE generates no RF.
-- A **KAT500** pill occupies the former Mem indicator position. **Success** and **Byp** describe tuner readback; the SWR meter above still measures SWR at the radio. Success clears when the matching context changes.
-- While KAT500 routing is selected, the power readouts include **%** for radio drive, not amplifier output watts.
-- If readbacks become stale while the tuner connection remains open, the external controls stay selected but unavailable. Closing the connection restores the radio controls. Reconnecting requires fresh Auto or Manual mode readback before selecting KAT500 again.
-
-With a KPA500 in Operate, fresh **KEY BLOCK** readback switches the shared **VU** and **PWR** meters to radio forward power, SWR and reflected power, with the radio power scale. **KEY PASS** returns them to amplifier readings and scale. While TX Controls uses the KAT500, its existing **KAT500** pill turns amber for confirmed KEY BLOCK. Hover over it for an explanation of the meter source and scale. Stale, disconnected or powered-off tuner status cannot assert KEY BLOCK. The KPA500 applet's **PWR** and **SWR** show the amplifier's own measurements; its Full-view **DRV** meter always uses the radio's measured forward watts before cable losses. This assumes the amplifier key line runs through the KAT500; it does not infer keying from zero output power. A separately selected radio-integrated amplifier retains its existing meter priority.
-
-Connect the amplifier key line through the KAT500 if its key interrupt is to protect an amplifier during tuning. AetherSDR does not switch the amplifier to Standby for this sequence. The context menu targets KAT500 while this routing is selected. Use Advanced for band/antenna-specific erasure and memory inspection.
+When **KEY BLOCK** is confirmed, the shared **VU** and **PWR** meters use radio watts and the radio scale instead of KPA500 output. A radio-integrated amplifier keeps its existing meter priority. The KPA500 applet still shows amplifier readback; **TX Controls** retains radio measurements and scale throughout.
 
 ## Using Advanced
 
@@ -108,7 +97,7 @@ Restore requires a complete firmware 02.16 backup matching the connected tuner s
 
 **Read fault history** shows newest records first, elapsed device seconds, decoded fault, ADC counts, SWR and raw bytes. Power On records differ from the current no-fault state. Unknown records remain visible. **Export CSV...** saves the captured records.
 
-**Inspect bin** reads matches for a selected kHz frequency, or **Current frequency**. Stored antenna/C/L rows do not alter live controls. To erase, select band and antenna, review the displayed erase target, check **Confirm selected erase**, and click **Erase selected memories**. Completion confirms the command barrier; inspect the bin to verify the resulting contents. **Confirm factory reset** has a separate explanation of erased settings/matches, restart and default-baud reconnection. Neither action runs on connect or page open.
+**Inspect bin** reads matches for a selected kHz frequency, or **Current frequency**. Stored antenna/C/L rows do not alter live controls. To clear every stored match, select **All 11 bands** and **All antennas**, check **Confirm erasing all KAT500 matches**, and click **Clear all ATU memories…**. This preserves configuration and the radio’s own ATU memories. For a narrower erase, select a band/antenna, review the target, check **Confirm selected erase**, and click **Erase selected memories**. Single-frequency erasure is not supported by the documented protocol. Completion confirms the command barrier; inspect the bin to verify the resulting contents. **Confirm factory reset** has a separate explanation of erased settings/matches, restart and default-baud reconnection. Neither action runs on connect or page open.
 
 ## Troubleshooting
 

@@ -1643,7 +1643,7 @@
   "split": "",
   "confidence": "high"
  },
- "models/Kxpa100TxController.h": {
+ "models/Kxpa100RadioAssociation.h": {
   "tag": "peripheral(elecraft)",
   "note": "Radio-associated external-tuner orchestration through existing TxController intent; no vendor radio wire.",
   "split": "",

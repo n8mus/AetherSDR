@@ -1323,6 +1323,8 @@ private:
     VkampConnection   m_vkampConn;       // VK3AMP amplifier, TCP control/status + UDP telemetry
     Kat500Model      m_kat500Model;
     Kxpa100Model      m_kxpa100Model;
+    class Kxpa100RadioAssociation* m_kxpa100Association = nullptr;
+    QPointer<class AtuPreTuneDialog> m_kat500PreTuneDialog;
     Kpa500Connection  m_kpa500Conn;      // Elecraft KPA500 amplifier, serial or raw TCP
     Kpa1500Connection m_kpa1500Conn;     // Elecraft KPA1500 amplifier, TCP control/status on port 1500 (#4097)
     BandPlanManager*  m_bandPlanMgr{nullptr};
