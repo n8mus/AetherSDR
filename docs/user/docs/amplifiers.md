@@ -124,7 +124,9 @@ failed or dropped link. Serial and network targets are saved separately.
 serial number from readback; unreported values remain unknown. The same
 information appears in the applet's **Settings**.
 
-<img src="/img/kpa500/kpa500-applet-full.png" width="360" alt="KPA500 compact applet with confirmed ON state and zero forward power." />
+<img src="/img/kpa500/kpa500-applet-drv.png" width="360" alt="KPA500 Full view with output power, SWR and the radio-sourced DRV meter; illustrative replay values." />
+
+*Full view with replayed telemetry illustrating the DRV meter.*
 
 *The KPA500 applet shows amplifier readback. This capture was taken without RF.*
 
