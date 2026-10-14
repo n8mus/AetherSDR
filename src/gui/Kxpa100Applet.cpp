@@ -779,13 +779,21 @@ void Kxpa100Applet::refresh()
     pill(m_fault,s.faultCode ? (*s.faultCode=='N' ? tr("NO FAULT") : tr("FAULT %1").arg(QChar(*s.faultCode))) : tr("FAULT ?"),
         fault,s.faultCode && *s.faultCode=='N' ? "ok" : "error");
     const std::array<std::optional<double>,7> values{s.forwardWatts,s.inputWatts,s.reflectedWatts,s.dissipatedWatts,s.temperatureC,s.supplyVolts,s.drainAmps};
-    const QStringList names{tr("OUT"),tr("IN"),tr("REFL"),tr("DISS"),tr("TEMP"),tr("SUPPLY"),tr("DRAIN")};
+    const QStringList names{tr("OUT"),tr("DRV"),tr("REFL"),tr("DISS"),tr("TEMP"),tr("SUPPLY"),tr("DRAIN")};
     const QStringList units{tr("W"),tr("W"),tr("W"),tr("W"),tr("°C"),tr("V"),tr("A")};
     for (int i=0;i<7;++i) {
         const QString value=values[i] ? QString::number(*values[i],'f',1) : QStringLiteral("—");
         const QString label=tr("%1 %2%3").arg(names[i],value,units[i]);
         pill(m_meterLabels[i],label,tr("KXPA100 %1: %2 %3. %4").arg(names[i],value,units[i],responding ? QString() : tr("Readback is stale.")),"muted");
         m_meters[i]->setValue(values[i].value_or(0)); m_meters[i]->setAccessibleName(label);
+        if (i == 1) {
+            const QString source = tr("DRV: input power measured by the KXPA100, in watts. Scale 0–10 W.");
+            const QString description = source + " " + m_meterLabels[i]->accessibleDescription();
+            m_meterLabels[i]->setToolTip(description);
+            m_meterLabels[i]->setAccessibleDescription(description);
+            m_meters[i]->setToolTip(description);
+            m_meters[i]->setAccessibleDescription(description);
+        }
     }
     const bool preview=m_swr->isDown(); const auto swr=preview ? s.bypassSwr : s.swr;
     const QString swrText=tr("%1 %2").arg(preview ? tr("BYP") : tr("SWR"),reading(swr));

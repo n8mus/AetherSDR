@@ -38,7 +38,7 @@ Connection preferences are client settings. The association and TX Controls pref
 
 **Tune** starts a tuner search; it does not generate a radio carrier. Supply RF according to the Elecraft instructions, or use the integrated TX Controls sequence below. **Cancel** requests an end to the search. **Clear fault** clears the current fault, leaving stored fault history intact.
 
-Full view shows output power and SWR, followed by input power, reflected power, dissipated power, temperature, supply voltage and drain current. Power meters use watts; SWR uses a 1–5 scale. The pill retains the exact reading beyond the scale. SWR is the last observed measurement and can remain after RF stops. Press and hold the **SWR** pill to preview bypass SWR without changing any relays; release to return to adjusted SWR. A dash means the reading is unavailable.
+Full view shows output power and SWR, followed by **DRV** input power measured by the KXPA100 (0–10 W), reflected power, dissipated power, temperature, supply voltage and drain current. Power meters use watts; SWR uses a 1–5 scale. The pill retains the exact reading beyond the scale. SWR is the last observed measurement and can remain after RF stops. Press and hold the **SWR** pill to preview bypass SWR without changing any relays; release to return to adjusted SWR. A dash means the reading is unavailable.
 
 **Mini** keeps the **OPR/STBY** PA toggle, **Tune/Cancel**, a mode/antenna/status readout, output power and SWR. **Full** restores the other controls. Expanded drawers and small popouts scroll when needed.
 

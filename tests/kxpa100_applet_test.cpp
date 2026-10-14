@@ -1,4 +1,5 @@
 #include "gui/Kxpa100Applet.h"
+#include "gui/HGauge.h"
 #include "TestSettingsProfile.h"
 #include "core/ThemeManager.h"
 #include "models/Kxpa100Model.h"
@@ -29,6 +30,17 @@ public:
         model.m_write=[&](const QByteArray& bytes) { wire.append(bytes); return true; };
         Kxpa100Applet widget; widget.setModel(&model); widget.resize(260,widget.sizeHint().height()); widget.show(); QTest::qWait(10);
         CHECK(wire.isEmpty());
+        auto* drive=dynamic_cast<HGauge*>(widget.findChild<QWidget*>("kxInputGauge"));
+        auto* driveLabel=widget.findChild<QLabel*>("kxMeterLabel1");
+        CHECK(drive && driveLabel && driveLabel->text() == "DRV 0.0W");
+        model.m_status.inputWatts=4.5; model.m_status.forwardWatts=85;
+        emit model.statusUpdated(model.m_status);
+        CHECK(driveLabel->text() == "DRV 4.5W" && drive->value() == 4.5f);
+        CHECK(drive->toolTip().contains("input power") && drive->accessibleDescription().contains("measured by the KXPA100"));
+        drive->setValueImmediate(10);
+        CHECK(drive->filledFraction() == 1.0f);
+        ready(model); emit model.statusUpdated(model.m_status);
+        CHECK(wire.isEmpty());
         auto* mini=widget.findChild<QPushButton*>("kxMini"); auto* manual=widget.findChild<QPushButton*>("kxManualToggle");
         auto* settings=widget.findChild<QPushButton*>("kxSettings"); auto* swr=widget.findChild<QPushButton*>("kxSwr");
         CHECK(mini && manual && settings && swr);
@@ -42,6 +54,7 @@ public:
         widget.resize(248,widget.minimumSizeHint().height()); QTest::qWait(10);
         CHECK(scroll->verticalScrollBar()->maximum() == 0);
         const int full=widget.sizeHint().height(); mini->click(); QTest::qWait(10);
+        CHECK(!drive->isVisible() && !driveLabel->isVisible());
         CHECK(widget.sizeHint().height() <= full * 0.60 && !manual->isVisible() && !settings->isVisible());
         CHECK(widget.findChild<QPushButton*>("kxTune")->isVisible() && swr->isVisible());
         mini->click(); manual->click(); CHECK(manual->text().startsWith("▾")); manual->click(); CHECK(manual->text().startsWith("▸"));

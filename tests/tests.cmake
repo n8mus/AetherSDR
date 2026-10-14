@@ -4751,6 +4751,7 @@ set_tests_properties(kpa500_advanced_widget_test PROPERTIES ENVIRONMENT "QT_QPA_
 
 add_executable(kpa500_applet_test
     tests/kpa500_applet_test.cpp
+    src/models/MeterModel.cpp
     src/gui/Kpa500Applet.cpp
     src/gui/CanonSurface.cpp
     src/gui/CanonWindow.cpp

@@ -6492,6 +6492,16 @@ void MainWindow::wireMeters()
 {
     auto* relativeTimer = new QTimer(this);
     relativeTimer->setInterval(100);
+    const auto updateKpa500Drive = [this] {
+        if (m_appletPanel && m_appletPanel->kpa500Applet()) {
+            m_appletPanel->kpa500Applet()->updateRadioDrive(
+                m_radioModel.meterModel(), m_radioModel.isConnected());
+        }
+    };
+    // Poll even without meter packets so an expired radio reading clears in AMP mode too.
+    connect(relativeTimer, &QTimer::timeout, this, updateKpa500Drive);
+    connect(&m_radioModel, &RadioModel::connectionStateChanged, this, updateKpa500Drive);
+    updateKpa500Drive();
     connect(relativeTimer, &QTimer::timeout, this, [this] {
         if (!m_appletPanel) { return; }
         auto* meter = m_appletPanel->sMeterWidget();

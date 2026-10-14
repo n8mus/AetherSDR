@@ -1,5 +1,6 @@
 #include "gui/Kpa500Applet.h"
 #include "gui/HGauge.h"
+#include "models/MeterModel.h"
 #include "core/AppSettings.h"
 #include "core/ThemeManager.h"
 #include "TestSettingsProfile.h"
@@ -42,6 +43,60 @@ public:
         QSignalSpy bands(&widget, &Kpa500Applet::bandRequested);
         QSignalSpy fans(&widget, &Kpa500Applet::fanSpeedChangeRequested);
         QSignalSpy speakers(&widget, &Kpa500Applet::speakerRequested);
+        MeterModel radioMeters;
+        widget.updateRadioDrive(radioMeters, true);
+        check(widget.m_driveReadout->text() == "DRV —" && !widget.m_driveGauge->isEnabled(),
+              "Missing radio power is unavailable, not a fabricated zero");
+        MeterDef forward;
+        forward.index = 8; forward.source = "TX"; forward.name = "FWDPWR"; forward.unit = "Watts";
+        radioMeters.defineMeter(forward);
+        widget.updateRadioDrive(radioMeters, true);
+        check(!widget.m_driveGauge->isEnabled(), "A declared but unfed radio meter is unavailable");
+        radioMeters.updateValueByName("TX", "FWDPWR", 12.5f);
+        widget.updateRadioDrive(radioMeters, true);
+        check(widget.m_driveReadout->text() == "DRV 12.5 W" && widget.m_driveGauge->value() == 12.5f,
+              "DRV uses measured radio watts with fractional precision");
+        check(widget.m_driveReadout->toolTip().contains("before cable losses")
+              && widget.m_driveGauge->accessibleDescription().contains("not measured at the KPA500 input"),
+              "DRV identifies the source and cable-loss limitation in tooltip and accessibility text");
+        Kpa500::Status amplified;
+        amplified.operate = true; amplified.forwardPowerW = 500.0f;
+        widget.applyStatus(amplified);
+        MeterDef amp;
+        amp.index = 12; amp.source = "AMP"; amp.name = "FWD"; amp.unit = "dBm";
+        radioMeters.defineMeter(amp);
+        radioMeters.updateValueByName("AMP", "FWD", 57.0f);
+        widget.updateRadioDrive(radioMeters, true);
+        check(widget.m_driveGauge->value() == 12.5f && widget.m_readouts[0]->text() == "PWR 500 W",
+              "Amplifier status and AMP relay meters cannot replace DRV radio watts");
+        widget.updateRadioDrive(radioMeters, false);
+        check(widget.m_driveReadout->text() == "DRV —" && widget.m_driveGauge->value() == 0.0f,
+              "Radio disconnect immediately clears a still-fresh drive reading");
+        QTest::qWait(MeterModel::kTxMeterStaleMs + 50);
+        MeterDef swr;
+        swr.index = 10; swr.source = "TX"; swr.name = "SWR"; swr.unit = "SWR";
+        radioMeters.defineMeter(swr);
+        radioMeters.updateValueByName("TX", "SWR", 1.2f);
+        radioMeters.updateValueByName("AMP", "FWD", 57.0f);
+        widget.updateRadioDrive(radioMeters, true);
+        check(widget.m_driveReadout->text() == "DRV —" && !widget.m_driveGauge->isEnabled()
+              && widget.m_driveGauge->filledFraction() == 0.0f,
+              "Fresh SWR and amplifier telemetry cannot keep stale radio forward watts alive");
+        radioMeters.updateValueByName("TX", "FWDPWR", 0.0f);
+        widget.updateRadioDrive(radioMeters, true);
+        check(widget.m_driveReadout->text() == "DRV 0.0 W" && widget.m_driveGauge->isEnabled(),
+              "A measured zero is available and distinct from a missing reading");
+        radioMeters.removeMeter(8);
+        widget.updateRadioDrive(radioMeters, true);
+        check(!widget.m_driveGauge->isEnabled(), "Removing the radio meter invalidates DRV");
+        radioMeters.defineMeter(forward);
+        radioMeters.updateValueByName("TX", "FWDPWR", 10.0f);
+        widget.updateRadioDrive(radioMeters, true);
+        check(widget.m_driveGauge->isEnabled(), "Fresh data restores drive availability before session reset");
+        radioMeters.clear();
+        widget.updateRadioDrive(radioMeters, true);
+        check(!widget.m_driveGauge->isEnabled(), "A new radio session cannot inherit the previous drive reading");
+        widget.applyStatus({});
         check(!widget.m_verbose->isChecked(), "Verbose debug defaults off");
         check(widget.followTx() && band->currentIndex() == -1 && !band->isEnabled(), "Follow TX defaults on without inventing a band");
         check(!power->isEnabled() && power->text() == QStringLiteral("—"), "Disconnected power control is unavailable and shows no invented power state");
@@ -140,11 +195,15 @@ public:
               && widget.m_tracking->toolTip().contains("queued until RX")
               && widget.m_trackingDetails->text().contains("14.119100"),
               "Header keeps confirmed band separate from the follow target and preserves full tracking details");
+        check(widget.m_driveGauge->isVisible() && widget.m_driveReadout->isVisible(),
+              "Full exposes the DRV gauge and pill");
         const int fullHeight = widget.minimumSizeHint().height();
         widget.m_miniButton->setChecked(true);
         QTest::qWait(10);
         check(widget.minimumSizeHint().height() * 2 <= fullHeight,
               "Mini occupies at most half the collapsed full layout height");
+        check(!widget.m_driveGauge->isVisible() && !widget.m_driveReadout->isVisible(),
+              "Mini hides the entire DRV row");
         check(!widget.m_toolsPane->isVisible() && !operate->isVisible()
               && widget.m_readouts[0]->isVisible() && widget.m_readouts[1]->isVisible()
               && widget.m_state->isVisible() && power->isVisible(),
@@ -324,6 +383,11 @@ public:
             widget.resize(254, widget.minimumSizeHint().height());
             QTest::qWait(50);
             widget.grab().save("kpa500-full-replay.png");
+            radioMeters.defineMeter(forward);
+            radioMeters.updateValueByName("TX", "FWDPWR", 25.0f);
+            widget.updateRadioDrive(radioMeters, true);
+            QTest::qWait(250);
+            widget.grab().save("kpa500-drv-synthetic-replay.png");
             widget.m_miniButton->setChecked(true);
             widget.resize(254, widget.minimumSizeHint().height());
             QTest::qWait(50);
