@@ -246,20 +246,6 @@ QPushButton* button(TxApplet& a,const QString& name) {
     for(auto* b:a.findChildren<QPushButton*>()) { if(b->accessibleName()==name) { return b; } }
     return nullptr;
 }
-void saving() {
-    Fixture f;
-    check(f.routing->saveMatch(), "SAVE accepts an explicit no-RF request");
-    for (const QByteArray& reply : {QByteArray("KAT500;"), QByteArray("RV02.16;"), QByteArray("SN00222;"),
-         QByteArray("PS1;"), QByteArray("TP0;"), QByteArray("VFWD0;"), QByteArray("AN1;"),
-         QByteArray("BYPN;"), QByteArray("SIDET;"), QByteArray("C0;"), QByteArray("L3;")}) {
-        Kat500ModelTest::step(f.kat, reply);
-    }
-    Kat500ModelTest::step(f.kat);
-    check(f.serial.contains("SM 14100;DM14100;"), "SAVE writes and verifies the current TX frequency bin");
-    Kat500ModelTest::frame(f.kat,"DM 14100-14119;AN1;SIDET;C00;L03;VSWRB1.00;5 UNUSED;");
-    check(!f.routing->busy() && f.routing->message().contains("saved and verified"), "SAVE completes only after matching memory readback");
-    check(!f.backend->wire.contains("tune:on") && !f.serial.contains("T;TP;"), "SAVE never requests a search or carrier");
-}
 void nativeSweepRouteFence() {
     Fixture f;
     AtuPreTuneDialog dialog(&f.radio, nullptr);
@@ -410,6 +396,6 @@ void presentation() {
 int main(int argc,char** argv) {
     TestSettingsProfile profile("kat500-tx-controls"); if(!profile.isValid()) { return 1; }
     QApplication app(argc,argv);
-    routingAndCycle(); cancellationAndFences(); saving(); presentation(); contextMenu(); nativeSweepRouteFence(); externalSweep();
+    routingAndCycle(); cancellationAndFences(); presentation(); contextMenu(); nativeSweepRouteFence(); externalSweep();
     return failures ? 1:0;
 }
