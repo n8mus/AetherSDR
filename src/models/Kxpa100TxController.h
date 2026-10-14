@@ -44,6 +44,7 @@ private:
     void ensureBypass();
     bool internalBypassed() const;
     bool originalIntentValid() const;
+    bool saveIntentValid() const;
     void recallFrequency();
     void beginSearch();
     void operationFinished();

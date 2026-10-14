@@ -54,7 +54,7 @@ Kxpa100TxController::Kxpa100TxController(RadioModel* radio, Kxpa100Model* tuner,
         connect(radio, &RadioModel::connectionStateChanged, this, [this](bool connected) {
             m_bypassRequested = false;
             if (!connected) { stop(tr("Radio disconnected; tune canceled."), true); }
-            refresh();
+            loadAssociation();
         });
         connect(radio, &RadioModel::infoChanged, this, &Kxpa100TxController::loadAssociation);
         connect(radio, &RadioModel::capabilitiesChanged, this, &Kxpa100TxController::refresh);
@@ -219,8 +219,8 @@ void Kxpa100TxController::refresh()
         || m_tuner->status().serial != m_serial || effectiveTxFrequencyKhz(m_radio) != m_frequencyKhz)) {
         stop(tr("Tune result discarded: matching context changed."), false);
     }
-    if (m_phase == Phase::Saving && (!m_selected || !m_tuner || !m_tuner->isConnected())) {
-        stop(tr("Saving canceled: tuner selection changed."), false);
+    if (m_phase == Phase::Saving && !saveIntentValid()) {
+        stop(tr("Saving canceled: radio, frequency or tuner context changed."), false);
     }
     ensureBypass();
     if (m_phase == Phase::Bypass && internalBypassed()) { recallFrequency(); }
@@ -343,9 +343,24 @@ void Kxpa100TxController::cancel()
 bool Kxpa100TxController::saveMatch()
 {
     if (!unavailableReason().isEmpty()) { return false; }
+    m_frequencyKhz = effectiveTxFrequencyKhz(m_radio);
+    m_serial = m_tuner->status().serial;
+    m_antenna = m_tuner->status().antenna;
+    m_mode = m_tuner->status().mode;
     m_message = tr("Saving the current KXPA100 match.");
     setPhase(Phase::Saving, 15000); m_ownsOperation = true;
-    if (!m_tuner->memorize(effectiveTxFrequencyKhz(m_radio))) { stop(tr("KXPA100 save request was refused."), false); return false; }
+    const QPointer<Kxpa100TxController> self(this);
+    if (!m_tuner->memorize(m_frequencyKhz, [self] {
+        return self && self->m_phase == Phase::Saving && self->saveIntentValid();
+    })) { stop(tr("KXPA100 save request was refused."), false); return false; }
     return true;
+}
+bool Kxpa100TxController::saveIntentValid() const
+{
+    return associated() && m_selected && m_tuner->isResponding() && m_tuner->tunerEligible()
+        && m_tuner->status().serial == m_serial && m_tuner->status().antenna == m_antenna
+        && m_tuner->status().mode == m_mode && m_tuner->status().faultCode == 'N'
+        && effectiveTxFrequencyKhz(m_radio) == m_frequencyKhz
+        && !m_radio->transmitModel().isTransmitting() && !m_radio->transmitModel().isTuning();
 }
 } // namespace AetherSDR

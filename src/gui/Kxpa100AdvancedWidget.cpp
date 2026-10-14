@@ -58,7 +58,6 @@ Kxpa100AdvancedWidget::Kxpa100AdvancedWidget(Kxpa100Model* model, QWidget* paren
     const auto label = [this](const QString& text, const char* name, QLayout* layout) {
         auto* l = new QLabel(text, this);
         l->setObjectName(name);
-        l->setAccessibleName(text);
         l->setTextFormat(Qt::PlainText);
         l->setWordWrap(true);
         layout->addWidget(l);

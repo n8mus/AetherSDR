@@ -228,7 +228,7 @@ void Kxpa100Model::tick()
         m_status.serial != m_operationSerial || m_status.firmware != m_operationFirmware)) {
         fail(QStringLiteral("Write stopped: device identity or idle/RF readback is unsafe or stale.")); return;
     }
-    if (m_active->mutation && m_tunePermit && !m_tunePermit()) { fail(QStringLiteral("Tune intent expired; request discarded.")); return; }
+    if (m_active->mutation && m_tunePermit && !m_tunePermit()) { fail(QStringLiteral("Operation intent expired; request discarded.")); return; }
     const QByteArray wire = m_active->wire; write(wire);
 }
 void Kxpa100Model::receiveBytes(const QByteArray& bytes) { m_parser->feed(bytes); }
@@ -429,9 +429,10 @@ bool Kxpa100Model::inspectMemories(int frequencyKhz)
     if (!isSupportedFrequency(frequencyKhz) || !begin(QStringLiteral("Inspect tuner memories"),false,true)) { return false; }
     requestMemory(frequencyKhz,{},[this] { finish(QStringLiteral("Memory readback complete.")); }); return true;
 }
-bool Kxpa100Model::memorize(int frequencyKhz)
+bool Kxpa100Model::memorize(int frequencyKhz, std::function<bool()> permit)
 {
     if (!isSupportedFrequency(frequencyKhz) || !begin(QStringLiteral("Save current match"),true,true)) { return false; }
+    m_tunePermit = std::move(permit);
     preflight([this,frequencyKhz] {
         readMatch([this,frequencyKhz] {
             const Status expected = m_status;

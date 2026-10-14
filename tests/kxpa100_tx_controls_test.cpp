@@ -16,6 +16,7 @@ namespace AetherSDR {
 class TxOperationIntegrationTestAccess {
 public:
     static void identity(RadioModel& r, const QString& serial = "HL2-TEST") { r.m_lastInfo.serial=serial; emit r.infoChanged(); }
+    static void family(RadioModel& r, const QString& family) { r.m_family=family; }
 };
 class Kxpa100ModelTest {
 public:
@@ -79,6 +80,13 @@ int main(int argc,char** argv) {
     TxOperationIntegrationTestAccess::identity(radio);
     CHECK(Kxpa100TxController::associate(&radio,&k));
     CHECK(routing.selected());
+    // Discovery can announce identity before the selected backend family changes.
+    TxOperationIntegrationTestAccess::family(radio,"previous-family");
+    TxOperationIntegrationTestAccess::identity(radio);
+    CHECK(!routing.associated());
+    TxOperationIntegrationTestAccess::family(radio,"test");
+    emit radio.connectionStateChanged(true);
+    CHECK(routing.associated());
     CHECK(wire.isEmpty());
     CHECK(b->wire.isEmpty());
     {
@@ -136,5 +144,14 @@ int main(int argc,char** argv) {
     Kxpa100ModelTest::step(k,"^TP0;"); Kxpa100ModelTest::step(k,"^MDA;");
     Kxpa100ModelTest::step(k,"^AN1;");
     CHECK(!routing.busy() && b->wire.count("tune:on")==carriersBeforeAntennaChange);
+    Kxpa100ModelTest::ready(k,wire);
+    CHECK(routing.saveMatch());
+    Kxpa100ModelTest::preflight(k);
+    Kxpa100ModelTest::match(k);
+    const int savesBeforeQsy=wire.count("^SM14100;^DM14100;");
+    SliceDelta qsy; qsy.frequency=14.2; radio.slice(0)->applyChanges(qsy);
+    Kxpa100ModelTest::step(k,"^DM F14100 BN05 BIN040 FR14100-14119\r\nAN1 EMPTY\r\nAN2 BYN SIT CR00 LR00;");
+    CHECK(wire.count("^SM14100;^DM14100;")==savesBeforeQsy);
+    CHECK(!routing.busy());
     return 0;
 }

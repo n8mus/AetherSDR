@@ -2,6 +2,8 @@
 #include "models/Kxpa100Model.h"
 #include "TestSettingsProfile.h"
 #include <QApplication>
+#include <QAccessible>
+#include <QLabel>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QFileDialog>
@@ -26,6 +28,9 @@ class Kxpa100AdvancedWidgetTest {
 public:
     static int run() {
         Kxpa100Model model; Kxpa100ModelTest::ready(model); Kxpa100AdvancedWidget widget(&model);
+        widget.showStatus("Backup readback completed.");
+        auto* accessible=QAccessible::queryAccessibleInterface(widget.m_status);
+        CHECK(accessible && accessible->text(QAccessible::Name)==widget.m_status->text());
         auto* table=widget.findChild<QTableWidget*>("kxConfiguration"); CHECK(table && table->rowCount()==12 && !table->isEnabled());
         Kxpa100::Configuration config; config.fill(3); emit model.configurationRead(config);
         CHECK(table->isEnabled()); table->item(1,1)->setCheckState(Qt::Unchecked);

@@ -48,7 +48,7 @@ public:
     bool cancelTune();
     void cancelTuneAfterPendingOperation();
     bool readMatchStatus();
-    bool memorize(int frequencyKhz);
+    bool memorize(int frequencyKhz, std::function<bool()> permit = {});
     bool recallFrequency(int frequencyKhz);
     bool setBand(int band);
     bool useTxControls() const { return m_useTxControls; }
