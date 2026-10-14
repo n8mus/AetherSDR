@@ -250,8 +250,8 @@ Burndown manifest for the engine/UI decoupling ([RFC](../aetherd-headless-engine
 | `models/Kat500Model.h` | 4 | peripheral(elecraft) — Typed model facade for the independent Elecraft KAT500 serial/raw-TCP tuner, with confirmed operating/configuration state and bounded maintenance operations. No radio-family wire or carrier commands are exposed to GUI. | unconverted |
 | `models/Kat500TxController.h` | 2 | peripheral(elecraft) — Engine-owned external tuner sequence through typed RadioModel and captured TX input; KAT500 remains an independent peripheral. No vendor radio wire or GUI dependency. | unconverted |
 | `models/Kat500Types.h` | 2 | peripheral(elecraft) — Model-owned KAT500 status, configuration and maintenance value types for the typed peripheral facade. No transport or raw command path in GUI. | unconverted |
-| `models/Kxpa100Model.h` | 5 | peripheral(elecraft) — Confirmed state and bounded operations for the independent Elecraft KXPA100 serial/TCP accessory; no radio wire or GUI dependency. | unconverted |
-| `models/Kxpa100TxController.h` | 3 | peripheral(elecraft) — Radio-associated external-tuner orchestration through existing TxController intent; no vendor radio wire. | unconverted |
+| `models/Kxpa100Model.h` | 4 | peripheral(elecraft) — Confirmed state and bounded operations for the independent Elecraft KXPA100 serial/TCP accessory; no radio wire or GUI dependency. | unconverted |
+| `models/Kxpa100RadioAssociation.h` | 2 | peripheral(elecraft) — Explicit per-radio amplifier telemetry association; no radio or tuner commands. | unconverted |
 | `models/Kxpa100Types.h` | 2 | peripheral(elecraft) — Typed KXPA100 accessory state, configuration, backup and fault records; no radio-family protocol. | unconverted |
 | `models/MemoryEntry.h` | 1 | universal — POD memory-channel record (freq/mode/offset/tone/squelch/filter/digital offsets) — canonical memories surface | unconverted |
 | `models/MeterModel.h` | 7 | mixed(flex) — Meter registry+values are core-profile; VITA-49 raw scaling, TGXL/PGXL amp routing, COMPPEAK quirks are Flex | unconverted |

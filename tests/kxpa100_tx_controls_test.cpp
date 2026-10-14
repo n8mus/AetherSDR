@@ -3,8 +3,9 @@
 #include "core/RadioSettingsScope.h"
 #include "core/SettingsDatabase.h"
 #include "gui/TxApplet.h"
+#include "gui/SharedTxMeterSelection.h"
 #include "models/Kxpa100Model.h"
-#include "models/Kxpa100TxController.h"
+#include "models/Kxpa100RadioAssociation.h"
 #include "models/RadioModel.h"
 #include "models/SliceModel.h"
 #include <QApplication>
@@ -91,128 +92,76 @@ int main(int argc,char** argv) {
     // Host-modulated radios expose the TX slice without Flex's transmit-freq status.
     TransmitDelta delta; delta.transmitFreq=0; delta.tunePower=1; radio.transmitModel().applyChanges(delta);
     Kxpa100Model k; QList<QByteArray> wire; Kxpa100ModelTest::ready(k,wire);
-    Kxpa100TxController routing(&radio,&k);
-    CHECK(!routing.selected() && b->wire.isEmpty() && wire.isEmpty());
-    // A fixture supplies the identity through the same RadioModel status path as discovery.
+    Kxpa100RadioAssociation association(&radio, &k);
+    CHECK(!association.associated() && b->wire.isEmpty() && wire.isEmpty());
     TxOperationIntegrationTestAccess::identity(radio);
-    CHECK(Kxpa100TxController::associate(&radio,&k));
-    CHECK(routing.selected());
-    // Discovery can announce identity before the selected backend family changes.
-    TxOperationIntegrationTestAccess::family(radio,"previous-family");
+    CHECK(Kxpa100RadioAssociation::associate(&radio, &k));
+    CHECK(association.associated());
+    CHECK(!radio.settingsScope().featureExact("kxpa100").contains("useTxControls"));
+    TxOperationIntegrationTestAccess::family(radio, "previous-family");
     TxOperationIntegrationTestAccess::identity(radio);
-    CHECK(!routing.associated());
-    TxOperationIntegrationTestAccess::family(radio,"test");
+    CHECK(!association.associated());
+    TxOperationIntegrationTestAccess::family(radio, "test");
     emit radio.connectionStateChanged(true);
-    CHECK(routing.associated());
-    CHECK(wire.isEmpty());
-    CHECK(b->wire.isEmpty());
+    CHECK(association.associated());
     {
         const RadioSettingsScope scope = radio.settingsScope();
         const QJsonObject original = scope.featureExact("kxpa100");
-        CHECK(original.value("useTxControls").toBool());
         SettingsDatabase locker;
         CHECK(locker.open(AppSettings::instance().filePath()) && locker.begin());
         const QtMessageHandler previous = qInstallMessageHandler(capturePreferenceWarning);
         const auto restoreHandler = qScopeGuard([previous] { qInstallMessageHandler(previous); });
-        k.setUseTxControls(false);
-        CHECK(!k.useTxControls() && !routing.selected());
-        CHECK(scope.featureExact("kxpa100") == original);
+        CHECK(!Kxpa100RadioAssociation::dissociate(&radio, &k));
+        CHECK(association.associated() && scope.featureExact("kxpa100") == original);
         CHECK(preferenceWarnings.size() == 1);
-        CHECK(preferenceWarnings.first().contains("TX Controls preference could not be saved"));
-        CHECK(preferenceWarnings.first().contains("only to this session"));
+        CHECK(preferenceWarnings.first().contains("association could not be saved"));
         locker.rollback();
         locker.close();
-
-        // Reload uses the last durable preference, not the rejected session change.
-        TxOperationIntegrationTestAccess::identity(radio);
-        CHECK(k.useTxControls() && routing.selected());
-        k.setUseTxControls(false);
-        QJsonObject disabled = original;
-        disabled["useTxControls"] = false;
-        CHECK(scope.featureExact("kxpa100") == disabled);
-        TxOperationIntegrationTestAccess::identity(radio);
-        CHECK(!k.useTxControls() && !routing.selected());
-        CHECK(preferenceWarnings.size() == 1);
-        k.setUseTxControls(true);
-        CHECK(scope.featureExact("kxpa100") == original);
-        CHECK(b->wire.isEmpty() && wire.isEmpty());
+        CHECK(Kxpa100RadioAssociation::dissociate(&radio, &k));
+        CHECK(!association.associated());
+        CHECK(Kxpa100RadioAssociation::associate(&radio, &k));
+        CHECK(association.associated());
     }
+    // Existing stored overlay preferences cannot change the native radio controls.
     {
-        TxApplet applet; applet.setRadioModel(&radio); applet.setTransmitModel(&radio.transmitModel()); applet.setKxpa100Model(&k);
-        QPushButton* atu=nullptr; QPushButton* save=nullptr;
+        QJsonObject legacy = radio.settingsScope().featureExact("kxpa100");
+        legacy["useTxControls"] = true;
+        CHECK(radio.settingsScope().setFeature("kxpa100", 1, legacy));
+        emit k.associationChanged();
+        CHECK(association.associated());
+        TxApplet applet;
+        applet.setRadioModel(&radio);
+        applet.setTransmitModel(&radio.transmitModel());
+        QPushButton* atu = nullptr;
+        QPushButton* mem = nullptr;
         for (auto* button : applet.findChildren<QPushButton*>()) {
-            if (button->accessibleName()=="ATU tune") { atu=button; }
-            if (button->accessibleName()=="ATU memories") { save=button; }
+            if (button->accessibleName() == "ATU tune") { atu = button; }
+            if (button->accessibleName() == "ATU memories") { mem = button; }
         }
-        CHECK(atu && save && atu->text()=="AUTO" && save->text()=="SAVE" && !save->isCheckable());
-        Kxpa100ModelTest::observe(k,"^MD;","^MDB;");
-        CHECK(!routing.selected() && atu->text()=="ATU" && save->text()=="MEM" && !atu->isEnabled());
-        Kxpa100ModelTest::observe(k,"^MD;","^MDM;");
-        CHECK(routing.selected() && atu->text()=="ATU" && save->text()=="SAVE");
-        TxOperationIntegrationTestAccess::identity(radio,"OTHER-RADIO");
-        CHECK(!routing.selected() && !applet.kxpa100Associated() && save->text()=="MEM");
-        TxOperationIntegrationTestAccess::identity(radio);
-        CHECK(routing.selected() && applet.kxpa100Associated());
-        k.setUseTxControls(false); CHECK(!routing.selected() && save->text()=="MEM");
-        k.setUseTxControls(true); CHECK(routing.selected());
-        Kxpa100ModelTest::observe(k,"^MD;","^MDA;");
-        CHECK(b->wire.isEmpty());
+        CHECK(atu && mem && atu->text() == "ATU" && mem->text() == "MEM");
+        CHECK(!atu->isEnabled() && !mem->isEnabled());
+        for (auto* label : applet.findChildren<QLabel*>()) { CHECK(label->text() != "KXPA100"); }
+        Kxpa100ModelTest::observe(k, "^TU;", "^TU0;");
+        CHECK(association.associated() && k.amplifierMeterEligible() && !k.tunerEligible());
+        CHECK(!atu->isEnabled() && atu->text() == "ATU");
+        radio.transmitModel().setHasTuner(true);
+        CHECK(atu->isEnabled() && atu->text() == "ATU" && mem->text() == "MEM");
     }
-    auto input=std::make_shared<TxController>(&radio);
-    CHECK(routing.start(input->capture(TxController::Activity::Tune)));
-    Kxpa100ModelTest::preflight(k);
-    Kxpa100ModelTest::step(k,"^BN05;");
-    Kxpa100ModelTest::match(k);
-    Kxpa100ModelTest::preflight(k); Kxpa100ModelTest::step(k,"^TP1;");
-    CHECK(wire.contains("^FT;^TP;") && b->wire.count("tune:on")==1);
-    CHECK(k.status().mode==Kxpa100::Mode::Auto && radio.transmitModel().tunePower()==1);
-    Kxpa100ModelTest::frame(k,"^FE;");
-    CHECK(b->wire.count("tune:off")==1);
-    Kxpa100ModelTest::match(k);
-    CHECK(routing.matched() && !routing.busy());
-    CHECK(routing.saveMatch());
-    Kxpa100ModelTest::preflight(k); Kxpa100ModelTest::match(k);
-    Kxpa100ModelTest::step(k,"^DM F14100 BN05 BIN040 FR14100-14119\r\nAN1 EMPTY\r\nAN2 BYN SIT CR00 LR00;");
-    CHECK(wire.contains("^SM14100;^DM14100;") && !routing.busy() && b->wire.count("tune:on")==1);
-    CHECK(routing.start(input->capture(TxController::Activity::Tune)));
-    Kxpa100ModelTest::preflight(k); Kxpa100ModelTest::step(k,"^BN05;"); Kxpa100ModelTest::match(k);
-    Kxpa100ModelTest::preflight(k); Kxpa100ModelTest::step(k,"^TP1;");
-    CHECK(b->wire.count("tune:on")==2);
-    Kxpa100ModelTest::stale(k);
-    CHECK(!routing.selected() && b->wire.contains("tune:off"));
-    Kxpa100ModelTest::drop(k);
-    CHECK(!routing.selected() && !b->wire.contains("atu:on"));
-    CHECK(Kxpa100TxController::dissociate(&radio,&k));
-    CHECK(!routing.associated());
-    Kxpa100ModelTest::ready(k,wire);
-    CHECK(Kxpa100TxController::associate(&radio,&k));
-    const int carriersBeforeAntennaChange=b->wire.count("tune:on");
-    CHECK(routing.start(input->capture(TxController::Activity::Tune)));
-    Kxpa100ModelTest::preflight(k); Kxpa100ModelTest::step(k,"^BN05;");
-    Kxpa100ModelTest::step(k,"^TP0;"); Kxpa100ModelTest::step(k,"^MDA;");
-    Kxpa100ModelTest::step(k,"^AN1;");
-    CHECK(!routing.busy() && b->wire.count("tune:on")==carriersBeforeAntennaChange);
-    Kxpa100ModelTest::ready(k,wire);
-    CHECK(routing.saveMatch());
-    Kxpa100ModelTest::preflight(k);
-    Kxpa100ModelTest::match(k);
-    const int savesBeforeQsy=wire.count("^SM14100;^DM14100;");
-    SliceDelta qsy; qsy.frequency=14.2; radio.slice(0)->applyChanges(qsy);
-    Kxpa100ModelTest::step(k,"^DM F14100 BN05 BIN040 FR14100-14119\r\nAN1 EMPTY\r\nAN2 BYN SIT CR00 LR00;");
-    CHECK(wire.count("^SM14100;^DM14100;")==savesBeforeQsy);
-    CHECK(!routing.busy());
-    qsy.frequency=14.1; radio.slice(0)->applyChanges(qsy);
-    const int carriersBeforePendingCancel=b->wire.count("tune:on");
-    CHECK(routing.start(input->capture(TxController::Activity::Tune)));
-    Kxpa100ModelTest::preflight(k); Kxpa100ModelTest::step(k,"^BN05;"); Kxpa100ModelTest::match(k);
-    Kxpa100ModelTest::preflight(k);
-    Kxpa100ModelTest::sendNext(k);
-    CHECK(wire.last()=="^FT;^TP;");
-    routing.cancel();
-    CHECK(k.isConnected() && routing.busy());
-    Kxpa100ModelTest::frame(k,"^TP1;");
-    Kxpa100ModelTest::step(k,"^TP0;");
-    CHECK(wire.last()=="^FE;^TP;" && k.status().tuning==false && !routing.busy());
-    CHECK(b->wire.count("tune:on")==carriersBeforePendingCancel);
+    const auto kxOnly = selectSharedTxMeters(5, false, false, false, true);
+    CHECK(kxOnly.source == SharedTxMeterSource::Kxpa100 && kxOnly.maxWatts == 100);
+    const auto pgxl = selectSharedTxMeters(100, true, true, true, true);
+    CHECK(pgxl.source == SharedTxMeterSource::Amplifier && pgxl.highPowerAmplifier);
+    const auto kpa = selectSharedTxMeters(100, false, true, false, true);
+    CHECK(kpa.source == SharedTxMeterSource::Amplifier && kpa.maxWatts == 500);
+    const auto blocked = selectSharedTxMeters(100, false, true, true, true);
+    CHECK(blocked.source == SharedTxMeterSource::RadioKeyBlocked && blocked.maxWatts == 100);
+    const auto stale = selectSharedTxMeters(5, false, false, false, false);
+    CHECK(stale.source == SharedTxMeterSource::Radio && stale.maxWatts == 5);
+    TxOperationIntegrationTestAccess::identity(radio, "ANOTHER-RADIO");
+    CHECK(!association.associated());
+    TxOperationIntegrationTestAccess::identity(radio);
+    CHECK(association.associated());
+    CHECK(b->wire.isEmpty());
+    for (const QByteArray& command : wire) { CHECK(command == "^TU;"); }
     return 0;
 }

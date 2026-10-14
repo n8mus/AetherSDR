@@ -1,7 +1,7 @@
 ---
 title: "KXPA100 Amplifier and Tuner"
 slug: "/kxpa100-amplifier-control"
-description: "Connect an Elecraft KXPA100, control its amplifier and optional tuner, and associate it with TX Controls."
+description: "Connect an Elecraft KXPA100, control its amplifier and optional tuner, and associate its amplifier metering with a radio."
 status: "Experimental"
 applies_to: ["All radios"]
 platforms: ["Linux", "macOS", "Windows"]
@@ -28,15 +28,15 @@ Connect the radio PTT output to the KXPA100 **PA KEY** input as required by your
 1. Open **Settings → Radio Setup... → Peripherals**, click **Add**, and select **Elecraft KXPA100**.
 2. Select **Serial** and the port/baud, or **Network** and your bridge host/port. Click **Connect**.
 3. The **KX100** applet button becomes available after identification. It remains available while the transport is open, including stale replies, and disappears when the connection closes.
-4. To integrate TX Controls, select the intended radio and click **Use with current radio** in the peripheral page or applet **Settings**. This explicitly associates the amplifier serial number with that radio. **Use KXPA100 for TX Controls** starts enabled after association.
+4. To use amplifier output on the shared **VU** and **PWR** meters, select the intended radio and click **Use with current radio** in the peripheral page or applet **Settings**. This explicitly associates the amplifier serial number with that radio.
 
-Connection preferences are client settings. The association and TX Controls preference belong to the selected radio. Switching to another radio does not give it control of this amplifier's TX overlay.
+Connection preferences are client settings. The metering association belongs to the selected radio and works with or without the optional KXAT100 tuner. Switching radios does not transfer that association.
 
 ## Using the applet
 
 **Standby** and **Operate** control the PA. **Auto**, **Manual** and **Bypass** control the separate tuner mode. **ANT 1** and **ANT 2** select the tuner antenna. The selected state changes after readback. Missing tuner hardware leaves tuner controls dimmed with an explanation while PA controls remain available.
 
-**Tune** starts a tuner search; it does not generate a radio carrier. Supply RF according to the Elecraft instructions, or use the integrated TX Controls sequence below. **Cancel** requests an end to the search. **Clear fault** clears the current fault, leaving stored fault history intact.
+**Tune** starts a tuner search; it does not generate a radio carrier. Supply RF according to the Elecraft instructions. **Cancel** requests an end to the search. **Clear fault** clears the current fault, leaving stored fault history intact.
 
 Full view shows output power and SWR, followed by **DRV** input power measured by the KXPA100 (0–10 W), reflected power, dissipated power, temperature, supply voltage and drain current. Power meters use watts; SWR uses a 1–5 scale. The pill retains the exact reading beyond the scale. SWR is the last observed measurement and can remain after RF stops. Press and hold the **SWR** pill to preview bypass SWR without changing any relays; release to return to adjusted SWR. A dash means the reading is unavailable.
 
@@ -56,22 +56,13 @@ The **ATU BYP** pill toggles the physical matching-network bypass relay. It leav
 
 **History** plots forward power, reflected power and last-observed SWR, with a selectable time window, scales and legends. Missing replies leave gaps. The graph shrinks as well as grows with its popout.
 
-**Settings** shows radio association, the TX Controls preference, identity, firmware, serial, DIRECT/NETWORK endpoint, freshness and operation results. **Open Advanced settings** opens the same maintenance page as Peripherals. **Debug** shows bounded diagnostics; **Verbose** includes wire traffic. New entries follow the bottom unless you scroll up or pause. Debug TX means serial output, not RF transmission.
+**Settings** shows radio association, identity, firmware, serial, DIRECT/NETWORK endpoint, freshness and operation results. **Open Advanced settings** opens the same maintenance page as Peripherals. **Debug** shows bounded diagnostics; **Verbose** includes wire traffic. New entries follow the bottom unless you scroll up or pause. Debug TX means serial output, not RF transmission.
 
-### TX Controls integration
+### Radio controls and shared metering
 
-For the associated radio, fresh **Auto** or **Manual** readback selects the KXPA100 overlay. Bypass mode, disabled integration, disconnection, stale state or another radio restores the radio's normal ATU/MEM controls. On a radio without an internal tuner, those normal controls are unavailable with an explanation.
+**TX Controls** always operates the radio's own tuner and memories. Connecting or associating a KXPA100 never replaces ATU/MEM, adds an overlay, or bypasses the internal tuner. A radio without an internal tuner shows those controls dimmed with an explanation. Use **KX100 → Tune** and **Manual → Memorize** for the external tuner.
 
-- **AUTO** is gold in Auto mode. Clicking it starts a fresh tune and keeps Auto selected. In Manual mode the button reads **ATU**.
-- A click authorizes a radio carrier at the existing **Tune Pwr** setting. The sequence confirms internal ATU bypass where applicable, recalls the TX frequency, requests a fresh search, and waits for the tuner to confirm before starting RF. It never increases the radio drive setting.
-- **CANCEL**, completion, timeout, lost connection, changed frequency or expired input authorization stops the carrier. A failed operation is not automatically retried.
-- **SAVE** replaces **MEM** and stores the current match for the TX frequency and selected antenna, with readback verification. SAVE generates no RF.
-- The **KXPA100** pill replaces the Mem status indicator. **Success** describes a completed tune in the same matching context; **Byp** reflects physical tuner bypass. The TX Controls SWR meter continues to measure the radio.
-- The RF Power and Tune Pwr readouts use **%** while this overlay is selected. They describe radio drive, not amplifier output watts.
-
-The shared VU and PWR meters use KXPA100 output and the amplifier scale only with fresh PA Operate readback and no active tuner search. Otherwise they use radio watts and the radio scale. The TX Controls pill turns amber when amplifier metering is unavailable; its tooltip explains the source. The KX100 applet always shows the amplifier's own readings.
-
-<img src="/img/kxpa100/kxpa100-tx-auto.png" width="300" alt="TX Controls using the KXPA100 AUTO and SAVE controls." />
+The shared **VU** and **PWR** meters use associated KXPA100 output on the amplifier scale when PA Operate and idle-tuner readback are fresh. This does not require an installed KXAT100. An operating radio-integrated amplifier has priority, followed by an operating KPA500; confirmed KAT500 KEY BLOCK retains the radio fallback for that KPA500 path. Otherwise fresh eligible KXPA100 telemetry is used, falling back to the radio when unavailable. The KX100 applet always shows the amplifier's own readings. **TX Controls** keeps radio watts/SWR and the radio scale; its RF Power and Tune Pwr readouts show percentages.
 
 ## Using Advanced
 
@@ -99,13 +90,13 @@ Restore requires firmware 01.39, matching backup serial/firmware, fresh identifi
 
 Read its tooltip or open Settings for the reason. Wait for identification and fresh idle measurements. Stop RF before switching antennas, relays or configuration. Tuner-only controls require the optional KXAT100. Advanced schema-dependent tools require firmware 01.39.
 
-### TX Controls still shows the radio controls
+### VU/PWR does not show KXPA100 output
 
-Confirm **Use with current radio** was applied to the intended radio, **Use KXPA100 for TX Controls** is checked, and the connected tuner reports Auto or Manual. Bypass and stale/disconnected states restore normal radio controls. A missing physical PA KEY cable cannot be fixed by association.
+Confirm **Use with current radio** was applied to the intended radio, the amplifier reports Operate, and power/idle readbacks are fresh. A higher-priority amplifier or active tuner search prevents KXPA100 metering. A missing physical PA KEY cable cannot be fixed by association.
 
-### The TX Controls preference returns to its previous value
+### Radio association cannot be saved
 
-If the settings store rejects a save, the selected **Use KXPA100 for TX Controls** value applies only to the current session. The `aether.kxpa100` warning log identifies the failed preference save. Reloading the association or restarting restores the last saved value. After resolving a read-only or busy settings store, change the checkbox again and verify the preference after restarting; a rejected write is not retried automatically.
+A rejected settings write leaves the previous association in effect and logs an `aether.kxpa100` warning. Resolve the read-only or busy settings store, then click **Use with current radio** again. Association changes are not retried automatically.
 
 ### An operation fails or the connection closes
 

@@ -74,7 +74,7 @@ device's own web interface. Connection defaults for every device type are
 under [Reference](#reference).
 
 
-The **Elecraft KXPA100** page combines amplifier and optional tuner controls. Click **Use with current radio** to associate it explicitly; **Use KXPA100 for TX Controls** then enables AUTO/ATU and SAVE for that radio. The **Advanced** section provides antenna configuration, native backup/restore, faults and memory tools. See [KXPA100 Amplifier and Tuner](./kxpa100-amplifier-control.md).
+The **Elecraft KXPA100** page combines amplifier and optional tuner controls. Click **Use with current radio** to associate it explicitly; this enables its VU/PWR metering and applet frequency context for that radio. TX Controls remains radio-side. The **Advanced** section provides antenna configuration, native backup/restore, faults and memory tools. See [KXPA100 Amplifier and Tuner](./kxpa100-amplifier-control.md).
 
 ### Connecting automatically
 
