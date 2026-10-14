@@ -2,6 +2,7 @@
 #include "CanonIndicators.h"
 #include "GuardedSlider.h"
 #include "HGauge.h"
+#include "models/MeterModel.h"
 #include "core/AppSettings.h"
 #include "core/ThemeManager.h"
 
@@ -212,6 +213,21 @@ Kpa500Applet::Kpa500Applet(QWidget* parent) : CanonApplet(parent)
     auto* details = new QVBoxLayout(m_detail);
     details->setContentsMargins(0, 0, 0, 0);
     details->setSpacing(2);
+    auto* driveRow = new QHBoxLayout;
+    driveRow->setSpacing(4);
+    m_driveReadout = new QLabel(this);
+    m_driveReadout->setObjectName("kpaDriveReading");
+    m_driveReadout->setFixedSize(62, 18);
+    m_driveReadout->setAlignment(Qt::AlignCenter);
+    m_driveReadout->setProperty("kpaPill", true);
+    m_driveReadout->setAccessibleName(tr("DRV radio forward power"));
+    driveRow->addWidget(m_driveReadout);
+    m_driveGauge = new HGauge(0, 100, 100, "", "", meterTicks(0, 100, 20, 5), this, 100);
+    m_driveGauge->setObjectName("kpaDriveGauge");
+    m_driveGauge->setAccessibleName(tr("DRV radio forward power"));
+    driveRow->addWidget(m_driveGauge, 1);
+    details->addLayout(driveRow);
+    setRadioDrivePower(std::nullopt);
     const std::array<int, 5> divisions{12, 16, 15, 10, 15};
     const std::array<int, 5> majorEvery{4, 4, 5, 5, 5};
     const std::array<float, 5> maxima{600, 5, m_fahrenheit ? 302.0f : 150.0f, 100, 30};
@@ -423,6 +439,8 @@ Kpa500Applet::Kpa500Applet(QWidget* parent) : CanonApplet(parent)
     connect(&m_timer, &QTimer::timeout, this, [this] { refresh(); if (m_historyPane->isVisible()) { renderHistory(); } });
     m_timer.start();
     applyCanonSheet(bodyWidget(), [this] {
+        m_driveGauge->setTickMarkColor(ThemeManager::instance().color(this,
+            m_driveGauge->isEnabled() ? "color.canon.muted" : "color.control.unavailable"));
         for (HGauge* gauge : m_gauges) {
             gauge->setTickMarkColor(ThemeManager::instance().color(this, "color.canon.muted"));
         }
@@ -430,6 +448,7 @@ Kpa500Applet::Kpa500Applet(QWidget* parent) : CanonApplet(parent)
             "QWidget#kpaContent, QScrollArea#kpaScroll { background: {{color.canon.ground}}; border: none; }"
             "QLabel[kpaPill=true] { font-size: 9px; font-weight: bold; color: {{color.canon.muted}}; "
             "background: {{color.canon.ground}}; border: 1px solid {{color.canon.line}}; border-radius: 3px; padding: 0 2px; }"
+            "QLabel#kpaDriveReading:disabled { color: {{color.control.unavailable}}; }"
             "QScrollBar:vertical { background: {{color.background.0}}; width: 12px; }"
             "QScrollBar:horizontal { background: {{color.background.0}}; height: 12px; }"
             "QScrollBar::handle { background: {{color.background.1}}; border-radius: 4px; min-width: 20px; min-height: 20px; }"
@@ -492,6 +511,32 @@ void Kpa500Applet::setBandTrackingText(const QString& text)
     m_tracking->setAccessibleDescription(text);
 }
 void Kpa500Applet::setRadioTransmitting(bool transmitting) { m_radioTransmitting = transmitting; refresh(); }
+void Kpa500Applet::updateRadioDrive(const MeterModel& meters, bool radioConnected)
+{
+    // Radio FWDPWR has its own freshness stamp, independent of AMP meter routing.
+    setRadioDrivePower(radioConnected ? meters.fwdPowerIfLive() : std::nullopt);
+}
+
+void Kpa500Applet::setRadioDrivePower(std::optional<float> watts)
+{
+    if (watts && (!std::isfinite(*watts) || *watts < 0.0f)) { watts.reset(); }
+    const QString text = tr("DRV %1").arg(reading(watts, 1, " W"));
+    const QString source = tr("Connected radio's measured forward power, before cable losses; "
+                             "not measured at the KPA500 input. Scale 0–100 W; the pill retains readings above the scale.");
+    const QString description = source + " " + (watts ? text : tr("Unavailable: no fresh radio forward-power measurement or radio disconnected."));
+    m_driveReadout->setAccessibleName(tr("DRV radio forward power: %1").arg(reading(watts, 1, " W")));
+    labelText(m_driveReadout, text);
+    for (QWidget* widget : std::array<QWidget*, 2>{m_driveReadout, m_driveGauge}) {
+        widget->setEnabled(watts.has_value());
+        widget->setToolTip(description);
+        widget->setAccessibleDescription(description);
+    }
+    m_driveGauge->setTickMarkColor(ThemeManager::instance().color(this,
+        watts ? "color.canon.muted" : "color.control.unavailable"));
+    if (watts) { m_driveGauge->setValue(*watts); }
+    else { m_driveGauge->setValueImmediate(0); m_driveGauge->clearPeak(); }
+}
+
 void Kpa500Applet::setIdentification(const QString& firmware, const QString& serial)
 {
     m_status.firmwareVersion = firmware;

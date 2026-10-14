@@ -6,6 +6,7 @@
 #include <QTimer>
 #include <array>
 #include <deque>
+#include <optional>
 
 class QLabel;
 class QPushButton;
@@ -17,6 +18,7 @@ class QSpacerItem;
 
 namespace AetherSDR {
 class HGauge;
+class MeterModel;
 
 class Kpa500Applet : public CanonApplet {
     Q_OBJECT
@@ -28,6 +30,7 @@ public:
     void setConnectionDescription(const QString& text);
     void setBandTrackingText(const QString& text);
     void setRadioTransmitting(bool transmitting);
+    void updateRadioDrive(const MeterModel& meters, bool radioConnected);
     void setMaintenanceBusy(bool busy);
     void recordTelemetry(const QString& command, const Kpa500::Status& status);
     void appendDiagnostic(const QString& line);
@@ -53,6 +56,7 @@ protected:
 private:
     friend class Kpa500AppletTest;
     void refresh();
+    void setRadioDrivePower(std::optional<float> watts);
     void updatePresentation();
     void savePreferences();
     void renderHistory();
@@ -77,6 +81,8 @@ private:
     bool m_historyExpanded{false};
     bool m_fahrenheit{false};
     QTimer m_timer;
+    QLabel* m_driveReadout;
+    HGauge* m_driveGauge;
     QLabel* m_state;
     QLabel* m_fault;
     QLabel* m_tracking;

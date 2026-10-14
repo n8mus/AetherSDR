@@ -124,7 +124,9 @@ failed or dropped link. Serial and network targets are saved separately.
 serial number from readback; unreported values remain unknown. The same
 information appears in the applet's **Settings**.
 
-<img src="/img/kpa500/kpa500-applet-full.png" width="360" alt="KPA500 compact applet with confirmed ON state and zero forward power." />
+<img src="/img/kpa500/kpa500-applet-drv.png" width="360" alt="KPA500 Full view with output power, SWR and the radio-sourced DRV meter; illustrative replay values." />
+
+*Full view with replayed telemetry illustrating the DRV meter.*
 
 *The KPA500 applet shows amplifier readback. This capture was taken without RF.*
 
@@ -168,6 +170,14 @@ retries; select again or toggle **Follow TX flag** to retry. Following never
 powers the amp on, selects Operate, or keys the radio.
 
 The meter readouts use compact pills beside scales with major and minor ticks.
+In **Full**, **DRV** shows the connected radio's measured forward watts before
+cable losses. It is not a measurement at the KPA500 input, an RF-power slider
+setting, or amplifier output. The scale is **0–100 W**; the pill retains readings
+above the scale. **DRV —** means the radio is disconnected or its forward-power
+measurement is missing or more than two seconds old. Other fresh meters cannot
+keep an old drive reading alive. The source stays radio forward power when the
+shared **VU** and **PWR** meters switch to **AMP**. **Mini** has no DRV row.
+
 The KPA500 SWR scale runs from **1 to 5**, matching the amplifier faceplate;
 its display turns amber at 2 and red at 2.5. No RF means SWR is unmeasured.
 
