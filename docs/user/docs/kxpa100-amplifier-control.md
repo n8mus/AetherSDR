@@ -44,9 +44,15 @@ Full view shows output power and SWR, followed by **DRV** input power measured b
 
 The **ATU BYP** pill toggles the physical matching-network bypass relay. It leaves Auto/Manual mode unchanged; a recall or tune may engage the network again. Use the main **Bypass** mode button to disable tuning. **ATT** toggles the input attenuator when software control is available. The rear-panel switch or firmware protection can override it. Hover over these pills for the complete meaning. Requests require fresh, idle readback with no RF.
 
+<img src="/img/kxpa100/kxpa100-full-replay.png" width="260" alt="KXPA100 Full applet with amplifier and tuner controls, DRV and output meters; illustrative replay values." />
+
+*Full view with replayed telemetry illustrating the meters.*
+
+<img src="/img/kxpa100/kxpa100-mini.png" width="260" alt="KXPA100 Mini view with PA, tune, mode and antenna status, output power and SWR." />
+
 ### Manual, History and Settings
 
-**Manual** exposes capacitance in pF and inductance in nH, with each relay labeled by its component value. Numeric **Set** selects the largest available combination at or below the entered total. The capacitor-side control changes which side of the matching network contains the capacitors. **Match frequency** selects the kHz frequency for **Recall** and **Memorize**. These commands require 1800–54000 kHz; an unknown frequency sends nothing. Recall loads a stored match; Memorize saves and verifies the current match. Neither generates RF.
+**Manual** exposes capacitance in pF and inductance in nH, with each relay labeled by its component value. Numeric **Set** selects the nearest available relay combination to the entered total. The capacitor-side control changes which side of the matching network contains the capacitors. **Match frequency** selects the kHz frequency for **Recall** and **Memorize**. These commands require 1800–54000 kHz; an unknown frequency sends nothing. Recall loads a stored match; Memorize saves and verifies the current match. Neither generates RF.
 
 **History** plots forward power, reflected power and last-observed SWR, with a selectable time window, scales and legends. Missing replies leave gaps. The graph shrinks as well as grows with its popout.
 
@@ -64,6 +70,8 @@ For the associated radio, fresh **Auto** or **Manual** readback selects the KXPA
 - The RF Power and Tune Pwr readouts use **%** while this overlay is selected. They describe radio drive, not amplifier output watts.
 
 The shared VU and PWR meters use KXPA100 output and the amplifier scale only with fresh PA Operate readback and no active tuner search. Otherwise they use radio watts and the radio scale. The TX Controls pill turns amber when amplifier metering is unavailable; its tooltip explains the source. The KX100 applet always shows the amplifier's own readings.
+
+<img src="/img/kxpa100/kxpa100-tx-auto.png" width="300" alt="TX Controls using the KXPA100 AUTO and SAVE controls." />
 
 ## Using Advanced
 
