@@ -7598,10 +7598,16 @@ void MainWindow::wireMeters()
             }
 #endif
         }
-        m_appletPanel->txApplet()->setPowerScale(selection.maxWatts, selection.highPowerAmplifier);
-        m_appletPanel->tunerApplet()->setPowerScale(selection.maxWatts, selection.highPowerAmplifier);
+        int radioMaxWatts = m_radioModel.transmitModel().maxPowerLevel();
+        if (m_radioModel.model().startsWith("AU-") && radioMaxWatts <= 100) {
+            radioMaxWatts = 500;
+        }
+        const bool integratedAmp = m_radioModel.amplifier().present()
+            && m_radioModel.amplifier().operate();
+        m_appletPanel->txApplet()->setPowerScale(radioMaxWatts, integratedAmp);
+        m_appletPanel->tunerApplet()->setPowerScale(radioMaxWatts, integratedAmp);
+        m_appletPanel->healthApplet()->setPowerScale(radioMaxWatts, integratedAmp);
         m_appletPanel->setMeterPowerScale(selection.maxWatts, selection.highPowerAmplifier);
-        m_appletPanel->healthApplet()->setPowerScale(selection.maxWatts, selection.highPowerAmplifier);
     };
     connect(&m_kat500Model, &Kat500Model::statusUpdated, this, updatePowerScale);
     connect(&m_kat500Model, &Kat500Model::availabilityChanged, this, updatePowerScale);

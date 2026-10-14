@@ -9,8 +9,6 @@
 #include "models/RadioModel.h"
 #include "models/TransmitModel.h"
 #include "models/TunerModel.h"
-#include "models/Kat500Model.h"
-#include "models/Kat500TxController.h"
 
 #include <QAction>
 #include <QPushButton>
@@ -27,16 +25,8 @@
 
 namespace AetherSDR {
 
-static const char* const kRadioTxButtonStyle =
-    "QPushButton { background: #1a3a5a; border: 1px solid #205070; "
-    "border-radius: 3px; color: #c8d8e8; font-size: 10px; font-weight: bold; "
-    "padding: 2px; }"
-    "QPushButton:hover { background: #204060; }"
-    "QPushButton:disabled { background-color: #1a1a2a; color: #556070; "
-    "border: 1px solid #2a3040; }";
-
 // MOX idle "this is the transmit button" accent — amber border/text, distinct
-// from the neutral style of its TUNE/ATU/MEM neighbors (#3663).  Tokenized
+// from the neutral btnStyle of its TUNE/ATU/MEM neighbors (#3663).  Tokenized
 // (color.tx.mox.*) so the accent is editable in the Theme Editor, mirroring the
 // waterfall LIVE chip (#3761).  Shared between construction and the moxChanged
 // return-to-idle branch so the two can't drift; background / hover-background /
@@ -105,11 +95,6 @@ static QString percentText(int value)
     return QStringLiteral("%1%").arg(value);
 }
 
-static QString powerText(int value, bool external)
-{
-    return external ? percentText(value) : QString::number(value);
-}
-
 // ── TxApplet ────────────────────────────────────────────────────────────────
 
 TxApplet::TxApplet(QWidget* parent)
@@ -127,32 +112,6 @@ TxApplet::TxApplet(QWidget* parent)
     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
     buildUI();
 
-}
-
-TxApplet::~TxApplet() = default;
-
-void TxApplet::setKat500Model(Kat500Model* model)
-{
-    if (m_kat500 == model) { return; }
-    m_kat500 = model;
-    rebuildKat500Routing();
-}
-void TxApplet::rebuildKat500Routing()
-{
-    if (m_preTuneDialog) {
-        m_preTuneDialog->close();
-        m_preTuneDialog = nullptr;
-    }
-    m_katTx.reset();
-    if (m_radioModel && m_kat500) {
-        m_katTx = std::make_unique<Kat500TxController>(m_radioModel, m_kat500);
-        connect(m_katTx.get(), &Kat500TxController::changed, this, [this] {
-            updateAtuAvailability();
-            syncAtuIndicators();
-        });
-    }
-    updateAtuAvailability();
-    syncAtuIndicators();
 }
 
 void TxApplet::buildUI()
@@ -211,7 +170,7 @@ void TxApplet::buildUI()
         m_rfPowerSlider->setAccessibleDescription("Transmit RF power level, 0 to 100 percent of maximum");
         row->addWidget(m_rfPowerSlider, 1);
 
-        m_rfPowerLabel = new QLabel("100");
+        m_rfPowerLabel = new QLabel("100%");
         AetherSDR::ThemeManager::instance().applyStyleSheet(m_rfPowerLabel, "QLabel { color: {{color.text.primary}}; font-size: 10px; }");
         m_rfPowerLabel->setFixedWidth(30);
         m_rfPowerLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
@@ -236,7 +195,7 @@ void TxApplet::buildUI()
         m_tunePowerSlider->setAccessibleDescription("Tune carrier power level, 0 to 100 percent of maximum");
         row->addWidget(m_tunePowerSlider, 1);
 
-        m_tunePowerLabel = new QLabel("10");
+        m_tunePowerLabel = new QLabel("10%");
         AetherSDR::ThemeManager::instance().applyStyleSheet(m_tunePowerLabel, "QLabel { color: {{color.text.primary}}; font-size: 10px; }");
         m_tunePowerLabel->setFixedWidth(30);
         m_tunePowerLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
@@ -273,9 +232,16 @@ void TxApplet::buildUI()
         auto* row = new QHBoxLayout;
         row->setSpacing(2);
 
+        const char* btnStyle =
+            "QPushButton { background: #1a3a5a; border: 1px solid #205070; "
+            "border-radius: 3px; color: #c8d8e8; font-size: 10px; font-weight: bold; "
+            "padding: 2px; }"
+            "QPushButton:hover { background: #204060; }"
+            "QPushButton:disabled { background-color: #1a1a2a; color: #556070; "
+            "border: 1px solid #2a3040; }";
         m_tuneBtn = new QPushButton("TUNE");
         markTxKeying(m_tuneBtn);   // emits a tune carrier — keys TX (#3646)
-        m_tuneBtn->setStyleSheet(kRadioTxButtonStyle);
+        m_tuneBtn->setStyleSheet(btnStyle);
         m_tuneBtn->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
         m_tuneBtn->setFixedHeight(22);
         m_tuneBtn->setAccessibleName("Tune");
@@ -299,7 +265,7 @@ void TxApplet::buildUI()
 
         m_atuBtn = new QPushButton("ATU");
         markTxKeying(m_atuBtn);    // starts ATU tune — keys TX (#3646)
-        m_atuBtn->setStyleSheet(kRadioTxButtonStyle);
+        m_atuBtn->setStyleSheet(btnStyle);
         m_atuBtn->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
         m_atuBtn->setFixedHeight(22);
         m_atuBtn->setAccessibleName("ATU tune");
@@ -313,7 +279,7 @@ void TxApplet::buildUI()
         row->addWidget(m_atuBtn);
 
         m_memBtn = new QPushButton("MEM");
-        m_memBtn->setStyleSheet(kRadioTxButtonStyle);
+        m_memBtn->setStyleSheet(btnStyle);
         m_memBtn->setCheckable(true);
         m_memBtn->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
         m_memBtn->setFixedHeight(22);
@@ -385,14 +351,14 @@ void TxApplet::buildUI()
 
     // ── Slider → label + command connections ────────────────────────────────
     connect(m_rfPowerSlider, &QSlider::valueChanged, this, [this](int v) {
-        m_rfPowerLabel->setText(powerText(v, m_katTx && m_katTx->selected()));
+        m_rfPowerLabel->setText(percentText(v));
         if (!m_updatingFromModel && m_model)
             m_model->setRfPower(v);
     });
     connect(m_rfPowerSlider, &QSlider::sliderReleased,
             this, &TxApplet::syncFromModel);
     connect(m_tunePowerSlider, &QSlider::valueChanged, this, [this](int v) {
-        m_tunePowerLabel->setText(powerText(v, m_katTx && m_katTx->selected()));
+        m_tunePowerLabel->setText(percentText(v));
         if (!m_updatingFromModel && m_model)
             m_model->setTunePower(v);
     });
@@ -432,8 +398,7 @@ void TxApplet::buildUI()
     //     prior status was Successful/OK
     // Mirrors SmartSDR's per-frequency toggle. (#1993)
     connect(m_atuBtn, &QPushButton::clicked, this, [this]() {
-        const bool external = m_katTx && (m_katTx->selected() || m_katTx->busy());
-        requestAtu(localTxInput(external ? TxController::Activity::Tune : TxController::Activity::Atu), external);
+        requestAtu(localTxInput(TxController::Activity::Atu));
     });
 
     // MEM requests a change; its checked state follows radio readback. Any
@@ -442,7 +407,6 @@ void TxApplet::buildUI()
     // readback sync sets the check under a QSignalBlocker, so it never lands
     // here.
     connect(m_memBtn, &QPushButton::toggled, this, [this] {
-        if (m_katTx && m_katTx->selected()) { return; }
         {
             const QSignalBlocker blocker(m_memBtn);
             m_memBtn->setChecked(m_model && m_model->memoriesEnabled());
@@ -451,9 +415,6 @@ void TxApplet::buildUI()
             return;
         }
         m_model->setAtuMemories(!m_model->memoriesEnabled());
-    });
-    connect(m_memBtn, &QPushButton::clicked, this, [this] {
-        if (m_katTx && m_katTx->selected()) { m_katTx->saveMatch(); }
     });
     configureTxActions();
 }
@@ -511,16 +472,8 @@ void TxApplet::requestMox(bool on, const TxController::Input& input)
     }
 }
 
-void TxApplet::requestAtu(const TxController::Input& input, bool external)
+void TxApplet::requestAtu(const TxController::Input& input)
 {
-    if (external) {
-        if (!m_katTx) { return; }
-        if (m_katTx->busy()) { m_katTx->cancel(); }
-        else if (m_katTx->selected() && !m_tgxlOperate) { m_katTx->start(input); }
-        return;
-    }
-    // The route was captured with the click. A later mode change cannot redirect it.
-    if (m_katTx && (m_katTx->selected() || m_katTx->busy())) { return; }
     if (!m_model) {
         return;
     }
@@ -577,9 +530,8 @@ void TxApplet::configureTxActions()
             || (action != QLatin1String("click") && action != QLatin1String("toggle"))) {
             return {};
         }
-        const bool external = m_katTx && (m_katTx->selected() || m_katTx->busy());
-        const TxController::Input input = controller->capture(external ? TxController::Activity::Tune : TxController::Activity::Atu);
-        return [this, input, external] { requestAtu(input, external); };
+        const TxController::Input input = controller->capture(TxController::Activity::Atu);
+        return [this, input] { requestAtu(input); };
     });
 }
 
@@ -595,10 +547,8 @@ void TxApplet::setTransmitModel(TransmitModel* model)
     const auto updateTuneAvailability = [this]() {
         const bool available = m_model->tuneAvailable() || m_model->isTuning();
         m_tuneBtn->setEnabled(available);
-        const QString description = available ? tr("Start or stop tune carrier")
-            : tr("Tune carrier is unavailable in this mode through the current radio backend");
-        m_tuneBtn->setToolTip(description);
-        m_tuneBtn->setAccessibleDescription(description);
+        m_tuneBtn->setToolTip(available ? tr("Start or stop tune carrier")
+            : tr("Tune carrier is unavailable in this mode through the current radio backend"));
     };
     connect(m_model, &TransmitModel::tuneAvailabilityChanged, this, updateTuneAvailability);
     connect(m_model, &TransmitModel::tuneChanged, this, updateTuneAvailability);
@@ -694,41 +644,6 @@ void TxApplet::updateAtuAvailability()
 {
     if (!m_atuBtn || !m_memBtn)
         return;
-    const bool external = m_katTx && m_katTx->selected();
-    const bool busy = m_katTx && m_katTx->busy();
-    m_rfPowerLabel->setText(powerText(m_model ? m_model->rfPower() : m_rfPowerSlider->value(), external));
-    m_tunePowerLabel->setText(powerText(m_model ? m_model->tunePower() : m_tunePowerSlider->value(), external));
-    if (external || busy) {
-        const QString reason = m_tgxlOperate ? tr("Disabled — TGXL is in OPERATE mode") : m_katTx->unavailableReason();
-        const QString action = busy ? tr("Cancel the KAT500 operation and stop its tune carrier")
-            : tr("Start a fresh KAT500 tune using the radio Tune Pwr setting; keep the current tuner mode");
-        m_atuBtn->setEnabled(busy || reason.isEmpty());
-        m_atuBtn->setText(busy ? tr("CANCEL") : m_kat500->status().mode == Kat500::Mode::Auto ? tr("AUTO") : tr("ATU"));
-        m_atuBtn->setToolTip(reason.isEmpty() ? action : reason);
-        m_atuBtn->setAccessibleDescription(reason.isEmpty() ? action : reason);
-        m_atuBtn->setContextMenuPolicy(Qt::CustomContextMenu);
-        m_memBtn->setText(tr("SAVE"));
-        const QSignalBlocker blocker(m_memBtn);
-        m_memBtn->setCheckable(false);
-        m_memBtn->setEnabled(!busy && reason.isEmpty());
-        const QString saveTip = reason.isEmpty() ? tr("Save the current KAT500 match for the TX frequency and selected antenna") : reason;
-        m_memBtn->setToolTip(saveTip);
-        m_memBtn->setAccessibleDescription(saveTip);
-        const bool automatic = m_kat500 && m_kat500->status().mode == Kat500::Mode::Auto;
-        const QString background = automatic ? "color.accessory.key.standby.background"
-            : m_katTx->matched() ? "color.accessory.key.meffa.active.background" : "color.background.2";
-        const QString foreground = automatic ? "color.accessory.key.standby.foreground"
-            : m_katTx->matched() ? "color.accessory.key.meffa.active.foreground" : "color.text.primary";
-        ThemeManager::instance().applyStyleSheet(m_atuBtn,
-            QString("QPushButton { background: {{%1}}; color: {{%2}}; border: 1px solid {{%2}}; border-radius: 3px; font-size: 10px; font-weight: bold; padding: 2px; }"
-                    "QPushButton:disabled { background: {{color.background.2}}; color: {{color.text.disabled}}; border-color: {{color.canon.lineHi}}; }").arg(background, foreground));
-        return;
-    }
-    m_atuBtn->setText(tr("ATU"));
-    ThemeManager::instance().applyStyleSheet(m_atuBtn, kRadioTxButtonStyle);
-    { const QSignalBlocker blocker(m_memBtn); m_memBtn->setCheckable(true); }
-    m_memBtn->setText(tr("MEM"));
-    m_memBtn->setAccessibleDescription(tr("Toggle radio ATU memory recall"));
     const bool atuEnabled = m_radioHasTuner && !m_tgxlOperate;
     const bool memoriesEnabled = m_radioHasTunerMemories && !m_tgxlOperate;
     m_atuBtn->setEnabled(atuEnabled);
@@ -749,7 +664,6 @@ void TxApplet::updateAtuAvailability()
     else if (m_tgxlOperate)
         tip = tr("Disabled — TGXL is in OPERATE mode");
     m_atuBtn->setToolTip(tip);
-    m_atuBtn->setAccessibleDescription(tip.isEmpty() ? tr("Start automatic antenna tuner") : tip);
     if (!m_radioHasTunerMemories) {
         m_memBtn->setToolTip(tr("ATU memory controls are unavailable for this radio"));
     } else {
@@ -784,13 +698,13 @@ void TxApplet::syncFromModel()
         && m_rfPowerSlider->value() != m_model->rfPower()) {
         m_rfPowerSlider->setValue(m_model->rfPower());
     }
-    m_rfPowerLabel->setText(powerText(m_model->rfPower(), m_katTx && m_katTx->selected()));
+    m_rfPowerLabel->setText(percentText(m_model->rfPower()));
 
     if (!m_tunePowerSlider->isSliderDown()
         && m_tunePowerSlider->value() != m_model->tunePower()) {
         m_tunePowerSlider->setValue(m_model->tunePower());
     }
-    m_tunePowerLabel->setText(powerText(m_model->tunePower(), m_katTx && m_katTx->selected()));
+    m_tunePowerLabel->setText(percentText(m_model->tunePower()));
 
     // Active profile — update combo selection
     if (!m_model->activeProfile().isEmpty()) {
@@ -819,28 +733,6 @@ void TxApplet::syncAtuIndicators()
         m_atuTunedFreqMhz = -1.0;
     }
 
-    const bool external = m_katTx && m_katTx->selected();
-    if (external) {
-        const bool responding = m_kat500 && m_kat500->isResponding();
-        setIndicatorState(m_successInd, indicatorState(responding, m_katTx->matched()), ThemeManager::instance().color("color.accent.success"));
-        setIndicatorState(m_bypInd, indicatorState(responding, m_kat500->status().bypassed == true), ThemeManager::instance().color("color.accent.warning"));
-        m_memInd->setText(tr("KAT500"));
-        m_memInd->setEnabled(responding);
-        const bool keyBlocked = m_kat500 && m_kat500->ampKeyBlockConfirmed();
-        const QString meterTip = keyBlocked
-            ? tr("KEY BLOCK confirmed: amplifier keying is blocked. With a KPA500 in Operate, the shared VU/PWR meters show radio watts, SWR and the radio scale. The KPA500 applet still shows amplifier readings.")
-            : tr("TX Controls use KAT500. SWR above is measured at the radio.");
-        m_memInd->setToolTip(meterTip + "\n" + m_katTx->message());
-        m_memInd->setAccessibleDescription(m_memInd->toolTip());
-        ThemeManager::instance().applyStyleSheet(m_memInd,
-            QStringLiteral("QLabel { background: {{color.canon.nested}}; color: %1; border: 1px solid {{color.canon.lineHi}}; border-radius: 3px; padding: 2px 3px; font-size: 9px; font-weight: bold; }"
-            "QLabel:disabled { color: {{color.text.disabled}}; }")
-                .arg(keyBlocked ? QStringLiteral("{{color.accent.warning}}")
-                                : QStringLiteral("{{color.accent.success}}")));
-    } else {
-        m_memInd->setText(tr("Mem"));
-        m_memInd->setToolTip(tr("Radio ATU is using a stored match"));
-        m_memInd->setAccessibleDescription(m_memInd->toolTip());
     // Success — green when tune was successful
     setIndicatorState(m_successInd,
         indicatorState(m_radioHasTuner,
@@ -857,8 +749,6 @@ void TxApplet::syncAtuIndicators()
     setIndicatorState(m_memInd,
         indicatorState(m_radioHasTunerMemories, m_model->usingMemory()));
 
-    }
-
     // APD indicators — mutually exclusive states, all off when APD disabled
     // Progression: Cal (calibrating) → Avail (calibration ready) → Active (applied)
     const bool apdOn  = m_model->apdEnabled();
@@ -874,7 +764,7 @@ void TxApplet::syncAtuIndicators()
     {
         m_updatingFromModel = true;
         const QSignalBlocker blocker(m_memBtn);
-        m_memBtn->setChecked(!external && m_model->memoriesEnabled());
+        m_memBtn->setChecked(m_model->memoriesEnabled());
         m_updatingFromModel = false;
     }
 }
@@ -935,7 +825,6 @@ void TxApplet::setRadioModel(RadioModel* radio)
     }
     m_txController.reset();
     m_radioModel = radio;
-    rebuildKat500Routing();
     m_forwardPowerRequiresSmoothing = !radio || !radio->isConnected()
         || radio->backendCapabilities().forwardPowerRequiresSmoothing;
     m_forwardPowerScaleFollowsBandRating = radio && radio->isConnected()
@@ -973,27 +862,6 @@ void TxApplet::buildAtuContextMenu(QMenu& menu)
     // correctly-greyed Pre-tune item read as a dead control, because a disabled
     // QAction also does not highlight on hover. (#5510)
     menu.setToolTipsVisible(true);
-    if (m_katTx && m_katTx->selected()) {
-        const QString reason = m_tgxlOperate ? tr("Disabled — TGXL is in OPERATE mode")
-                                            : m_katTx->unavailableReason();
-        auto* preTune = menu.addAction(tr("Pre-tune bands…"));
-        preTune->setObjectName("katPreTuneBands");
-        const QString sweepReason = !reason.isEmpty() ? reason
-            : !m_bandPlanMgr ? tr("Waiting for the active band plan.") : QString();
-        preTune->setEnabled(sweepReason.isEmpty());
-        preTune->setToolTip(sweepReason.isEmpty() ? tr("Pre-tune selected bands using KAT500.") : sweepReason);
-        preTune->setStatusTip(preTune->toolTip());
-        connect(preTune, &QAction::triggered, this, [this] {
-            if (m_katTx && m_katTx->selected()) { openPreTuneDialog(); }
-        });
-        auto* clear = menu.addAction(tr("Clear all KAT500 memories…"));
-        clear->setObjectName("katClearAllMemories");
-        clear->setEnabled(reason.isEmpty());
-        clear->setToolTip(reason.isEmpty() ? tr("Erase all KAT500 bands and antennas after confirmation.") : reason);
-        clear->setStatusTip(clear->toolTip());
-        connect(clear, &QAction::triggered, this, &TxApplet::confirmAndClearKat500Memories);
-        return;
-    }
 
     auto* preTune = menu.addAction(QString::fromUtf8("Pre-tune bands\xE2\x80\xA6"));
     const bool memOn = m_model && m_model->memoriesEnabled();
@@ -1064,16 +932,14 @@ void TxApplet::showTuneContextMenu(const QPoint& pos)
 
 void TxApplet::openPreTuneDialog()
 {
-    const bool external = m_katTx && m_katTx->selected();
-    if (!m_radioModel || !m_bandPlanMgr || !m_model || m_tgxlOperate) { return; }
-    if (external ? !m_katTx->unavailableReason().isEmpty() : !m_model->memoriesEnabled()) { return; }
-    if (m_preTuneDialog && m_preTuneDialog->usesKat500() != external) {
-        m_preTuneDialog->close();
-        m_preTuneDialog = nullptr;
-    }
+    if (!m_radioModel || !m_bandPlanMgr || !m_model) return;
+    if (!m_model->memoriesEnabled()) return;
+
     if (!m_preTuneDialog) {
         m_preTuneDialog = new AtuPreTuneDialog(m_radioModel, m_bandPlanMgr,
-                                               this->window(), m_katTx.get());
+                                               this->window());
+        connect(m_preTuneDialog, &QObject::destroyed,
+                this, [this]() { m_preTuneDialog = nullptr; });
         m_preTuneDialog->setAttribute(Qt::WA_DeleteOnClose);
     }
     m_preTuneDialog->show();
@@ -1081,38 +947,8 @@ void TxApplet::openPreTuneDialog()
     m_preTuneDialog->activateWindow();
 }
 
-void TxApplet::confirmAndClearKat500Memories()
-{
-    if (!m_katTx || !m_katTx->selected() || !m_kat500 || m_tgxlOperate
-        || !m_katTx->unavailableReason().isEmpty()) { return; }
-    const QPointer<TxApplet> self(this);
-    const QPointer<Kat500Model> tuner(m_kat500);
-    const QString serial = tuner->status().serial;
-    bool disconnected = false;
-    ScopedChildWidget<QMessageBox> boxOwner(this->window());
-    QMessageBox& box = *boxOwner.get();
-    connect(tuner, &Kat500Model::disconnected, &box, [&disconnected] { disconnected = true; });
-    box.setWindowTitle(tr("Clear all KAT500 memories"));
-    box.setIcon(QMessageBox::Warning);
-    box.setText(tr("Erase every stored KAT500 match on all bands and all three antennas?"));
-    box.setInformativeText(tr("Tuner configuration and the radio's internal ATU memories are preserved. "
-        "This cannot be undone without restoring a KAT500 backup. "
-        "New matches will require tuning again."));
-    auto* clear = box.addButton(tr("Clear all KAT500 memories"), QMessageBox::DestructiveRole);
-    box.addButton(QMessageBox::Cancel);
-    box.setDefaultButton(QMessageBox::Cancel);
-    box.exec();
-    if (self && boxOwner && tuner && !disconnected && self->m_kat500 == tuner && self->m_katTx
-        && self->m_katTx->selected() && !self->m_tgxlOperate
-        && self->m_katTx->unavailableReason().isEmpty() && tuner->status().serial == serial
-        && box.clickedButton() == clear) {
-        tuner->eraseMemories(-1, 0, true);
-    }
-}
-
 void TxApplet::confirmAndClearAtuMemories()
 {
-    if (m_katTx && m_katTx->selected()) { return; }
     if (!m_model) return;
     const QPointer<TxApplet> self(this);
     const QPointer<TransmitModel> model(m_model);
@@ -1130,7 +966,7 @@ void TxApplet::confirmAndClearAtuMemories()
     box.addButton("Cancel", QMessageBox::RejectRole);
     box.exec();
     if (self && boxOwner && model && self->m_model == model.data()
-        && box.clickedButton() == clearBtn && !(m_katTx && m_katTx->selected())) {
+        && box.clickedButton() == clearBtn) {
         model->atuClearMemories();
     }
 }
