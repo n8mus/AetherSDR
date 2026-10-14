@@ -7616,13 +7616,12 @@ void MainWindow::wireMeters()
     connect(kx, &Kxpa100Applet::advancedSettingsRequested, this, [this] {
         if (auto* dialog = openRadioSetupPage(QStringLiteral("Peripherals"))) { dialog->revealKxpa100AdvancedSettings(); }
     });
-    connect(kx, &Kxpa100Applet::associateRadioRequested, this, [this] {
-        if ((m_kxpa100Association && m_kxpa100Association->associated())) {
-            Kxpa100RadioAssociation::dissociate(&m_radioModel, &m_kxpa100Model);
-        } else {
-            Kxpa100RadioAssociation::associate(&m_radioModel, &m_kxpa100Model);
-        }
+    connect(kx, &Kxpa100Applet::associateRadioRequested, this, [this, kx] {
+        const bool saved = m_kxpa100Association && m_kxpa100Association->associated()
+            ? Kxpa100RadioAssociation::dissociate(&m_radioModel, &m_kxpa100Model)
+            : Kxpa100RadioAssociation::associate(&m_radioModel, &m_kxpa100Model);
         refreshTunerPortFrequency();
+        kx->setAssociationResult(saved);
     });
     connect(&m_kxpa100Model, &Kxpa100Model::associationChanged, this, &MainWindow::refreshTunerPortFrequency);
     connect(&m_kxpa100Model, &Kxpa100Model::availabilityChanged, this, &MainWindow::refreshTunerPortFrequency);

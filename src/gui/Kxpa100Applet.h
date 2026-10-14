@@ -27,6 +27,7 @@ class Kxpa100Applet : public CanonApplet
     void setModel(Kxpa100Model* model);
     void setFloating(bool floating);
     void setRadioContext(const QString& radioName, int txFrequencyKhz, bool associated);
+    void setAssociationResult(bool saved);
     QSize sizeHint() const override;
     QSize minimumSizeHint() const override;
   signals:

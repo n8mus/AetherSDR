@@ -515,7 +515,7 @@ Kxpa100Applet::Kxpa100Applet(QWidget* parent) : CanonApplet(parent)
     m_result = label("kxOperationResult", settings);
     auto* help = label("kxHistoryHelp", settings);
     help->setText(tr("History shows measured forward/reflected watts and last observed SWR. Gaps mean missing replies. "
-        "Hold the SWR pill with the mouse or Space to compare bypass SWR; release to return. "
+        "Hold the SWR pill with the mouse to compare bypass SWR; release to return. "
         "Last SWR and RF-counter frequency can remain after RF stops. Debug TX means serial writes, not RF."));
     auto* advanced = button(tr("Open Advanced settings"), "kxAdvancedSettings", settings);
     connect(advanced, &QPushButton::clicked, this, &Kxpa100Applet::advancedSettingsRequested);
@@ -726,6 +726,11 @@ void Kxpa100Applet::setRadioContext(const QString& radioName, int txFrequencyKhz
     m_associate->setText(associated ? tr("Remove radio association") : tr("Use with current radio"));
     refresh();
 }
+void Kxpa100Applet::setAssociationResult(bool saved)
+{
+    text(m_result, saved ? tr("Radio association updated.")
+        : tr("Radio association was not saved. Connect an identified radio and KXPA100, and check that settings are writable. The previous association is unchanged."));
+}
 void Kxpa100Applet::refresh()
 {
     const Kxpa100::Status s = m_model ? m_model->status() : Kxpa100::Status{};
@@ -783,7 +788,7 @@ void Kxpa100Applet::refresh()
     }
     const bool preview=m_swr->isDown(); const auto swr=preview ? s.bypassSwr : s.swr;
     const QString swrText=tr("%1 %2").arg(preview ? tr("BYP") : tr("SWR"),reading(swr));
-    const QString swrHelp=tr("Last observed %1 SWR. Hold with the mouse or Space to preview bypass SWR; release to return. "
+    const QString swrHelp=tr("Last observed %1 SWR. Hold with the mouse to preview bypass SWR; release to return. "
         "This changes the display only. SWR may remain after RF stops. Scale 1–5; the pill preserves values above 5.").arg(preview ? tr("bypass") : tr("adjusted"));
     pill(m_swr,swrText,swrHelp,preview ? "warn" : rf ? "live" : "muted");
     if (preview!=m_showingBypass) { m_swrGauge->setValueImmediate(swr.value_or(1)); }

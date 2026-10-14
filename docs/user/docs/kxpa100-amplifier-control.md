@@ -32,6 +32,8 @@ Connect the radio PTT output to the KXPA100 **PA KEY** input as required by your
 
 Connection preferences are client settings. The metering association belongs to the selected radio and works with or without the optional KXAT100 tuner. Switching radios does not transfer that association.
 
+For **Network**, enter a hostname or IP address without a URL scheme, path, spaces or control characters, and a port from 1 to 65535. Invalid entries are rejected before connecting.
+
 ## Using the applet
 
 **Standby** and **Operate** control the PA. **Auto**, **Manual** and **Bypass** control the separate tuner mode. **ANT 1** and **ANT 2** select the tuner antenna. The selected state changes after readback. Missing tuner hardware leaves tuner controls dimmed with an explanation while PA controls remain available.
@@ -100,7 +102,7 @@ Confirm **Use with current radio** was applied to the intended radio, the amplif
 
 ### Radio association cannot be saved
 
-A rejected settings write leaves the previous association in effect and logs an `aether.kxpa100` warning. Resolve the read-only or busy settings store, then click **Use with current radio** again. Association changes are not retried automatically.
+A rejected settings write leaves the previous association in effect and logs an `aether.kxpa100` warning. Applet **Settings** also displays the failure beside the operation result. Resolve the read-only or busy settings store, then click **Use with current radio** again. Association changes are not retried automatically.
 
 ### An operation fails or the connection closes
 

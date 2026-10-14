@@ -1,6 +1,10 @@
 #include "models/Kxpa100Model.h"
 #include "core/Kxpa100Maintenance.h"
 #include <QCoreApplication>
+#include <QTcpSocket>
+#ifdef HAVE_SERIALPORT
+#include <QSerialPort>
+#endif
 #include <QSignalSpy>
 #include <cstdio>
 using namespace AetherSDR::Kxpa100;
@@ -75,7 +79,31 @@ public:
         }
         return 0;
     }
+    static int transportBoundaries()
+    {
+        Kxpa100Model model;
+        CHECK(model.m_socket->readBufferSize() > 0 && model.m_socket->readBufferSize() <= 4096);
+        QSignalSpy failed(&model, &Kxpa100Model::connectionFailed);
+        const QList<QString> invalidHosts{QString(), QString(254, QLatin1Char('a')),
+            QStringLiteral("bridge/path"), QStringLiteral("bridge host"),
+            QStringLiteral("bridge\nhost"), QStringLiteral("bridge") + QChar(0)};
+        for (const QString& host : invalidHosts) {
+            model.connectToHost(host, 4001);
+            CHECK(!model.isConnected() && !model.m_connecting && !model.m_timer.isActive());
+            CHECK(model.m_socket->state() == QAbstractSocket::UnconnectedState);
+        }
+        model.connectToHost(QStringLiteral("bridge"), 0);
+        CHECK(failed.size() == invalidHosts.size() + 1 && !model.m_connecting);
+#ifdef HAVE_SERIALPORT
+        CHECK(model.m_serial && !model.m_serial->isOpen());
+        model.connectSerial(QString(), 38400);
+        model.connectSerial(QStringLiteral("unused-port"), 12345);
+        CHECK(!model.m_serial->isOpen() && !model.isConnected());
+#endif
+        return 0;
+    }
     static int run() {
+        CHECK(transportBoundaries() == 0);
         {
             Harness h; h.model.transportOpened();
             CHECK(!h.model.isDetected() && h.wire.isEmpty());

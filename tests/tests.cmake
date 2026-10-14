@@ -4679,6 +4679,10 @@ add_executable(kxpa100_model_test tests/kxpa100_model_test.cpp
     src/core/Kxpa100Protocol.cpp src/core/Kxpa100Maintenance.cpp)
 target_include_directories(kxpa100_model_test PRIVATE src)
 target_link_libraries(kxpa100_model_test PRIVATE Qt6::Core Qt6::Network Qt6::Test)
+if(TARGET Qt6::SerialPort)
+    target_compile_definitions(kxpa100_model_test PRIVATE HAVE_SERIALPORT)
+    target_link_libraries(kxpa100_model_test PRIVATE Qt6::SerialPort)
+endif()
 add_test(NAME kxpa100_model_test COMMAND kxpa100_model_test)
 
 add_executable(kat500_protocol_test tests/kat500_protocol_test.cpp src/core/Kat500Protocol.cpp)

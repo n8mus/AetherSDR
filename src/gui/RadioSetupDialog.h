@@ -211,7 +211,8 @@ private:
                            const std::shared_ptr<QVector<std::function<void()>>>& pageReseeds);
     void buildKat500Device(PeripheralDeviceUi& ui, QWidget* stackParent,
                            const std::function<void()>& refresh,
-                           const std::shared_ptr<QVector<std::function<void()>>>& pageReseeds);    void buildKxpa100Device(PeripheralDeviceUi& ui, QWidget* stackParent,
+                           const std::shared_ptr<QVector<std::function<void()>>>& pageReseeds);
+    void buildKxpa100Device(PeripheralDeviceUi& ui, QWidget* stackParent,
                            const std::function<void()>& refresh,
                            const std::shared_ptr<QVector<std::function<void()>>>& pageReseeds);
     void buildKpa1500Device(PeripheralDeviceUi& ui, QWidget* stackParent,
