@@ -73,6 +73,8 @@ Ports**. The ShackSwitch page has a **⚙ Web UI** button that opens the
 device's own web interface. Connection defaults for every device type are
 under [Reference](#reference).
 
+The **Elecraft KAT500** page also has **Use KAT500 for TX Controls**, enabled by default. Auto or Manual mode routes TX Controls tuning to the KAT500 and changes MEM to SAVE; Bypass mode restores the radio controls. See [KAT500 TX Controls integration](./kat500-tuner-control.md#tx-controls-integration).
+
 ### Connecting automatically
 
 TGXL, PGXL, Antenna Genius and ShackSwitch each have a toggle, **on by

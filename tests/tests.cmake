@@ -8436,6 +8436,15 @@ add_test(NAME gui_nested_lifetime_test COMMAND gui_nested_lifetime_test)
 set_tests_properties(gui_nested_lifetime_test PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+# Injected serial transport and backend only: no sockets, serial ports or RF.
+add_executable(kat500_tx_controls_test tests/kat500_tx_controls_test.cpp
+    src/gui/TxApplet.cpp src/gui/AtuPreTuneDialog.cpp src/gui/DragValuePopup.cpp
+    src/gui/FramelessResizer.cpp src/gui/FramelessWindowTitleBar.cpp)
+target_include_directories(kat500_tx_controls_test PRIVATE src tests)
+target_link_libraries(kat500_tx_controls_test PRIVATE aethercore Qt6::Widgets Qt6::Test)
+add_test(NAME kat500_tx_controls_test COMMAND kat500_tx_controls_test)
+set_tests_properties(kat500_tx_controls_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(tx_applet_power_reconciliation_test
     tests/tx_applet_power_reconciliation_test.cpp
     src/gui/TxApplet.cpp

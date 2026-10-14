@@ -20,6 +20,8 @@ class BandPlanManager;
 class RadioModel;
 class TransmitModel;
 class TunerModel;
+class Kat500Model;
+class Kat500TxController;
 
 // TX applet: transmit controls matching the SmartSDR TX panel (power/SWR
 // gauges, RF and Tune power, TX profile, TUNE/MOX/ATU/MEM, APD).
@@ -28,6 +30,8 @@ class TxApplet : public QWidget {
 
 public:
     explicit TxApplet(QWidget* parent = nullptr);
+    ~TxApplet() override;
+    void setKat500Model(Kat500Model* model);
 
     void setTransmitModel(TransmitModel* model);
     void setTunerModel(TunerModel* tuner);
@@ -63,7 +67,9 @@ private:
     TxController::Input localTxInput(TxController::Activity activity);
     void requestTune(bool on, const TxController::Input& input);
     void requestMox(bool on, const TxController::Input& input);
-    void requestAtu(const TxController::Input& input);
+    void requestAtu(const TxController::Input& input, bool external);
+    void rebuildKat500Routing();
+    void confirmAndClearKat500Memories();
     void syncFromModel();
     void syncAtuIndicators();
     // Single owner of the ATU/MEM enabled state.
@@ -83,11 +89,13 @@ private:
     // and the radio reverts to single_tone on its own across power cycles.
     void showTuneContextMenu(const QPoint& pos);
 
+    QPointer<Kat500Model> m_kat500;
+    std::unique_ptr<Kat500TxController> m_katTx;
     TransmitModel* m_model{nullptr};
     RadioModel*       m_radioModel{nullptr};
     std::shared_ptr<TxController> m_txController;
     BandPlanManager*  m_bandPlanMgr{nullptr};
-    AtuPreTuneDialog* m_preTuneDialog{nullptr};
+    QPointer<AtuPreTuneDialog> m_preTuneDialog;
 
     // Frequency at which the ATU last reported a successful tune.
     // Used to gate the second-click → bypass behaviour: a click on the ATU

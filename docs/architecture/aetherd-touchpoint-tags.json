@@ -319,7 +319,7 @@
  },
  "core/FirmwareCurrency.h": {
   "tag": "universal",
-  "note": "Pure release comparison and its operator-facing wording; names no family and holds no wire types — the published version and release-notes template both arrive from the backend's declared capability.",
+  "note": "Pure release comparison and its operator-facing wording; names no family and holds no wire types \u2014 the published version and release-notes template both arrive from the backend's declared capability.",
   "split": "",
   "confidence": "high"
  },
@@ -1622,6 +1622,12 @@
  "models/Kat500Types.h": {
   "tag": "peripheral(elecraft)",
   "note": "Model-owned KAT500 status, configuration and maintenance value types for the typed peripheral facade. No transport or raw command path in GUI.",
+  "split": "",
+  "confidence": "high"
+ },
+ "models/Kat500TxController.h": {
+  "tag": "peripheral(elecraft)",
+  "note": "Engine-owned external tuner sequence through typed RadioModel and captured TX input; KAT500 remains an independent peripheral. No vendor radio wire or GUI dependency.",
   "split": "",
   "confidence": "high"
  }

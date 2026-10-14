@@ -93,6 +93,59 @@ class Kat500ModelTest
         model.m_lastReply = -10000;
         emit model.availabilityChanged();
     }
+    static int signalPathToggles()
+    {
+        Kat500Model model;
+        ready(model);
+        model.m_lastIo = 100;
+        QList<QByteArray> wire;
+        model.m_write = [&wire](const QByteArray& bytes) { wire.append(bytes); return true; };
+        Kat500Applet widget;
+        widget.setModel(&model);
+        const char* names[]{"katBypassedStatus", "katAttenuatorStatus", "katAmpInterruptStatus"};
+        const QByteArray settersOn[]{"BYPB;", "ATTN1;", "AMPI1;"};
+        const QByteArray settersOff[]{"BYPN;", "ATTN0;", "AMPI0;"};
+        const QByteArray getters[]{"BYP;", "ATTN;", "AMPI;"};
+        std::optional<bool>* states[]{&model.m_status.bypassed, &model.m_status.attenuator,
+                                     &model.m_status.ampKeyInterrupted};
+        for (int i = 0; i < 3; ++i) {
+            auto* control = widget.findChild<QPushButton*>(names[i]);
+            CHECK(control && control->isCheckable() && control->isEnabled());
+            CHECK(!control->isChecked() && !control->accessibleDescription().isEmpty());
+            for (bool requested : {true, false}) {
+                const bool confirmed = states[i]->value();
+                control->click();
+                CHECK(model.operationBusy() && !control->isEnabled());
+                CHECK(control->isChecked() == confirmed);
+                model.tick();
+                const QByteArray setter = requested ? settersOn[i] : settersOff[i];
+                CHECK(wire.last() == setter + getters[i]);
+                model.receiveBytes(setter);
+                CHECK(!model.operationBusy() && control->isEnabled());
+                CHECK(control->isChecked() == requested && *states[i] == requested);
+                CHECK(model.status().mode == Kat500::Mode::Auto);
+            }
+            states[i]->reset();
+            emit model.statusUpdated(model.status());
+            CHECK(!control->isEnabled() && control->accessibleDescription().contains("confirmed"));
+            *states[i] = false;
+            emit model.statusUpdated(model.status());
+        }
+        CHECK(wire.size() == 6);
+        for (const char* name : {"katManualState0", "katManualState1", "katManualState2"}) {
+            CHECK(!widget.findChild<QWidget*>(name));
+        }
+        for (int condition = 0; condition < 3; ++condition) {
+            blocked(model, condition);
+            for (const char* name : names) {
+                auto* control = widget.findChild<QPushButton*>(name);
+                CHECK(!control->isEnabled() && !control->accessibleDescription().isEmpty());
+                control->click();
+            }
+            CHECK(wire.size() == 6);
+        }
+        return 0;
+    }
     static void off(Kat500Model& model)
     {
         model.m_lastReply = 100;
@@ -106,6 +159,7 @@ int main(int argc, char** argv)
     TestSettingsProfile profile("kat500-applet-test");
     QApplication app(argc, argv);
     AetherSDR::AppSettings::instance().load();
+    CHECK(AetherSDR::Kat500ModelTest::signalPathToggles() == 0);
     AetherSDR::Kat500Applet widget;
     widget.resize(310, 300);
     widget.show();
@@ -206,7 +260,7 @@ int main(int argc, char** argv)
     CHECK(!swr->accessibleDescription().contains("no fresh RF indication"));
     AetherSDR::Kat500ModelTest::rf(model, false);
     CHECK(swr->text() == "SWR 1.33" && writes.isEmpty());
-    auto* key = widget.findChild<QLabel*>("katAmpInterruptStatus");
+    auto* key = widget.findChild<QPushButton*>("katAmpInterruptStatus");
     CHECK(key->text() == "KEY PASS");
     AetherSDR::Kat500ModelTest::interrupt(model, true);
     CHECK(key->text() == "KEY BLOCK");
@@ -220,14 +274,24 @@ int main(int argc, char** argv)
         toggle->setChecked(false);
     }
     widget.findChild<QPushButton*>("katManualToggle")->setChecked(true);
-    for (const char* name : {"katCapacitorSide", "katManualState0", "katManualState1", "katManualState2"}) {
+    for (const char* name : {"katCapacitorSide"}) {
         CHECK(!widget.findChild<QCheckBox*>(name)->isVisible());
     }
     auto* memory = widget.findChild<QSpinBox*>("katRecallFrequency");
     CHECK(memory->suffix() == " kHz");
+    CHECK(memory->value() == 14096);
+    memory->setValue(1);
+    CHECK(!widget.findChild<QPushButton*>("katRecall")->isEnabled());
+    CHECK(!widget.findChild<QPushButton*>("katMemorize")->isEnabled());
+    CHECK(widget.findChild<QPushButton*>("katRecall")->toolTip().contains("1800"));
+    memory->setValue(7160);
+    AetherSDR::Kat500ModelTest::rf(model, false);
+    CHECK(memory->value() == 7160);
+    CHECK(widget.findChild<QPushButton*>("katRecall")->isEnabled());
+    memory->setValue(14096);
     CHECK(widget.findChild<QLabel*>("katRecallFrequencyLabel")->buddy() == memory);
     widget.findChild<QPushButton*>("katSettings")->setChecked(true);
-    for (const char* name : {"katCapacitorSide", "katManualState0", "katManualState1", "katManualState2"}) {
+    for (const char* name : {"katCapacitorSide"}) {
         auto* control = widget.findChild<QCheckBox*>(name);
         CHECK(control->isVisible() && control->isEnabled());
     }
@@ -327,8 +391,8 @@ int main(int argc, char** argv)
         auto* selectedAntenna = widget.findChild<QPushButton*>("katAntenna1");
         CHECK(selectedMode->isChecked() && selectedAntenna->isChecked());
         CHECK(!selectedMode->isEnabled() && !selectedAntenna->isEnabled());
-        for (const char* name : {"katCapacitorSide", "katManualState0", "katManualState1", "katManualState2"}) {
-            auto* control = widget.findChild<QCheckBox*>(name);
+        for (const char* name : {"katCapacitorSide", "katBypassedStatus", "katAttenuatorStatus", "katAmpInterruptStatus"}) {
+            auto* control = widget.findChild<QWidget*>(name);
             CHECK(!control->isEnabled() && !control->accessibleDescription().isEmpty());
         }
         // Render each disabled button in both states: selection must change its

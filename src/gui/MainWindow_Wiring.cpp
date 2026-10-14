@@ -7525,6 +7525,11 @@ void MainWindow::wireMeters()
 #endif
     }
 
+    m_kat500Model.setUseTxControls(PeripheralSettings::deviceString("Kat500", "UseTxControls", "True") != "False");
+    connect(&m_kat500Model, &Kat500Model::useTxControlsChanged, this, [](bool on) {
+        PeripheralSettings::setDeviceString("Kat500", "UseTxControls", on ? "True" : "False");
+    });
+    m_appletPanel->txApplet()->setKat500Model(&m_kat500Model);
     auto* kat = m_appletPanel->kat500Applet();
     kat->setModel(&m_kat500Model);
     connect(&m_kat500Model, &Kat500Model::detectedChanged, m_appletPanel, &AppletPanel::setKat500Visible);

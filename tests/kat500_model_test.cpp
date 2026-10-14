@@ -491,11 +491,31 @@ static int stateful()
     CHECK(settings.setters.size() == 1 && settings.model.configuration().value({Setting::SlotsPerBin,5}) == 6);
     Peer tuning;
     CHECK(tuning.model.startTune()); tuning.complete(); CHECK(tuning.model.status().tuning == true);
+    QSignalSpy tuneTelemetry(&tuning.model, &Kat500Model::telemetryReceived);
+    tuning.model.receiveBytes("FT;");
+    CHECK(tuneTelemetry.size() == 1 && tuneTelemetry.first().first().toString() == "FT");
     CHECK(tuning.model.cancelTune()); tuning.complete(); CHECK(tuning.model.status().tuning == false);
     Peer reset; QSignalSpy resetDone(&reset.model,&Kat500Model::operationFinished);
     CHECK(reset.model.factoryReset(true)); reset.complete();
     CHECK(reset.wire.contains("EEINIT;") && reset.wire.contains("RST0;") && !reset.model.isConnected());
     CHECK(!reset.wire.contains("PS1;"));
+    return 0;
+}
+static int rejectUnsupportedMemoryFrequency()
+{
+    Peer peer;
+    peer.wire.clear();
+    QSignalSpy failed(&peer.model,&Kat500Model::operationFailed);
+    for (const int frequency : {1, 1799, 54001, 99999}) {
+        CHECK(!peer.model.recallFrequency(frequency));
+        CHECK(!peer.model.memorize(frequency));
+        CHECK(!peer.model.inspectMemories(frequency));
+        CHECK(!peer.model.operationBusy() && peer.model.isConnected());
+    }
+    CHECK(peer.wire.isEmpty() && failed.size() == 12);
+    peer.model.m_status.frequencyKhz = 0;
+    CHECK(!peer.model.memorize() && !peer.model.inspectMemories());
+    CHECK(peer.wire.isEmpty() && peer.model.isConnected());
     return 0;
 }
 static int run()
@@ -539,7 +559,7 @@ static int run()
     model.transportOpened(); model.m_timer.stop(); sent.clear();
     CHECK(next() == ";"); CHECK(!sent.contains("MDM;MD;"));
     model.transportClosed();
-    const int failures = followDoesNotRetryAdmittedIntent() | lateEepromRepliesStopRestore(false) | lateEepromRepliesStopRestore(true) |
+    const int failures = rejectUnsupportedMemoryFrequency() | followDoesNotRetryAdmittedIntent() | lateEepromRepliesStopRestore(false) | lateEepromRepliesStopRestore(true) |
         lateMemoryTerminatorCannotPublish() | antennaPermissionsLoadWhilePolling() | ordinaryPollLatencyKeepsSafetyFresh() | settlingReadback() | rejectNewUnsafeReadback() | doNotExposeFailedBackup() |
         cancelResetDuringDiagnostic() | canceledMemoryDrainsWithoutTelemetry();
     return failures ? 1 : stateful();

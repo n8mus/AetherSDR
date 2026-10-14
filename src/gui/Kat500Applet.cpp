@@ -246,9 +246,29 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
     auto* states = new QHBoxLayout(m_physicalPane);
     states->setContentsMargins(0, 0, 0, 0);
     states->setSpacing(3);
-    m_physical[0] = statusPill("katBypassedStatus", states);
-    m_physical[1] = statusPill("katAttenuatorStatus", states);
-    m_physical[2] = statusPill("katAmpInterruptStatus", states);
+    const QStringList physicalNames{"katBypassedStatus", "katAttenuatorStatus", "katAmpInterruptStatus"};
+    for (int i = 0; i < 3; ++i) {
+        m_physical[i] = button(QString(), physicalNames[i], states);
+        m_physical[i]->setProperty("katPill", true);
+        m_physical[i]->setProperty("katSignalToggle", true);
+        m_physical[i]->setCheckable(true);
+        m_physical[i]->setFixedHeight(18);
+        m_physical[i]->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+        states->setStretch(i, 1);
+        connect(m_physical[i], &QPushButton::clicked, this, [this, i] {
+            if (m_model) {
+                const auto& status = m_model->status();
+                if (i == 0 && status.bypassed) {
+                    m_model->setBypassed(!*status.bypassed);
+                } else if (i == 1 && status.attenuator) {
+                    m_model->setAttenuator(!*status.attenuator);
+                } else if (i == 2 && status.ampKeyInterrupted) {
+                    m_model->setAmpKeyInterrupted(!*status.ampKeyInterrupted);
+                }
+            }
+            refresh();
+        });
+    }
     m_readiness = statusPill("katReadiness", states);
     root->addWidget(m_physicalPane);
     auto* tools = new QHBoxLayout;
@@ -291,12 +311,17 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
             refresh();
         });
         auto* bits = new QGridLayout;
-        for (int bit = 0; bit < 8; ++bit) {
-            auto* check = new QCheckBox(QString::number(bit), this);
+        bits->setHorizontalSpacing(2);
+        for (int position = 0; position < 8; ++position) {
+            const int bit = 7 - position;
+            const int value = Kat500::relayTotal(kind == 0, 1 << bit);
+            auto* check = new QCheckBox(QString::number(value), this);
+            check->setProperty("katRelay", true);
             check->setObjectName(QStringLiteral("kat%1Bit%2").arg(kind == 0 ? "C" : "L").arg(bit));
             check->setAccessibleName(
-                tr("%1 relay bit %2").arg(kind == 0 ? "Capacitor" : "Inductor").arg(bit));
-            bits->addWidget(check, bit / 4, bit % 4);
+                (kind == 0 ? tr("Capacitor %1 picofarads, relay bit %2")
+                           : tr("Inductor %1 nanohenries, relay bit %2")).arg(value).arg(bit));
+            bits->addWidget(check, position / 4, position % 4);
             (kind == 0 ? m_capBits : m_indBits)[bit] = check;
             connect(check, &QCheckBox::clicked, this, [this, kind, bit](bool on) {
                 if (m_model) {
@@ -320,7 +345,14 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
     m_frequencyRecall = new QSpinBox(this);
     m_frequencyRecall->setObjectName("katRecallFrequency");
     m_frequencyRecall->setAccessibleName(tr("Memory frequency in kHz"));
-    m_frequencyRecall->setRange(1, 99999);
+    m_frequencyRecall->setRange(0, 99999);
+    m_frequencyRecall->setSpecialValueText(tr("Select frequency"));
+    m_frequencyRecall->setToolTip(tr("Starts at the confirmed tuner frequency. Enter 1800–54000 kHz to choose a different memory; edits are preserved."));
+    m_frequencyRecall->setAccessibleDescription(m_frequencyRecall->toolTip());
+    connect(m_frequencyRecall, &QSpinBox::valueChanged, this, [this] {
+        m_frequencyEdited = true;
+        refresh();
+    });
     m_frequencyRecall->setSuffix(tr(" kHz"));
     auto* memoryRow = new QHBoxLayout;
     auto* memoryLabel = new QLabel(tr("Match frequency"), this);
@@ -373,6 +405,16 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
            "only; it does not key a radio. Default off."));
     m_follow->setChecked(prefs.value("FollowTx").toBool(false));
     settings->addWidget(m_follow);
+    m_txControls = new QCheckBox(tr("Use KAT500 for TX Controls"), this);
+    m_txControls->setObjectName("katUseTxControls");
+    m_txControls->setAccessibleName(m_txControls->text());
+    m_txControls->setToolTip(tr("Default on. Auto/Manual use KAT500 AUTO/ATU and SAVE; Bypass restores the radio ATU/MEM controls."));
+    m_txControls->setAccessibleDescription(m_txControls->toolTip());
+    m_txControls->setChecked(true);
+    settings->addWidget(m_txControls);
+    connect(m_txControls, &QCheckBox::toggled, this, [this](bool on) {
+        if (m_model) { m_model->setUseTxControls(on); }
+    });
     auto* signalPathTitle = label("katSignalPathTitle", settings);
     signalPathTitle->setText(tr("Signal path"));
     auto* signalPath = new QVBoxLayout;
@@ -388,26 +430,6 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
         }
         refresh();
     });
-    const QStringList stateNames{tr("Physical bypass"), tr("Attenuator"), tr("Block amplifier keying")};
-    for (int i = 0; i < 3; ++i) {
-        auto* c = new QCheckBox(stateNames[i], this);
-        c->setObjectName(QStringLiteral("katManualState%1").arg(i));
-        c->setAccessibleName(stateNames[i]);
-        m_manualStates[i] = c;
-        signalPath->addWidget(c);
-        connect(c, &QCheckBox::clicked, this, [this, i](bool on) {
-            if (m_model) {
-                if (i == 0) {
-                    m_model->setBypassed(on);
-                } else if (i == 1) {
-                    m_model->setAttenuator(on);
-                } else {
-                    m_model->setAmpKeyInterrupted(on);
-                }
-            }
-            refresh();
-        });
-    }
     m_identity = label("katIdentity", settings);
     m_observed = label("katLastObserved", settings);
     m_availability = label("katAvailability", settings);
@@ -503,6 +525,7 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
         return checkRules() + QStringLiteral(
             "QWidget#katContent, QWidget#katViewport, QScrollArea#katScroll { background: {{color.canon.ground}}; border: none; }"
             "QLabel, QCheckBox { color: {{color.canon.muted}}; font-size: 10px; }"
+            "QCheckBox[katRelay=true] { spacing: 2px; }"
             "QLabel[katPill=true] { font-size: 9px; font-weight: bold; background: {{color.canon.nested}}; "
             "border: 1px solid {{color.canon.lineHi}}; border-radius: 3px; padding: 0 2px; }"
             "QLabel[katTone=ok] { color: {{color.accent.success}}; }"
@@ -531,7 +554,13 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
             "QPushButton:checked:disabled { background: {{color.accessory.key.meffa.active.background}}; "
             "color: {{color.text.secondary}}; border-color: {{color.accessory.key.meffa.active.border}}; } "
             "QPushButton#katBypass:checked:disabled { background: {{color.accessory.key.standby.background}}; "
-            "color: {{color.text.secondary}}; border-color: {{color.accessory.key.standby.foreground}}; }");
+            "color: {{color.text.secondary}}; border-color: {{color.accessory.key.standby.foreground}}; }"
+            "QPushButton[katSignalToggle=true] { background: {{color.canon.nested}}; border-color: {{color.canon.lineHi}}; }"
+            "QPushButton[katSignalToggle=true]:checked { background: {{color.canon.nested}}; "
+            "color: {{color.accent.warning}}; border-color: {{color.canon.lineHi}}; }"
+            "QPushButton[katSignalToggle=true]:hover:enabled { border-color: {{color.canon.cyan}}; }"
+            "QPushButton[katSignalToggle=true]:disabled { color: {{color.canon.muted}}; "
+            "background: {{color.canon.nested}}; border-color: {{color.canon.line}}; }");
     });
     presentation();
     refresh();
@@ -554,13 +583,21 @@ void Kat500Applet::setModel(Kat500Model* model)
         disconnect(m_model, nullptr, this, nullptr);
     }
     m_model = model;
+    m_frequencyEdited = false;
+    { const QSignalBlocker blocker(m_frequencyRecall); m_frequencyRecall->setValue(0); }
     if (model) {
+        { const QSignalBlocker blocker(m_txControls); m_txControls->setChecked(model->useTxControls()); }
+        connect(model, &Kat500Model::useTxControlsChanged, this, [this](bool on) {
+            const QSignalBlocker blocker(m_txControls); m_txControls->setChecked(on);
+        });
         model->setFollowTxFrequency(m_follow->isChecked());
         model->setVerbose(m_verbose->isChecked());
         connect(model, &Kat500Model::statusUpdated, this, &Kat500Applet::refresh);
         connect(model, &Kat500Model::operationFinished, this,
                 [this](const QString& message) { text(m_result, message); });
         connect(model, &Kat500Model::operationFailed, this,
+                [this](const QString& message) { text(m_result, message); });
+        connect(model, &Kat500Model::connectionFailed, this,
                 [this](const QString& message) { text(m_result, message); });
         connect(model, &Kat500Model::availabilityChanged, this, &Kat500Applet::refresh);
         connect(model, &Kat500Model::configurationRead, this, &Kat500Applet::refresh);
@@ -664,21 +701,38 @@ void Kat500Applet::refresh()
     m_showingBypass = preview;
     m_swrGauge->setAccessibleName(swrText);
     m_swrGauge->setAccessibleDescription(swrHelp);
-    const std::array<std::optional<bool>, 2> physical{s.bypassed, s.attenuator};
-    const QStringList shortNames{tr("BYP"), tr("ATT")};
-    const QStringList fullNames{tr("Physical bypass"), tr("Attenuator")};
-    for (int i = 0; i < 2; ++i) {
-        pill(m_physical[i], tr("%1 %2").arg(shortNames[i], physical[i] ? flag(physical[i]) : tr("?")),
-             tr("%1: %2").arg(fullNames[i], flag(physical[i])),
-             physical[i].value_or(false) ? "warn" : "muted");
+    const std::array<std::optional<bool>, 3> physical{s.bypassed, s.attenuator, s.ampKeyInterrupted};
+    const QStringList physicalText{
+        tr("BYP %1").arg(s.bypassed ? flag(s.bypassed) : tr("?")),
+        tr("ATT %1").arg(s.attenuator ? flag(s.attenuator) : tr("?")),
+        s.ampKeyInterrupted ? (*s.ampKeyInterrupted ? tr("KEY BLOCK") : tr("KEY PASS")) : tr("KEY ?")};
+    const QStringList physicalHelp{
+        tr("Bypass network (relays only): %1. Auto/Manual mode stays unchanged; recall or tuning may "
+           "engage the network again. Use the main Bypass button to disable tuning. %2")
+            .arg(flag(s.bypassed), s.bypassed ? (*s.bypassed ? tr("Click to engage the matching network.")
+                                                          : tr("Click to bypass the matching network."))
+                                             : QString()),
+        tr("Attenuator: %1. %2")
+            .arg(flag(s.attenuator), s.attenuator ? (*s.attenuator ? tr("Click to turn the attenuator off.")
+                                                               : tr("Click to turn the attenuator on."))
+                                                : QString()),
+        tr("Amplifier key-line relay: %1. This affects the amplifier only when its key line passes "
+           "through the tuner; it does not indicate amplifier transmission. %2")
+            .arg(s.ampKeyInterrupted ? (*s.ampKeyInterrupted ? tr("blocked") : tr("connected"))
+                                    : tr("unknown"),
+                 s.ampKeyInterrupted ? (*s.ampKeyInterrupted ? tr("Click to allow amplifier keying.")
+                                                           : tr("Click to block amplifier keying."))
+                                     : QString())};
+    for (int i = 0; i < 3; ++i) {
+        const QSignalBlocker blocker(m_physical[i]);
+        m_physical[i]->setChecked(physical[i].value_or(false));
+        const QString blocked = !reason.isEmpty() ? reason
+            : !physical[i] ? tr("Wait for confirmed state.") : QString();
+        availability(m_physical[i], blocked);
+        const QString detail = blocked.isEmpty() ? physicalHelp[i]
+                                                : physicalHelp[i] + QStringLiteral("\n") + blocked;
+        pill(m_physical[i], physicalText[i], detail, physical[i].value_or(false) ? "warn" : "muted");
     }
-    pill(m_physical[2], s.ampKeyInterrupted ? (*s.ampKeyInterrupted ? tr("KEY BLOCK") : tr("KEY PASS"))
-                                          : tr("KEY ?"),
-         tr("KAT500 amplifier key-line relay: %1. This affects the amplifier only when its key line "
-            "passes through the tuner; it does not indicate amplifier transmission.")
-             .arg(s.ampKeyInterrupted ? (*s.ampKeyInterrupted ? tr("blocked") : tr("connected"))
-                                     : tr("unknown")),
-         s.ampKeyInterrupted.value_or(false) ? "warn" : "muted");
     const bool responding = m_model && m_model->isResponding();
     const QString readiness = !m_model || !m_model->isDetected() ? tr("OFFLINE")
                               : !responding ? tr("STALE")
@@ -727,6 +781,16 @@ void Kat500Applet::refresh()
             availability(control, reason);
         }
     }
+    if (!m_frequencyEdited && m_model && m_model->isResponding()) {
+        const QSignalBlocker blocker(m_frequencyRecall);
+        m_frequencyRecall->setValue(Kat500::isSupportedFrequency(s.frequencyKhz.value_or(0))
+                                       ? *s.frequencyKhz : 0);
+    }
+    const QString frequencyReason = !reason.isEmpty() ? reason
+        : Kat500::isSupportedFrequency(m_frequencyRecall->value()) ? QString()
+        : tr("Select a frequency from 1800 to 54000 kHz before recalling or memorizing a match.");
+    availability(findChild<QPushButton*>("katRecall"), frequencyReason);
+    availability(findChild<QPushButton*>("katMemorize"), frequencyReason);
     for (int kind = 0; kind < 2; ++kind) {
         const auto mask = kind == 0 ? s.capacitorMask : s.inductorMask;
         auto* numeric = kind == 0 ? m_cap : m_ind;
@@ -750,15 +814,6 @@ void Kat500Applet::refresh()
         m_side->setChecked(s.side == Kat500::CapacitorSide::Antenna);
         if (!s.side) {
             availability(m_side, tr("Wait for confirmed capacitor side."));
-        }
-    }
-    const std::array<std::optional<bool>, 3> values{s.bypassed, s.attenuator, s.ampKeyInterrupted};
-    for (int i = 0; i < 3; ++i) {
-        const QSignalBlocker b(m_manualStates[i]);
-        availability(m_manualStates[i], reason);
-        m_manualStates[i]->setChecked(values[i].value_or(false));
-        if (!values[i]) {
-            availability(m_manualStates[i], tr("Wait for confirmed state."));
         }
     }
     if (reason.isEmpty() && s.firmware != QStringLiteral("02.16")) {

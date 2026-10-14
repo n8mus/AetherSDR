@@ -80,7 +80,9 @@ void Kat500Model::reconnect()
 }
 void Kat500Model::transportOpened()
 {
+    m_deferredTuneCancel = false;
     ++m_generation; m_resetAt = 0; m_pendingBackup = {};
+    m_tunePermit = {};
     m_settleGetter.clear(); m_settleVerify = {}; m_settleDeadline = 0;
     m_connected = true; m_connecting = false; m_detected = false; m_status = {};
     m_configuration.clear(); m_received.clear(); m_lastStateFrames.clear(); m_queue.clear(); m_active.reset(); m_parser->reset();
@@ -91,7 +93,9 @@ void Kat500Model::transportOpened()
 }
 void Kat500Model::transportClosed(const QString& reason)
 {
+    m_deferredTuneCancel = false;
     ++m_generation; m_resetAt = 0; m_pendingBackup = {};
+    m_tunePermit = {};
     m_settleGetter.clear(); m_settleVerify = {}; m_settleDeadline = 0;
     const bool wasOpen = m_connected || m_connecting;
     m_connected = false; m_connecting = false; m_timer.stop();
@@ -125,7 +129,7 @@ QString Kat500Model::unavailableReason(bool writing) const
     if (!m_detected) { return QStringLiteral("Waiting for KAT500 identification."); }
     if (m_status.identity == QStringLiteral("kat500")) { return QStringLiteral("Bootloader detected. Use the official Elecraft Utility."); }
     if (!isResponding()) { return QStringLiteral("KAT500 readback is stale; waiting for a wake response."); }
-    if (operationBusy()) { return QStringLiteral("Another KAT500 operation is in progress."); }
+    if (operationBusy() || m_deferredTuneCancel) { return QStringLiteral("Another KAT500 operation is in progress."); }
     if (m_now() < m_quarantineUntil) { return QStringLiteral("Waiting for late replies to drain."); }
     if (m_status.powerOn != true) { return QStringLiteral("KAT500 power is off or unknown."); }
     if (writing && (m_status.tuning != false || m_status.forwardAdc != 0 || fieldAgeMs(QStringLiteral("TP")) < 0 ||
@@ -195,10 +199,11 @@ void Kat500Model::tick()
         return;
     }
     if (m_dropMemory && now >= m_quarantineUntil) {
-        transportClosed(QStringLiteral("Incomplete memory response; close the stream before further commands.")); return;
+        transportClosed(QStringLiteral("Memory response was incomplete. Reconnect the KAT500 to resume; no command was retried.")); return;
     }
     if (!m_settleGetter.isEmpty()) {
         if (m_settleGeneration != m_generation || !operationBusy()) {
+            m_tunePermit = {};
             m_settleGetter.clear(); m_settleVerify = {}; m_settleDeadline = 0;
         } else if (now >= m_settleDeadline) {
             fail(QStringLiteral("Requested value was not confirmed before the readback deadline; no write retry was sent.")); return;
@@ -211,6 +216,10 @@ void Kat500Model::tick()
         return;
     }
     if (now < m_quarantineUntil) { return; }
+    if (m_deferredTuneCancel && !operationBusy()) {
+        m_deferredTuneCancel = false;
+        if (!cancelTune()) { report(QStringLiteral("Deferred tuner cancellation could not be sent.")); }
+    }
     if (m_queue.isEmpty()) {
         if (now < m_nextPoll || operationBusy()) { return; }
         if (m_status.powerOn == false) { query("PS;"); m_nextPoll = now + 5000; }
@@ -269,6 +278,9 @@ void Kat500Model::tick()
          fieldAgeMs(QStringLiteral("VFWD")) < 0 || fieldAgeMs(QStringLiteral("VFWD")) > 5000)) {
         fail(QStringLiteral("Write stopped: current power, tuning or RF readback is unsafe or stale.")); return;
     }
+    if (m_active->mutation && m_tunePermit && !m_tunePermit()) {
+        fail(QStringLiteral("Tune input authorization expired; request discarded.")); return;
+    }
     const QByteArray wire = m_active->wire;
     if (wire.startsWith("DM") || wire.contains(";DM")) { m_memoryReading = true; }
     write(wire);
@@ -324,7 +336,11 @@ void Kat500Model::receiveFrame(const QByteArray& frame)
         }
         return;
     }
-    if (frame == "FT" && m_operation == QStringLiteral("Request tuner search")) { m_tuneCompleted = true; return; }
+    if (frame == "FT") {
+        m_tuneCompleted = true;
+        emit telemetryReceived(QStringLiteral("FT"), m_status);
+        return;
+    }
     // Never treat unsolicited DM continuation or EEPROM data as live telemetry.
     if (frame.startsWith("DM ")) { m_dropMemory = true; return; }
     Status identity = m_status;
@@ -379,6 +395,7 @@ bool Kat500Model::begin(const QString& name, bool writing)
 }
 void Kat500Model::finish(const QString& message)
 {
+    m_tunePermit = {};
     m_settleGetter.clear(); m_settleVerify = {}; m_settleDeadline = 0;
     m_operation.clear(); m_operationWriting = false; m_regionComplete = {}; m_edits.clear();
     m_nextPoll = m_now() + 200; report(message); emit operationBusyChanged(false); emit operationFinished(message); emit availabilityChanged();
@@ -386,6 +403,7 @@ void Kat500Model::finish(const QString& message)
 void Kat500Model::fail(const QString& reason)
 {
     ++m_generation; m_resetAt = 0; m_pendingBackup = {};
+    m_tunePermit = {};
     m_settleGetter.clear(); m_settleVerify = {}; m_settleDeadline = 0;
     qCWarning(lcKat500).noquote() << reason;
     const bool busy = operationBusy();
@@ -474,10 +492,26 @@ bool Kat500Model::setBypassed(bool bypassed) { return requestValue(bypassed ? "B
 bool Kat500Model::setAttenuator(bool enabled) { return requestValue(enabled ? "ATTN1;" : "ATTN0;","ATTN;",[enabled](const Status& s) { return s.attenuator == enabled; },QStringLiteral("Set attenuator")); }
 bool Kat500Model::setAmpKeyInterrupted(bool interrupted) { return requestValue(interrupted ? "AMPI1;" : "AMPI0;","AMPI;",[interrupted](const Status& s) { return s.ampKeyInterrupted == interrupted; },QStringLiteral("Set amplifier key interrupt")); }
 bool Kat500Model::clearFault() { return requestValue("FLTC;","FLT;",[](const Status& s) { return s.faultCode == 0; },QStringLiteral("Clear current fault")); }
-bool Kat500Model::startTune(bool saveMatch)
+void Kat500Model::setUseTxControls(bool enabled)
 {
+    if (m_useTxControls == enabled) { return; }
+    m_useTxControls = enabled;
+    emit useTxControlsChanged(enabled);
+}
+bool Kat500Model::startTune(bool saveMatch, std::function<bool()> permit)
+{
+    if (permit && !permit()) { return false; }
     m_tuneCompleted = false;
-    return requestValue(saveMatch ? "T;" : "FTNS;","TP;",[this](const Status& s) { return s.tuning == true || m_tuneCompleted; },QStringLiteral("Request tuner search"));
+    const bool accepted = requestValue(saveMatch ? "T;" : "FTNS;","TP;",[this](const Status& s) { return s.tuning == true || m_tuneCompleted; },QStringLiteral("Request tuner search"));
+    if (accepted) { m_tunePermit = std::move(permit); }
+    return accepted;
+}
+void Kat500Model::cancelTuneAfterPendingOperation()
+{
+    if (!m_connected || !m_detected) { return; }
+    if (m_operation == QStringLiteral("Cancel tuner search")) { return; }
+    m_deferredTuneCancel = true;
+    cancelOperation();
 }
 bool Kat500Model::cancelTune()
 {
@@ -488,8 +522,16 @@ bool Kat500Model::cancelTune()
         [this](const QByteArray&) { pollTuneCancellation(); },2000,true,false});
     return true;
 }
+bool Kat500Model::validateMemoryFrequency(int frequencyKhz, bool allowCurrent)
+{
+    const int target = allowCurrent && frequencyKhz == 0 ? m_status.frequencyKhz.value_or(0) : frequencyKhz;
+    if (isSupportedFrequency(target)) { return true; }
+    emit operationFailed(QStringLiteral("Select a KAT500 frequency from 1800 to 54000 kHz; no command was sent."));
+    return false;
+}
 bool Kat500Model::recallFrequency(int frequencyKhz)
 {
+    if (!validateMemoryFrequency(frequencyKhz)) { return false; }
     return requestValue(buildFrequency(frequencyKhz),"F;",[frequencyKhz](const Status& s) { return s.frequencyKhz == frequencyKhz; },QStringLiteral("Recall frequency"));
 }
 void Kat500Model::setFollowTxFrequency(bool enabled)
@@ -503,6 +545,7 @@ void Kat500Model::setEffectiveTxFrequencyHz(qint64 frequencyHz)
 {
     if (!m_followTx || frequencyHz < 1000 || frequencyHz > 99999000) { return; }
     const int khz = static_cast<int>(frequencyHz / 1000);
+    if (!isSupportedFrequency(khz)) { return; }
     if (m_followIntentKhz != khz) {
         m_followIntentKhz = khz;
         m_followIntentAdmitted = false;
@@ -520,9 +563,34 @@ void Kat500Model::pollTuneCancellation()
     if (m_now() >= m_cancelTuneDeadline) { fail(QStringLiteral("Tuner has not confirmed cancellation; CT was not retried.")); return; }
     query("TP;",[this] { pollTuneCancellation(); });
 }
+bool Kat500Model::readMatchStatus()
+{
+    if (!begin(QStringLiteral("Read tune result"), false)) { return false; }
+    m_tuneResultDeadline = m_now() + 4000;
+    for (const QByteArray& command : {QByteArray("MD;"), QByteArray("AN;"), QByteArray("BYP;"),
+         QByteArray("SIDE;"), QByteArray("C;"), QByteArray("L;"), QByteArray("VSWR;")}) {
+        query(command);
+    }
+    query("FLT;", [this] { readTuneIdle(); });
+    return true;
+}
+void Kat500Model::readTuneIdle()
+{
+    if (m_operation != QStringLiteral("Read tune result")) { return; }
+    query("TP;");
+    query("VFWD;", [this] {
+        if (m_status.tuning == false && m_status.forwardAdc == 0) {
+            finish(QStringLiteral("Tune result and idle readback confirmed."));
+        } else if (m_now() >= m_tuneResultDeadline) {
+            fail(QStringLiteral("Tuner did not confirm idle with no RF after tuning."));
+        } else {
+            readTuneIdle();
+        }
+    });
+}
 bool Kat500Model::memorize(int frequencyKhz)
 {
-    if (frequencyKhz < 0 || frequencyKhz > 99999 || !begin(QStringLiteral("Memorize match"),true)) { return false; }
+    if (!validateMemoryFrequency(frequencyKhz, true) || !begin(QStringLiteral("Memorize match"),true)) { return false; }
     if (m_status.firmware != QStringLiteral("02.16")) { fail(QStringLiteral("Memory verification is supported for firmware 02.16.")); return false; }
     preflight([this,frequencyKhz] {
         query("AN;"); query("BYP;"); query("SIDE;"); query("C;");
@@ -700,7 +768,7 @@ bool Kat500Model::readFaultHistory()
 }
 bool Kat500Model::inspectMemories(int frequencyKhz)
 {
-    if (frequencyKhz < 0 || frequencyKhz > 99999 || !begin(QStringLiteral("Inspect memory bin"),false)) { return false; }
+    if (!validateMemoryFrequency(frequencyKhz, true) || !begin(QStringLiteral("Inspect memory bin"),false)) { return false; }
     if (m_status.firmware != QStringLiteral("02.16")) { fail(QStringLiteral("Memory response decoding is verified only for firmware 02.16.")); return false; }
     m_memoryExpected.reset(); requestMemory(frequencyKhz); return true;
 }

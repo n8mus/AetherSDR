@@ -60,9 +60,9 @@ class Kat500Applet : public CanonApplet
     QPushButton* m_debugToggle;
     std::array<QPushButton*, 3> m_modes{}, m_antennas{};
     std::array<QCheckBox*, 8> m_capBits{}, m_indBits{};
-    std::array<QCheckBox*, 3> m_manualStates{};
     QCheckBox* m_side;
     QCheckBox* m_follow;
+    QCheckBox* m_txControls;
     QCheckBox* m_verbose;
     QCheckBox* m_pause;
     QSpinBox* m_cap;
@@ -70,7 +70,7 @@ class Kat500Applet : public CanonApplet
     QSpinBox* m_frequencyRecall;
     QLabel* m_frequency;
     QPushButton* m_swr;
-    std::array<QLabel*, 3> m_physical{};
+    std::array<QPushButton*, 3> m_physical{};
     QLabel* m_readiness;
     QLabel* m_miniState;
     QLabel* m_fault;
@@ -89,6 +89,7 @@ class Kat500Applet : public CanonApplet
     QElapsedTimer m_clock;
     QTimer m_timer;
     std::array<std::optional<int>, 2> m_lastRelayMasks{};
+    bool m_frequencyEdited = false;
     bool m_floating = false;
     bool m_showingBypass = false;
 };

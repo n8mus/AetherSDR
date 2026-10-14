@@ -201,7 +201,7 @@ QString validateConfiguration(const Configuration& confirmed, const Configuratio
     }
     return {};
 }
-QByteArray buildFrequency(int khz) { return khz >= 1 && khz <= 99999 ? "F " + QByteArray::number(khz) + ';' : QByteArray{}; }
+QByteArray buildFrequency(int khz) { return isSupportedFrequency(khz) ? "F " + QByteArray::number(khz) + ';' : QByteArray{}; }
 QByteArray buildErase(int band, int antenna)
 {
     return band >= 0 && band <= 10 && antenna >= 0 && antenna <= 3

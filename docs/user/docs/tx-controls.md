@@ -31,6 +31,8 @@ transmit. Before you key up for the first time, read [Before You Transmit](./bef
   can train its predistortion against the output of an external linear
   amplifier rather than its own PA.
 
+Both power slider readouts include **%**: they set radio drive, not amplifier output watts.
+
 Hover **RF Pwr** or **SWR** for a floating badge with the exact value
 (for example `12 W` or `1.12:1`). Forward power drops to zero as soon as you
 unkey, and SWR does not show a stale reading while you receive.
@@ -53,6 +55,11 @@ the Tuner Genius XL.
 
 ### ATU, MEM and pre-tuning
 
+With **Use KAT500 for TX Controls** enabled (the default), a connected KAT500 in Auto or Manual takes over these controls. **AUTO** is gold in Auto and requests a fresh tune without changing mode; Manual uses **ATU**. **SAVE** replaces MEM and stores the current match without RF. A **KAT500** pill replaces the Mem indicator, while the SWR meter remains the radio's measurement. Bypass mode restores the normal radio controls. See [KAT500 TX Controls integration](./kat500-tuner-control.md#tx-controls-integration).
+
+When KAT500 is selected, right-click **AUTO**/**ATU** for **Pre-tune bands…** (KAT500 sweep) or **Clear all KAT500 memories…** (confirmation required). These act on the external tuner. The normal radio menu returns in KAT500 Bypass mode.
+
+
 - **MEM** shows the tuner's real memory state as the radio reports it, not
   just your last click.
 - ATU tune failures are reported in the status bar.
@@ -63,7 +70,7 @@ the bands you choose, tunes the ATU at each point and stores the result in the
 ATU memory, so later band changes recall a match instead of re-tuning. On
 channelised bands such as US 60 m it uses one point per channel.
 
-- **MEM must be on**; otherwise the entry is disabled with
+- **For the internal radio ATU, MEM must be on**; otherwise the entry is disabled with
   "Enable MEM before running the pre-tune sweep". It is hidden or disabled on
   radios without ATU memory, and a disabled entry says why.
 - **Mode:** *Step (confirm each point)*, with Tune / Skip / Abort per point, or
@@ -71,11 +78,13 @@ channelised bands such as US 60 m it uses one point per channel.
 - **License class** limits the points to sub-bands your class may use, where
   the active band plan has class data (the ARRL US plan has T/G/E).
 - Safety nets: a warning with an estimated duration above 100 points; a
-  warning when Auto-mode tune power is above 20 W; an audible cue on a
+  warning when Auto-mode tune power is above 20%; an audible cue on a
   per-point timeout; and after 3 consecutive failed or bypassed results on one
   band, the sweep skips the rest of that band and moves on.
 - **The sweep keys the transmitter repeatedly. Make sure the bands are clear
   before you start.**
+
+KAT500 sweeps require the external tuner to remain connected in Auto/Manual. They use KAT500 memory-bin spacing, do not require the radio's MEM setting, and stop on an unsuccessful or unconfirmed result.
 
 **Clear ATU memories.** **Tools → Clear ATU Memories...** or right-click
 **ATU** → **Clear ATU memories…** erases the stored tuner solutions after a

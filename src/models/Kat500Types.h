@@ -10,6 +10,8 @@
 #include <tuple>
 
 namespace AetherSDR::Kat500 {
+// KAT500 Owner's Manual: continuous operating coverage from 1.8 through 54 MHz.
+constexpr bool isSupportedFrequency(int khz) { return khz >= 1800 && khz <= 54000; }
 enum class Mode { Auto, Manual, Bypass };
 enum class CapacitorSide { Transmitter, Antenna };
 struct Status {

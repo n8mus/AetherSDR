@@ -47,8 +47,13 @@ public:
     bool setAmpKeyInterrupted(bool interrupted);
     bool clearFault();
     // Explicit operator intent only. No command here keys a radio/carrier.
-    bool startTune(bool saveMatch = true);
+    bool startTune(bool saveMatch = true, std::function<bool()> permit = {});
+    bool useTxControls() const { return m_useTxControls; }
+    void setUseTxControls(bool enabled);
     bool cancelTune();
+    // Retain stop intent if its controller goes away while a serial request drains.
+    void cancelTuneAfterPendingOperation();
+    bool readMatchStatus();
     bool memorize(int frequencyKhz = 0);
     bool recallFrequency(int frequencyKhz);
     void setFollowTxFrequency(bool enabled);
@@ -80,6 +85,7 @@ public:
     void clearDebug() { m_debug.clear(); emit debugChanged(); }
 
 signals:
+    void useTxControlsChanged(bool enabled);
     void connected();
     void disconnected();
     void connectionFailed(const QString& reason);
@@ -132,8 +138,10 @@ private:
     void eraseNextBand();
     void queueIdentity();
     void pollTuneCancellation();
+    void readTuneIdle();
     void confirmRequestedValue();
     void pollRequestedValue();
+    bool validateMemoryFrequency(int frequencyKhz, bool allowCurrent = false);
     void requestMemory(int frequencyKhz, const QByteArray& prefix = {});
     void reconnect();
 
@@ -203,7 +211,11 @@ private:
     quint64 m_settleGeneration = 0;
     bool m_settleAllowOff = false;
     qint64 m_cancelTuneDeadline = 0;
+    qint64 m_tuneResultDeadline = 0;
+    bool m_deferredTuneCancel = false;
     bool m_tuneCompleted = false;
+    bool m_useTxControls = true;
+    std::function<bool()> m_tunePermit;
     bool m_regionExternal = false;
     int m_regionAddress = 0;
     int m_regionEnd = 0;
