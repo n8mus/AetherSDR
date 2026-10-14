@@ -1060,7 +1060,7 @@ void TxApplet::openPreTuneDialog()
     }
     if (!m_preTuneDialog) {
         m_preTuneDialog = new AtuPreTuneDialog(m_radioModel, m_bandPlanMgr,
-                                               this->window(), external ? m_katTx.get() : nullptr);
+                                               this->window(), m_katTx.get());
         m_preTuneDialog->setAttribute(Qt::WA_DeleteOnClose);
     }
     m_preTuneDialog->show();

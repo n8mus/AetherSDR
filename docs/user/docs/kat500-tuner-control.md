@@ -62,7 +62,7 @@ F, FX and FC are displayed in kHz; FY is a range in kHz. They can remain after R
 
 **Use KAT500 for TX Controls** is on by default in both the applet's **Settings** and **Peripherals → Elecraft KAT500**. When the tuner reports **Auto** or **Manual**, the TX Controls applet uses it instead of the internal radio ATU. Explicit **Bypass** mode or switching this option off restores the radio controls. Physical bypass can be the tuner's chosen match in Auto and does not change the selected route.
 
-Right-click **AUTO** or **ATU** for **Pre-tune bands…** and **Clear all KAT500 memories…**. Pre-tune uses the same Step/Auto sweep dialog, with KAT500 memory-bin spacing and the active band plan. Each point runs a fresh KAT500 tune while keeping the radio's internal ATU bypassed. Aborting stops the carrier, cancels the tuner search and restores the original radio frequency. A lost tuner connection or changed route stops the sweep without falling back to the radio ATU.
+Right-click **AUTO** or **ATU** for **Pre-tune bands…** and **Clear all KAT500 memories…**. Pre-tune uses the same Step/Auto sweep dialog, with KAT500 memory-bin spacing and the active band plan. Each point runs a fresh KAT500 tune while keeping the radio's internal ATU bypassed. Aborting stops the carrier, cancels the tuner search and restores the original radio frequency. A lost tuner connection or changed route stops the sweep without falling back to the radio ATU. Changing between the radio and KAT500 invalidates an open pre-tune window, including a paused sweep; close and reopen it to use the new tuner.
 
 **Clear all KAT500 memories…** asks for confirmation before erasing stored matches on every band and antenna; it preserves configuration and the radio's internal memories. Elecraft does not document single-frequency erasure. Left-click **AUTO** or **ATU** for a fresh tune at the current frequency instead.
 
@@ -131,3 +131,11 @@ Return to the existing dialog to complete or cancel file selection. Advanced per
 - [Amplifiers](./amplifiers.md)
 - [Settings and Backups](./settings-and-backups.md)
 - [Elecraft KAT500 software](https://elecraft.com/pages/kat500-software)
+
+## Screenshots
+
+Current Full and Mini applets, captured from the Mac connected to a KAT500 with no RF:
+
+<img src="/img/kat500/kat500-applet-full.png" width="320" alt="KAT500 Full applet with confirmed Auto mode, antenna 1, SWR and signal-path toggles." />
+
+<img src="/img/kat500/kat500-applet-mini.png" width="320" alt="KAT500 Mini applet with power, Tune, fault status, mode and SWR." />

@@ -76,6 +76,8 @@ private:
     void onContinueClicked();
     void onAtuStateChanged();
     void onKat500Changed();
+    bool routeMatches() const;
+    void invalidateRoute(const QString& reason);
     void onPerPointTimeout();
     void beginNextPoint();
     void requestTuneNow();
@@ -90,7 +92,7 @@ private:
     QPointer<Kat500TxController> m_kat500;
     bool m_externalTuner{false};
     bool m_externalPointStarted{false};
-    bool m_externalConnectionLost{false};
+    bool m_routeInvalidated{false};
     std::shared_ptr<TxController> m_programController;
     TxController::Input m_programInput;
     TxController::Input m_pointInput;

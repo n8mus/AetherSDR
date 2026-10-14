@@ -155,7 +155,7 @@ AtuPreTuneDialog::AtuPreTuneDialog(RadioModel* radio,
     : QDialog(parent),
       m_radio(radio),
       m_kat500(kat500),
-      m_externalTuner(kat500 != nullptr),
+      m_externalTuner(kat500 && kat500->selected()),
       m_bandPlan(bandPlan)
 {
     theme::setContainer(this, QStringLiteral("dialog/atuPreTune"));
@@ -167,7 +167,7 @@ AtuPreTuneDialog::AtuPreTuneDialog(RadioModel* radio,
     m_settleTimer->setSingleShot(true);
     m_settleTimer->setInterval(kSettleMs);
     connect(m_settleTimer, &QTimer::timeout, this, [this]() {
-        if (!m_radio || !m_sweepActive || !m_programInput.valid() || !m_pointInput.valid()) {
+        if (!routeMatches() || !m_radio || !m_sweepActive || !m_programInput.valid() || !m_pointInput.valid()) {
             finishSweep(" Aborted: transmit authorization ended.");
             return;
         }
@@ -252,19 +252,21 @@ AtuPreTuneDialog::AtuPreTuneDialog(RadioModel* radio,
 
     if (m_kat500) {
         connect(m_kat500, &Kat500TxController::tunerDisconnected, this, [this] {
-            m_externalConnectionLost = true;
-            m_startBtn->setEnabled(false);
-            const QString reason = tr("KAT500 disconnected. Close and reopen the sweep after reconnecting.");
-            m_startBtn->setToolTip(reason);
-            m_startBtn->setAccessibleDescription(reason);
-            if (m_sweepActive) { finishSweep(reason); }
+            if (m_externalTuner) {
+                invalidateRoute(tr("KAT500 disconnected. Close and reopen the sweep after reconnecting."));
+            }
+        });
+        connect(m_kat500, &Kat500TxController::changed, this, [this] {
+            if (!routeMatches()) {
+                invalidateRoute(tr("Tuner selection changed. Close and reopen the pre-tune sweep."));
+            }
         });
         // Completion publishes carrier-stop and match readback in the same turn.
         // Observe the settled result, never the intermediate idle transition.
         connect(m_kat500, &Kat500TxController::changed, this,
                 &AtuPreTuneDialog::onKat500Changed, Qt::QueuedConnection);
         connect(m_kat500, &QObject::destroyed, this, [this] {
-            if (m_sweepActive) { finishSweep(tr(" Aborted: KAT500 route closed.")); }
+            invalidateRoute(tr("Tuner route closed. Close and reopen the pre-tune sweep."));
         });
     }
     setFramelessMode(AppSettings::instance().value("FramelessWindow", "True").toString() == "True");
@@ -602,8 +604,7 @@ void AtuPreTuneDialog::startSweep(const std::shared_ptr<TxController>& controlle
     if (m_preparingSweep || m_sweepActive || !input.valid() || !input.belongsTo(m_radio)) {
         return;
     }
-    if (m_externalTuner && (m_externalConnectionLost || !m_kat500 || !m_kat500->selected()
-        || !m_kat500->unavailableReason().isEmpty())) { return; }
+    if (!routeMatches() || (m_externalTuner && !m_kat500->unavailableReason().isEmpty())) { return; }
     m_preparingSweep = true;
     const auto preparing = qScopeGuard([self] { if (self) { self->m_preparingSweep = false; } });
     m_programController = controller;
@@ -723,8 +724,7 @@ void AtuPreTuneDialog::startSweep(const std::shared_ptr<TxController>& controlle
         }
     }
 
-    if (m_externalTuner && (m_externalConnectionLost || !m_kat500 || !m_kat500->selected()
-        || !m_kat500->unavailableReason().isEmpty())) { return; }
+    if (!routeMatches() || (m_externalTuner && !m_kat500->unavailableReason().isEmpty())) { return; }
     m_currentIndex = -1;
     m_successCount = 0;
     m_skipCount = 0;
@@ -871,10 +871,25 @@ void AtuPreTuneDialog::onPerPointTimeout()
     finishSweep(" Aborted: per-point timeout.");
 }
 
+bool AtuPreTuneDialog::routeMatches() const
+{
+    return !m_routeInvalidated && (m_kat500 ? m_kat500->selected() == m_externalTuner : !m_externalTuner);
+}
+
+void AtuPreTuneDialog::invalidateRoute(const QString& reason)
+{
+    if (m_routeInvalidated) { return; }
+    m_routeInvalidated = true;
+    m_startBtn->setEnabled(false);
+    m_startBtn->setToolTip(reason);
+    m_startBtn->setAccessibleDescription(reason);
+    if (m_sweepActive) { finishSweep(reason); }
+}
+
 void AtuPreTuneDialog::onKat500Changed()
 {
     if (!m_sweepActive || !m_externalTuner) { return; }
-    if (!m_programInput.valid() || m_externalConnectionLost || !m_kat500 || !m_kat500->selected()) {
+    if (!m_programInput.valid() || m_routeInvalidated || !m_kat500 || !m_kat500->selected()) {
         finishSweep(tr(" Aborted: KAT500 selection or transmit authorization changed."));
         return;
     }

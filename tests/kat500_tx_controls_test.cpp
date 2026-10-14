@@ -22,7 +22,8 @@ class TxAppletPowerReconciliationTestAccess {
 public:
     static void prepare(AtuPreTuneDialog& dialog, const std::shared_ptr<TxController>& input) {
         dialog.m_programController = input;
-        dialog.m_programInput = input->captureProgram(TxController::Activity::Tune);
+        dialog.m_programInput = input->captureProgram(dialog.usesKat500()
+            ? TxController::Activity::Tune : TxController::Activity::Atu);
         dialog.m_sweepActive = true;
         dialog.m_currentIndex = 0;
         dialog.m_txSliceId = 0;
@@ -235,6 +236,22 @@ void saving() {
     check(!f.routing->busy() && f.routing->message().contains("saved and verified"), "SAVE completes only after matching memory readback");
     check(!f.backend->wire.contains("tune:on") && !f.serial.contains("T;TP;"), "SAVE never requests a search or carrier");
 }
+void nativeSweepRouteFence() {
+    for (const bool paused : {false, true}) {
+        Fixture f;
+        Kat500ModelTest::mode(f.kat, Kat500::Mode::Bypass);
+        AtuPreTuneDialog dialog(&f.radio, nullptr, nullptr, f.routing.get());
+        check(!dialog.usesKat500(), "Bypass captures the native pre-tune route");
+        TxAppletPowerReconciliationTestAccess::prepare(dialog, f.input);
+        if (paused) { TxAppletPowerReconciliationTestAccess::pause(dialog); }
+        Kat500ModelTest::mode(f.kat, Kat500::Mode::Auto);
+        Kat500ModelTest::mode(f.kat, Kat500::Mode::Bypass);
+        TxAppletPowerReconciliationTestAccess::settle(dialog);
+        check(!TxAppletPowerReconciliationTestAccess::active(dialog)
+            && !f.backend->wire.contains("atu:on") && !f.backend->wire.contains("tune:on"),
+            "route change invalidates native sweep even if Bypass returns before settle");
+    }
+}
 void externalSweep() {
     {
         Fixture f;
@@ -402,6 +419,6 @@ void presentation() {
 int main(int argc,char** argv) {
     TestSettingsProfile profile("kat500-tx-controls"); if(!profile.isValid()) { return 1; }
     QApplication app(argc,argv);
-    routingAndCycle(); cancellationAndFences(); saving(); presentation(); contextMenu(); externalSweep();
+    routingAndCycle(); cancellationAndFences(); saving(); presentation(); contextMenu(); nativeSweepRouteFence(); externalSweep();
     return failures ? 1:0;
 }
