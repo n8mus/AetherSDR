@@ -1,7 +1,6 @@
 #include "gui/Kxpa100Applet.h"
 #include "TestSettingsProfile.h"
 #include "core/ThemeManager.h"
-#include "gui/Kxpa100Applet.h"
 #include "models/Kxpa100Model.h"
 #include <QApplication>
 #include <QCheckBox>
@@ -39,6 +38,8 @@ public:
         CHECK(!widget.findChild<QPushButton*>("kxAntenna3"));
         CHECK(!widget.findChild<QLabel*>("kxFrequency")->text().contains("0 kHz"));
         auto* scroll=widget.findChild<QScrollArea*>("kxScroll"); CHECK(scroll);
+        CHECK(scroll->verticalScrollBar()->maximum() == 0);
+        widget.resize(248,widget.minimumSizeHint().height()); QTest::qWait(10);
         CHECK(scroll->verticalScrollBar()->maximum() == 0);
         const int full=widget.sizeHint().height(); mini->click(); QTest::qWait(10);
         CHECK(widget.sizeHint().height() <= full * 0.60 && !manual->isVisible() && !settings->isVisible());

@@ -890,7 +890,7 @@ QSize Kxpa100Applet::sizeHint() const
 }
 QSize Kxpa100Applet::minimumSizeHint() const
 {
-    return QSize(238, m_mini && m_mini->isChecked() ? 124 : 350);
+    return QSize(238, m_mini && m_mini->isChecked() ? 124 : 376);
 }
 bool Kxpa100Applet::eventFilter(QObject* watched, QEvent* event)
 {

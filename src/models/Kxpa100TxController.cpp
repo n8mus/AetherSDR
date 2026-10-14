@@ -1,19 +1,21 @@
 #include "Kxpa100TxController.h"
 #include "Kxpa100Model.h"
 #include "RadioModel.h"
+#include "SliceModel.h"
 #include <QScopedValueRollback>
 #include <cmath>
 #include <utility>
 
 namespace AetherSDR {
-namespace {
-int frequencyKhz(RadioModel* radio)
+int Kxpa100TxController::effectiveTxFrequencyKhz(RadioModel* radio)
 {
-    if (!radio) { return 0; }
-    const double mhz = radio->transmitModel().transmitFreq();
+    const SliceModel* slice = radio && radio->isConnected() ? radio->txSlice() : nullptr;
+    if (!slice) { return 0; }
+    const double mhz = slice->frequency()
+        + ((slice->mode() == "FM" || slice->mode() == "NFM") ? slice->txOffsetFreq() : 0.0)
+        + (slice->xitOn() ? slice->xitFreq() / 1.0e6 : 0.0);
     return std::isfinite(mhz) && mhz >= 0.001 && mhz < 100.0
         ? static_cast<int>(std::llround(mhz * 1000.0)) : 0;
-}
 }
 Kxpa100TxController::Kxpa100TxController(RadioModel* radio, Kxpa100Model* tuner, QObject* parent)
     : QObject(parent), m_radio(radio), m_tuner(tuner)
@@ -168,12 +170,12 @@ QString Kxpa100TxController::unavailableReason() const
         || m_tuner->fieldAgeMs("^MD") > 5000) { return tr("Waiting for fresh KXPA100 Auto or Manual mode readback."); }
     if (m_tuner->fieldAgeMs("^FL") < 0 || m_tuner->fieldAgeMs("^FL") > 5000) { return tr("Waiting for current fault readback."); }
     if (status.faultCode != 'N') { return tr("Clear the KXPA100 fault before tuning."); }
-    if (!Kxpa100::isSupportedFrequency(frequencyKhz(m_radio))) { return tr("KXPA100 requires a TX frequency from 1800 to 54000 kHz."); }
+    if (!Kxpa100::isSupportedFrequency(effectiveTxFrequencyKhz(m_radio))) { return tr("KXPA100 requires a TX frequency from 1800 to 54000 kHz."); }
     return {};
 }
 bool Kxpa100TxController::matchContextCurrent() const
 {
-    if (!m_tuner || !m_tuner->isResponding() || frequencyKhz(m_radio) != m_frequencyKhz) { return false; }
+    if (!m_tuner || !m_tuner->isResponding() || effectiveTxFrequencyKhz(m_radio) != m_frequencyKhz) { return false; }
     const auto& status = m_tuner->status();
     return status.tunerPresent == true && status.serial == m_matchContext.serial
         && status.mode == m_matchContext.mode && status.antenna == m_matchContext.antenna
@@ -184,7 +186,7 @@ bool Kxpa100TxController::matched() const
 {
     return m_selected && m_completed && m_tuner
         && matchContextCurrent() && m_tuner->status().faultCode == 'N'
-        && m_tuner->status().swr.has_value() && frequencyKhz(m_radio) == m_frequencyKhz;
+        && m_tuner->status().swr.has_value() && effectiveTxFrequencyKhz(m_radio) == m_frequencyKhz;
 }
 bool Kxpa100TxController::originalIntentValid() const
 {
@@ -194,8 +196,9 @@ bool Kxpa100TxController::originalIntentValid() const
     return m_selected && associated() && m_tuner->tunerEligible() && m_radio && m_radio->isConnected() && m_tuner && m_tuner->isResponding()
         && m_tuner->useTxControls() && m_tuner->status().tunerPresent == true
         && m_tuner->status().mode && m_tuner->status().mode != Kxpa100::Mode::Bypass
+        && m_tuner->status().mode == m_mode && m_tuner->status().antenna == m_antenna
         && m_tuner->status().serial == m_serial && m_tuner->status().faultCode == 'N'
-        && frequencyKhz(m_radio) == m_frequencyKhz && m_carrier.valid()
+        && effectiveTxFrequencyKhz(m_radio) == m_frequencyKhz && m_carrier.valid()
         && m_carrier.belongsTo(m_radio);
 }
 void Kxpa100TxController::refresh()
@@ -213,7 +216,7 @@ void Kxpa100TxController::refresh()
         }
     }
     if (m_phase == Phase::Result && (!m_selected || !m_tuner || !m_tuner->isConnected()
-        || m_tuner->status().serial != m_serial || frequencyKhz(m_radio) != m_frequencyKhz)) {
+        || m_tuner->status().serial != m_serial || effectiveTxFrequencyKhz(m_radio) != m_frequencyKhz)) {
         stop(tr("Tune result discarded: matching context changed."), false);
     }
     if (m_phase == Phase::Saving && (!m_selected || !m_tuner || !m_tuner->isConnected())) {
@@ -244,7 +247,9 @@ bool Kxpa100TxController::start(const TxController::Input& carrier)
 {
     if (!unavailableReason().isEmpty() || !carrier.valid() || !carrier.belongsTo(m_radio)) { return false; }
     m_carrier = carrier;
-    m_frequencyKhz = frequencyKhz(m_radio); m_serial = m_tuner->status().serial;
+    m_frequencyKhz = effectiveTxFrequencyKhz(m_radio); m_serial = m_tuner->status().serial;
+    m_antenna = m_tuner->status().antenna;
+    m_mode = m_tuner->status().mode;
     m_completed = false;
     m_searchRequested = false; m_cancelPending = false;
     m_message = tr("Waiting for internal ATU bypass confirmation.");
@@ -340,7 +345,7 @@ bool Kxpa100TxController::saveMatch()
     if (!unavailableReason().isEmpty()) { return false; }
     m_message = tr("Saving the current KXPA100 match.");
     setPhase(Phase::Saving, 15000); m_ownsOperation = true;
-    if (!m_tuner->memorize(frequencyKhz(m_radio))) { stop(tr("KXPA100 save request was refused."), false); return false; }
+    if (!m_tuner->memorize(effectiveTxFrequencyKhz(m_radio))) { stop(tr("KXPA100 save request was refused."), false); return false; }
     return true;
 }
 } // namespace AetherSDR

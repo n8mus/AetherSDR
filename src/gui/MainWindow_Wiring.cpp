@@ -1763,10 +1763,9 @@ bool MainWindow::reattachSliceVisualsToPanadapter(SliceModel* s)
 void MainWindow::refreshTunerPortFrequency()
 {
     if (m_appletPanel && m_appletPanel->kxpa100Applet()) {
-        const double mhz = m_radioModel.transmitModel().transmitFreq();
         m_appletPanel->kxpa100Applet()->setRadioContext(
             m_radioModel.isConnected() ? m_radioModel.nickname() : QString(),
-            std::isfinite(mhz) && mhz > 0 && mhz < 100 ? qRound(mhz * 1000) : 0,
+            Kxpa100TxController::effectiveTxFrequencyKhz(&m_radioModel),
             m_appletPanel->txApplet()->kxpa100Associated());
     }
     // Match the active plan's segments to the KPA's fixed band selectors.

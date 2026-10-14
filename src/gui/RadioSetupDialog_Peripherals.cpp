@@ -1494,7 +1494,7 @@ void RadioSetupDialog::buildKxpa100Device(PeripheralDeviceUi& ui, QWidget* stack
     auto* advancedToggle = new QPushButton(tr("Advanced"), ui.page);
     advancedToggle->setObjectName(QStringLiteral("peripheralAdvanced_kxpa100"));
     advancedToggle->setAccessibleName(tr("KXPA100 advanced maintenance"));
-    advancedToggle->setAccessibleDescription(tr("Configuration backup and restore, stored fault history and all seven configuration categories and stored matches."));
+    advancedToggle->setAccessibleDescription(tr("Antenna configuration, backup and restore, stored fault history and tuner memories."));
     advancedToggle->setCheckable(true);
     auto* advanced = new Kxpa100AdvancedWidget(m_kxpa100, ui.page);
     advanced->hide();

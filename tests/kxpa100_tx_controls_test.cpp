@@ -70,7 +70,8 @@ int main(int argc,char** argv) {
     SliceDelta slice; slice.txSlice=true; slice.mode="USB"; slice.frequency=14.1; slice.panId="0x40000000"; radio.slice(0)->applyChanges(slice);
     radio.transmitModel().setTxModeGetter([] { return QStringLiteral("USB"); });
     radio.transmitModel().setHasTuner(false);
-    TransmitDelta delta; delta.transmitFreq=14.1; delta.tunePower=1; radio.transmitModel().applyChanges(delta);
+    // Host-modulated radios expose the TX slice without Flex's transmit-freq status.
+    TransmitDelta delta; delta.transmitFreq=0; delta.tunePower=1; radio.transmitModel().applyChanges(delta);
     Kxpa100Model k; QList<QByteArray> wire; Kxpa100ModelTest::ready(k,wire);
     Kxpa100TxController routing(&radio,&k);
     CHECK(!routing.selected() && b->wire.isEmpty() && wire.isEmpty());
@@ -127,5 +128,13 @@ int main(int argc,char** argv) {
     CHECK(!routing.selected() && !b->wire.contains("atu:on"));
     CHECK(Kxpa100TxController::dissociate(&radio,&k));
     CHECK(!routing.associated());
+    Kxpa100ModelTest::ready(k,wire);
+    CHECK(Kxpa100TxController::associate(&radio,&k));
+    const int carriersBeforeAntennaChange=b->wire.count("tune:on");
+    CHECK(routing.start(input->capture(TxController::Activity::Tune)));
+    Kxpa100ModelTest::preflight(k); Kxpa100ModelTest::step(k,"^BN05;");
+    Kxpa100ModelTest::step(k,"^TP0;"); Kxpa100ModelTest::step(k,"^MDA;");
+    Kxpa100ModelTest::step(k,"^AN1;");
+    CHECK(!routing.busy() && b->wire.count("tune:on")==carriersBeforeAntennaChange);
     return 0;
 }

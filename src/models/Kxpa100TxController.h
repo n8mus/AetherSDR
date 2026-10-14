@@ -19,6 +19,7 @@ public:
     ~Kxpa100TxController() override;
     static bool associate(RadioModel* radio, Kxpa100Model* tuner);
     static bool dissociate(RadioModel* radio, Kxpa100Model* tuner);
+    static int effectiveTxFrequencyKhz(RadioModel* radio);
     bool associated() const;
     bool selected() const { return m_selected; }
     bool busy() const { return m_phase != Phase::Idle; }
@@ -65,6 +66,8 @@ private:
     bool m_cancelPending{false};
     bool m_completed{false};
     int m_frequencyKhz{0};
+    std::optional<int> m_antenna;
+    std::optional<Kxpa100::Mode> m_mode;
     QString m_serial;
     QString m_boundFamily, m_boundRadio, m_boundSerial;
     bool m_loadingPreferences = false;
