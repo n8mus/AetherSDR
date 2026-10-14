@@ -75,6 +75,7 @@ public:
     QString debugText() const { return m_debug.join(QLatin1Char('\n')); }
     void clearDebug() { m_debug.clear(); emit debugChanged(); }
 signals:
+    void associationChanged();
     void connected();
     void disconnected();
     void connectionFailed(const QString& reason);

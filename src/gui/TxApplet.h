@@ -20,6 +20,8 @@ class BandPlanManager;
 class RadioModel;
 class TransmitModel;
 class TunerModel;
+class Kxpa100Model;
+class Kxpa100TxController;
 class Kat500Model;
 class Kat500TxController;
 
@@ -31,6 +33,8 @@ class TxApplet : public QWidget {
 public:
     explicit TxApplet(QWidget* parent = nullptr);
     ~TxApplet() override;
+    void setKxpa100Model(Kxpa100Model* model);
+    bool kxpa100Associated() const;
     void setKat500Model(Kat500Model* model);
 
     void setTransmitModel(TransmitModel* model);
@@ -67,7 +71,10 @@ private:
     TxController::Input localTxInput(TxController::Activity activity);
     void requestTune(bool on, const TxController::Input& input);
     void requestMox(bool on, const TxController::Input& input);
-    void requestAtu(const TxController::Input& input, bool external);
+    enum class AtuRoute { Radio, Kat500, Kxpa100 };
+    AtuRoute atuRoute() const;
+    void requestAtu(const TxController::Input& input, AtuRoute route);
+    void rebuildKxpa100Routing();
     void rebuildKat500Routing();
     void confirmAndClearKat500Memories();
     void syncFromModel();
@@ -89,6 +96,8 @@ private:
     // and the radio reverts to single_tone on its own across power cycles.
     void showTuneContextMenu(const QPoint& pos);
 
+    QPointer<Kxpa100Model> m_kxpa100;
+    std::unique_ptr<Kxpa100TxController> m_kxTx;
     QPointer<Kat500Model> m_kat500;
     std::unique_ptr<Kat500TxController> m_katTx;
     TransmitModel* m_model{nullptr};

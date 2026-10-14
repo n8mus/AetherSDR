@@ -21,7 +21,9 @@ int main()
     CHECK(applyStatus("^PC0023", s) && s.drainAmps == 2.3);
     CHECK(applyStatus("^SV13287", s) && s.supplyVolts == 13.287);
     CHECK(applyStatus("^TM0315", s) && s.temperatureC == 31.5);
-    CHECK(applyStatus("^SW01.3", s) && s.swr == 1.3);
+    CHECK(applyStatus("^SW010", s) && s.swr == 1.0);
+    CHECK(applyStatus("^SW013", s) && s.swr == 1.3);
+    CHECK(!applyStatus("^SW01.3", s) && !applyStatus("^SW009", s));
     CHECK(applyStatus("^SB012", s) && s.bypassSwr == 1.2);
     CHECK(applyStatus("^F14074", s) && s.frequencyKhz == 14074);
     CHECK(applyStatus("^FLP01234", s) && s.faultCode == 'P' && s.faultDetail == 123.4);

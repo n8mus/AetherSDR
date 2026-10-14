@@ -2,7 +2,7 @@
 
 namespace AetherSDR {
 
-enum class SharedTxMeterSource { Radio, Amplifier, RadioKeyBlocked };
+enum class SharedTxMeterSource { Radio, Amplifier, RadioKeyBlocked, Kxpa100 };
 
 struct SharedTxMeterSelection {
     SharedTxMeterSource source{SharedTxMeterSource::Radio};

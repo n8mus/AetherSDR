@@ -90,11 +90,9 @@ bool applyStatus(const QByteArray& frame, Status& status)
         }
     }
     if (frame.startsWith("^SW")) {
-        static const QRegularExpression pattern(QStringLiteral("^\\^SW[0-9]{2}\\.[0-9]$"));
-        if (!pattern.match(QString::fromLatin1(frame)).hasMatch()) { return false; }
-        const double value = frame.mid(3).toDouble();
-        if (value < 1.0) { return false; }
-        status.swr = value; return true;
+        const auto value = number(frame.mid(3), 3, 10, 999);
+        if (!value) { return false; }
+        status.swr = *value / 10.0; return true;
     }
     if (frame.size() == 4 && frame.startsWith("^AD") && QByteArray("DFIJNV").contains(frame[3])) {
         status.attenuatorReason = frame[3]; return true;

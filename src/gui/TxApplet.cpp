@@ -9,6 +9,8 @@
 #include "models/RadioModel.h"
 #include "models/TransmitModel.h"
 #include "models/TunerModel.h"
+#include "models/Kxpa100Model.h"
+#include "models/Kxpa100TxController.h"
 #include "models/Kat500Model.h"
 #include "models/Kat500TxController.h"
 
@@ -131,6 +133,33 @@ TxApplet::TxApplet(QWidget* parent)
 
 TxApplet::~TxApplet() = default;
 
+bool TxApplet::kxpa100Associated() const { return m_kxTx && m_kxTx->associated(); }
+TxApplet::AtuRoute TxApplet::atuRoute() const
+{
+    if (m_kxTx && (m_kxTx->selected() || m_kxTx->busy())) { return AtuRoute::Kxpa100; }
+    if (m_katTx && (m_katTx->selected() || m_katTx->busy())) { return AtuRoute::Kat500; }
+    return AtuRoute::Radio;
+}
+void TxApplet::setKxpa100Model(Kxpa100Model* model)
+{
+    if (m_kxpa100 == model) { return; }
+    m_kxpa100 = model;
+    rebuildKxpa100Routing();
+}
+void TxApplet::rebuildKxpa100Routing()
+{
+    m_kxTx.reset();
+    if (m_radioModel && m_kxpa100) {
+        m_kxTx = std::make_unique<Kxpa100TxController>(m_radioModel, m_kxpa100);
+        connect(m_kxTx.get(), &Kxpa100TxController::changed, this, [this] {
+            if (kxpa100Associated() && m_katTx) { m_katTx.reset(); }
+            else if (!kxpa100Associated() && !m_katTx && m_kat500) { rebuildKat500Routing(); }
+            updateAtuAvailability(); syncAtuIndicators();
+        });
+    }
+    rebuildKat500Routing();
+}
+
 void TxApplet::setKat500Model(Kat500Model* model)
 {
     if (m_kat500 == model) { return; }
@@ -144,7 +173,7 @@ void TxApplet::rebuildKat500Routing()
         m_preTuneDialog = nullptr;
     }
     m_katTx.reset();
-    if (m_radioModel && m_kat500) {
+    if (m_radioModel && m_kat500 && !kxpa100Associated()) {
         m_katTx = std::make_unique<Kat500TxController>(m_radioModel, m_kat500);
         connect(m_katTx.get(), &Kat500TxController::changed, this, [this] {
             updateAtuAvailability();
@@ -385,14 +414,14 @@ void TxApplet::buildUI()
 
     // ── Slider → label + command connections ────────────────────────────────
     connect(m_rfPowerSlider, &QSlider::valueChanged, this, [this](int v) {
-        m_rfPowerLabel->setText(powerText(v, m_katTx && m_katTx->selected()));
+        m_rfPowerLabel->setText(powerText(v, atuRoute() != AtuRoute::Radio));
         if (!m_updatingFromModel && m_model)
             m_model->setRfPower(v);
     });
     connect(m_rfPowerSlider, &QSlider::sliderReleased,
             this, &TxApplet::syncFromModel);
     connect(m_tunePowerSlider, &QSlider::valueChanged, this, [this](int v) {
-        m_tunePowerLabel->setText(powerText(v, m_katTx && m_katTx->selected()));
+        m_tunePowerLabel->setText(powerText(v, atuRoute() != AtuRoute::Radio));
         if (!m_updatingFromModel && m_model)
             m_model->setTunePower(v);
     });
@@ -432,8 +461,9 @@ void TxApplet::buildUI()
     //     prior status was Successful/OK
     // Mirrors SmartSDR's per-frequency toggle. (#1993)
     connect(m_atuBtn, &QPushButton::clicked, this, [this]() {
-        const bool external = m_katTx && (m_katTx->selected() || m_katTx->busy());
-        requestAtu(localTxInput(external ? TxController::Activity::Tune : TxController::Activity::Atu), external);
+        const AtuRoute route = atuRoute();
+        const bool external = route != AtuRoute::Radio;
+        requestAtu(localTxInput(external ? TxController::Activity::Tune : TxController::Activity::Atu), route);
     });
 
     // MEM requests a change; its checked state follows radio readback. Any
@@ -442,7 +472,7 @@ void TxApplet::buildUI()
     // readback sync sets the check under a QSignalBlocker, so it never lands
     // here.
     connect(m_memBtn, &QPushButton::toggled, this, [this] {
-        if (m_katTx && m_katTx->selected()) { return; }
+        if (atuRoute() != AtuRoute::Radio) { return; }
         {
             const QSignalBlocker blocker(m_memBtn);
             m_memBtn->setChecked(m_model && m_model->memoriesEnabled());
@@ -453,7 +483,8 @@ void TxApplet::buildUI()
         m_model->setAtuMemories(!m_model->memoriesEnabled());
     });
     connect(m_memBtn, &QPushButton::clicked, this, [this] {
-        if (m_katTx && m_katTx->selected()) { m_katTx->saveMatch(); }
+        if (m_kxTx && m_kxTx->selected()) { m_kxTx->saveMatch(); }
+        else if (m_katTx && m_katTx->selected()) { m_katTx->saveMatch(); }
     });
     configureTxActions();
 }
@@ -511,9 +542,15 @@ void TxApplet::requestMox(bool on, const TxController::Input& input)
     }
 }
 
-void TxApplet::requestAtu(const TxController::Input& input, bool external)
+void TxApplet::requestAtu(const TxController::Input& input, AtuRoute route)
 {
-    if (external) {
+    if (route != atuRoute()) { return; }
+    if (route == AtuRoute::Kxpa100) {
+        if (m_kxTx->busy()) { m_kxTx->cancel(); }
+        else if (!m_tgxlOperate) { m_kxTx->start(input); }
+        return;
+    }
+    if (route == AtuRoute::Kat500) {
         if (!m_katTx) { return; }
         if (m_katTx->busy()) { m_katTx->cancel(); }
         else if (m_katTx->selected() && !m_tgxlOperate) { m_katTx->start(input); }
@@ -577,9 +614,10 @@ void TxApplet::configureTxActions()
             || (action != QLatin1String("click") && action != QLatin1String("toggle"))) {
             return {};
         }
-        const bool external = m_katTx && (m_katTx->selected() || m_katTx->busy());
+        const AtuRoute route = atuRoute();
+        const bool external = route != AtuRoute::Radio;
         const TxController::Input input = controller->capture(external ? TxController::Activity::Tune : TxController::Activity::Atu);
-        return [this, input, external] { requestAtu(input, external); };
+        return [this, input, route] { requestAtu(input, route); };
     });
 }
 
@@ -692,8 +730,39 @@ void TxApplet::setTransmitModel(TransmitModel* model)
 
 void TxApplet::updateAtuAvailability()
 {
-    if (!m_atuBtn || !m_memBtn)
+    if (!m_atuBtn || !m_memBtn) {
         return;
+    }
+    if (m_kxTx && (m_kxTx->selected() || m_kxTx->busy())) {
+        const bool external = m_kxTx->selected();
+        const bool busy = m_kxTx->busy();
+        m_rfPowerLabel->setText(powerText(m_model ? m_model->rfPower() : m_rfPowerSlider->value(), external));
+        m_tunePowerLabel->setText(powerText(m_model ? m_model->tunePower() : m_tunePowerSlider->value(), external));
+        const QString reason = m_tgxlOperate ? tr("Disabled — TGXL is in OPERATE mode") : m_kxTx->unavailableReason();
+        const QString action = busy ? tr("Cancel the KXPA100 operation and stop its tune carrier")
+            : tr("Start a fresh KXPA100 tune using the radio Tune Pwr setting; keep the current tuner mode");
+        m_atuBtn->setEnabled(busy || reason.isEmpty());
+        m_atuBtn->setText(busy ? tr("CANCEL") : m_kxpa100->status().mode == Kxpa100::Mode::Auto ? tr("AUTO") : tr("ATU"));
+        m_atuBtn->setToolTip(reason.isEmpty() ? action : reason);
+        m_atuBtn->setAccessibleDescription(reason.isEmpty() ? action : reason);
+        m_atuBtn->setContextMenuPolicy(Qt::NoContextMenu);
+        m_memBtn->setText(tr("SAVE"));
+        const QSignalBlocker blocker(m_memBtn);
+        m_memBtn->setCheckable(false);
+        m_memBtn->setEnabled(!busy && reason.isEmpty());
+        const QString saveTip = reason.isEmpty() ? tr("Save the current KXPA100 match for the TX frequency and selected antenna") : reason;
+        m_memBtn->setToolTip(saveTip);
+        m_memBtn->setAccessibleDescription(saveTip);
+        const bool automatic = m_kxpa100 && m_kxpa100->status().mode == Kxpa100::Mode::Auto;
+        const QString background = automatic ? "color.accessory.key.standby.background"
+            : m_kxTx->matched() ? "color.accessory.key.meffa.active.background" : "color.background.2";
+        const QString foreground = automatic ? "color.accessory.key.standby.foreground"
+            : m_kxTx->matched() ? "color.accessory.key.meffa.active.foreground" : "color.text.primary";
+        ThemeManager::instance().applyStyleSheet(m_atuBtn,
+            QString("QPushButton { background: {{%1}}; color: {{%2}}; border: 1px solid {{%2}}; border-radius: 3px; font-size: 10px; font-weight: bold; padding: 2px; }"
+                    "QPushButton:disabled { background: {{color.background.2}}; color: {{color.text.disabled}}; border-color: {{color.canon.lineHi}}; }").arg(background, foreground));
+        return;
+    }
     const bool external = m_katTx && m_katTx->selected();
     const bool busy = m_katTx && m_katTx->busy();
     m_rfPowerLabel->setText(powerText(m_model ? m_model->rfPower() : m_rfPowerSlider->value(), external));
@@ -784,13 +853,13 @@ void TxApplet::syncFromModel()
         && m_rfPowerSlider->value() != m_model->rfPower()) {
         m_rfPowerSlider->setValue(m_model->rfPower());
     }
-    m_rfPowerLabel->setText(powerText(m_model->rfPower(), m_katTx && m_katTx->selected()));
+    m_rfPowerLabel->setText(powerText(m_model->rfPower(), atuRoute() != AtuRoute::Radio));
 
     if (!m_tunePowerSlider->isSliderDown()
         && m_tunePowerSlider->value() != m_model->tunePower()) {
         m_tunePowerSlider->setValue(m_model->tunePower());
     }
-    m_tunePowerLabel->setText(powerText(m_model->tunePower(), m_katTx && m_katTx->selected()));
+    m_tunePowerLabel->setText(powerText(m_model->tunePower(), atuRoute() != AtuRoute::Radio));
 
     // Active profile — update combo selection
     if (!m_model->activeProfile().isEmpty()) {
@@ -819,8 +888,24 @@ void TxApplet::syncAtuIndicators()
         m_atuTunedFreqMhz = -1.0;
     }
 
-    const bool external = m_katTx && m_katTx->selected();
-    if (external) {
+    if (m_kxTx && m_kxTx->selected()) {
+        const bool responding = m_kxpa100 && m_kxpa100->isResponding();
+        setIndicatorState(m_successInd, indicatorState(responding, m_kxTx->matched()), ThemeManager::instance().color("color.accent.success"));
+        setIndicatorState(m_bypInd, indicatorState(responding, m_kxpa100->status().bypassed == true), ThemeManager::instance().color("color.accent.warning"));
+        m_memInd->setText(tr("KXPA100"));
+        m_memInd->setEnabled(responding);
+        const bool keyBlocked = !m_kxpa100->amplifierMeterEligible();
+        const QString meterTip = keyBlocked
+            ? tr("KXPA100 PA output is unavailable or bypassed. Shared power meters show radio watts and the radio scale; the KXPA100 applet keeps device readings.")
+            : tr("TX Controls use KXPA100. Shared power meters show its amplifier output; the TX Controls SWR meter measures the radio.");
+        m_memInd->setToolTip(meterTip + "\n" + m_kxTx->message());
+        m_memInd->setAccessibleDescription(m_memInd->toolTip());
+        ThemeManager::instance().applyStyleSheet(m_memInd,
+            QStringLiteral("QLabel { background: {{color.canon.nested}}; color: %1; border: 1px solid {{color.canon.lineHi}}; border-radius: 3px; padding: 2px 3px; font-size: 9px; font-weight: bold; }"
+            "QLabel:disabled { color: {{color.text.disabled}}; }")
+                .arg(keyBlocked ? QStringLiteral("{{color.accent.warning}}")
+                                : QStringLiteral("{{color.accent.success}}")));
+    } else if (m_katTx && m_katTx->selected()) {
         const bool responding = m_kat500 && m_kat500->isResponding();
         setIndicatorState(m_successInd, indicatorState(responding, m_katTx->matched()), ThemeManager::instance().color("color.accent.success"));
         setIndicatorState(m_bypInd, indicatorState(responding, m_kat500->status().bypassed == true), ThemeManager::instance().color("color.accent.warning"));
@@ -874,7 +959,7 @@ void TxApplet::syncAtuIndicators()
     {
         m_updatingFromModel = true;
         const QSignalBlocker blocker(m_memBtn);
-        m_memBtn->setChecked(!external && m_model->memoriesEnabled());
+        m_memBtn->setChecked(atuRoute() == AtuRoute::Radio && m_model->memoriesEnabled());
         m_updatingFromModel = false;
     }
 }
@@ -935,7 +1020,7 @@ void TxApplet::setRadioModel(RadioModel* radio)
     }
     m_txController.reset();
     m_radioModel = radio;
-    rebuildKat500Routing();
+    rebuildKxpa100Routing();
     m_forwardPowerRequiresSmoothing = !radio || !radio->isConnected()
         || radio->backendCapabilities().forwardPowerRequiresSmoothing;
     m_forwardPowerScaleFollowsBandRating = radio && radio->isConnected()

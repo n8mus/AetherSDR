@@ -94,6 +94,7 @@
 #include "core/VkampConnection.h"
 #include "core/Kpa500Connection.h"
 #include "models/Kat500Model.h"
+#include "models/Kxpa100Model.h"
 #include "core/Kpa1500Connection.h"
 #include "core/DxccColorProvider.h"
 
@@ -1321,6 +1322,7 @@ private:
     SpeConnection     m_speConn;         // SPE Expert amplifier, serial or ser2net
     VkampConnection   m_vkampConn;       // VK3AMP amplifier, TCP control/status + UDP telemetry
     Kat500Model      m_kat500Model;
+    Kxpa100Model      m_kxpa100Model;
     Kpa500Connection  m_kpa500Conn;      // Elecraft KPA500 amplifier, serial or raw TCP
     Kpa1500Connection m_kpa1500Conn;     // Elecraft KPA1500 amplifier, TCP control/status on port 1500 (#4097)
     BandPlanManager*  m_bandPlanMgr{nullptr};

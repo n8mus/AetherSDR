@@ -401,7 +401,7 @@ QString Kxpa100AdvancedWidget::restoreReason() const
         return tr("Choose a complete validated .KXPAConfig backup first.");
     }
     if (m_backup->firmware != m_model->status().firmware || m_backup->serial != m_model->status().serial) {
-        return tr("Backup firmware and serial must match this tuner.");
+        return tr("Backup firmware and serial must match this amplifier.");
     }
     return {};
 }
