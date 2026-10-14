@@ -46,7 +46,9 @@ Kxpa100TxController::Kxpa100TxController(RadioModel* radio, Kxpa100Model* tuner,
         connect(tuner, &Kxpa100Model::telemetryReceived, this, [this](const QString& command) { telemetry(command); });
         connect(tuner, &Kxpa100Model::disconnected, this, [this] {
             m_completed = false;
-            stop(tr("KXPA100 disconnected; carrier stopped."), false);
+            stop(m_searchRequested
+                ? tr("KXPA100 disconnected; carrier stopped. Tuner cancellation is unconfirmed; reconnect and cancel before supplying RF.")
+                : tr("KXPA100 disconnected; carrier stopped."), false);
             emit tunerDisconnected();
         });
     }
@@ -321,7 +323,9 @@ void Kxpa100TxController::stop(const QString& reason, bool cancelSearch)
     m_phase = Phase::Idle; m_deadline.stop(); m_message = reason;
     const auto carrier = std::exchange(m_carrier, {});
     carrier.stop();
-    if (owns && m_tuner) { m_tuner->cancelOperation(); }
+    // Drain an already-sent start acknowledgement before sending the stop. Closing
+    // this unnumbered command stream would leave the physical search armed.
+    if (owns && m_tuner && !(cancelSearch && search)) { m_tuner->cancelOperation(); }
     m_cancelPending = cancelSearch && search && m_tuner && m_tuner->isConnected();
     if (m_cancelPending) { setPhase(Phase::Cancelling, 5000); pollCancellation(); }
     else { m_searchRequested = false; }

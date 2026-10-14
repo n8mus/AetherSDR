@@ -32,6 +32,7 @@ public:
     static void frame(Kxpa100Model& k,const QByteArray& reply) { k.receiveBytes(reply); }
     static void observe(Kxpa100Model& k,const QByteArray& query,const QByteArray& reply) { k.query(query); step(k,reply); }
     static void step(Kxpa100Model& k,const QByteArray& reply) { k.tick(); k.receiveBytes(reply); }
+    static void sendNext(Kxpa100Model& k) { k.tick(); }
     static void preflight(Kxpa100Model& k) {
         for (const QByteArray& s : {QByteArray("^IKXPA100;"),QByteArray("^RV01.39;"),QByteArray("^SN00031;"),QByteArray("^TP0;"),QByteArray("^PI0000;"),QByteArray("^PF0000;")}) { step(k,s); }
     }
@@ -153,5 +154,18 @@ int main(int argc,char** argv) {
     Kxpa100ModelTest::step(k,"^DM F14100 BN05 BIN040 FR14100-14119\r\nAN1 EMPTY\r\nAN2 BYN SIT CR00 LR00;");
     CHECK(wire.count("^SM14100;^DM14100;")==savesBeforeQsy);
     CHECK(!routing.busy());
+    qsy.frequency=14.1; radio.slice(0)->applyChanges(qsy);
+    const int carriersBeforePendingCancel=b->wire.count("tune:on");
+    CHECK(routing.start(input->capture(TxController::Activity::Tune)));
+    Kxpa100ModelTest::preflight(k); Kxpa100ModelTest::step(k,"^BN05;"); Kxpa100ModelTest::match(k);
+    Kxpa100ModelTest::preflight(k);
+    Kxpa100ModelTest::sendNext(k);
+    CHECK(wire.last()=="^FT;^TP;");
+    routing.cancel();
+    CHECK(k.isConnected() && routing.busy());
+    Kxpa100ModelTest::frame(k,"^TP1;");
+    Kxpa100ModelTest::step(k,"^TP0;");
+    CHECK(wire.last()=="^FE;^TP;" && k.status().tuning==false && !routing.busy());
+    CHECK(b->wire.count("tune:on")==carriersBeforePendingCancel);
     return 0;
 }
