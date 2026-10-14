@@ -36,7 +36,7 @@ Kat500TxController::Kat500TxController(RadioModel* radio, Kat500Model* tuner, QO
         connect(tuner, &Kat500Model::availabilityChanged, this, &Kat500TxController::refresh);
         connect(tuner, &Kat500Model::operationFinished, this, &Kat500TxController::operationFinished);
         connect(tuner, &Kat500Model::operationFailed, this, [this](const QString& reason) {
-            if (m_ownsOperation) { stop(reason, m_phase != Phase::Saving && m_phase != Phase::Result && m_phase != Phase::Cancelling); }
+            if (m_ownsOperation) { stop(reason, m_phase != Phase::Result && m_phase != Phase::Cancelling); }
         });
         connect(tuner, &Kat500Model::telemetryReceived, this, [this](const QString& command) { telemetry(command); });
         connect(tuner, &Kat500Model::disconnected, this, [this] {
@@ -143,7 +143,7 @@ void Kat500TxController::refresh()
     }
     if (m_completed && !matchContextCurrent()) { m_completed = false; }
     if (previouslySelected != m_selected) { m_bypassRequested = false; m_completed = false; }
-    if (busy() && m_phase != Phase::Cancelling && m_phase != Phase::Saving && m_phase != Phase::Result) {
+    if (busy() && m_phase != Phase::Cancelling && m_phase != Phase::Result) {
         if (!originalIntentValid() || (m_phase == Phase::Carrier &&
             (!m_radio->transmitModel().isTuning() || !internalBypassed()))) {
             stop(tr("Tune canceled: device, radio, frequency or input authorization changed."), true);
@@ -152,9 +152,6 @@ void Kat500TxController::refresh()
     if (m_phase == Phase::Result && (!m_selected || !m_tuner || !m_tuner->isConnected()
         || m_tuner->status().serial != m_serial || frequencyKhz(m_radio) != m_frequencyKhz)) {
         stop(tr("Tune result discarded: matching context changed."), false);
-    }
-    if (m_phase == Phase::Saving && (!m_selected || !m_tuner || !m_tuner->isConnected())) {
-        stop(tr("Saving canceled: tuner selection changed."), false);
     }
     ensureBypass();
     if (m_phase == Phase::Bypass && internalBypassed()) { recallFrequency(); }
@@ -231,7 +228,6 @@ void Kat500TxController::operationFinished()
         publish();
         break;
     case Phase::Cancelling: m_searchRequested = false; stop(tr("KAT500 tune canceled."), false); break;
-    case Phase::Saving: stop(tr("KAT500 match saved and verified."), false); break;
     default: break;
     }
 }
@@ -271,13 +267,5 @@ void Kat500TxController::cancel()
 {
     if (m_phase == Phase::Cancelling) { return; }
     stop(tr("Tune canceled; carrier stopped."), true);
-}
-bool Kat500TxController::saveMatch()
-{
-    if (!unavailableReason().isEmpty()) { return false; }
-    m_message = tr("Saving the current KAT500 match.");
-    setPhase(Phase::Saving, 15000); m_ownsOperation = true;
-    if (!m_tuner->memorize(frequencyKhz(m_radio))) { stop(tr("KAT500 save request was refused."), false); return false; }
-    return true;
 }
 } // namespace AetherSDR

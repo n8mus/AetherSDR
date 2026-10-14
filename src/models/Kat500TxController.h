@@ -23,7 +23,6 @@ public:
     QString unavailableReason() const;
     QString message() const { return m_message; }
     bool start(const TxController::Input& carrier);
-    bool saveMatch();
     void cancel();
 
 signals:
@@ -31,7 +30,7 @@ signals:
     void tunerDisconnected();
 
 private:
-    enum class Phase { Idle, Bypass, Frequency, Search, Carrier, Result, Cancelling, Saving };
+    enum class Phase { Idle, Bypass, Frequency, Search, Carrier, Result, Cancelling };
     void refresh();
     void publish();
     bool matchContextCurrent() const;
