@@ -14,6 +14,43 @@ using namespace AetherSDR::Kat500;
 namespace AetherSDR {
 class Kat500ModelTest {
 public:
+static int keyBlockReadback() {
+    Kat500Model model;
+    qint64 now = 100;
+    model.m_timer.stop();
+    model.m_now = [&] { return now; };
+    model.m_write = [](const QByteArray&) { return true; };
+    model.m_connected = true;
+    model.m_detected = true;
+    model.m_lastReply = model.m_lastIo = now;
+    model.m_nextPoll = 60000;
+    model.m_status.identity = "KAT500";
+    model.m_status.powerOn = true;
+    model.m_status.tuning = false;
+    model.m_status.forwardAdc = 0;
+    model.m_received["TP"] = model.m_received["VFWD"] = now;
+    CHECK(!model.ampKeyBlockConfirmed());
+    CHECK(model.setAmpKeyInterrupted(true));
+    model.tick();
+    CHECK(!model.ampKeyBlockConfirmed()); // Sending a request is not confirmation.
+    model.receiveBytes("AMPI1;");
+    CHECK(model.ampKeyBlockConfirmed());
+    now += 5001;
+    model.m_lastReply = model.m_lastIo = now; // Other replies cannot freshen AMPI.
+    CHECK(!model.ampKeyBlockConfirmed());
+    model.query("AMPI;"); model.tick(); model.receiveBytes("AMPI1;");
+    CHECK(model.ampKeyBlockConfirmed());
+    model.query("AMPI;"); model.tick(); model.receiveBytes("AMPI0;");
+    CHECK(!model.ampKeyBlockConfirmed());
+    model.query("AMPI;"); model.tick(); model.receiveBytes("AMPI1;");
+    CHECK(model.ampKeyBlockConfirmed());
+    model.m_status.powerOn = false;
+    CHECK(!model.ampKeyBlockConfirmed());
+    model.m_status.powerOn = true;
+    model.transportClosed();
+    CHECK(!model.ampKeyBlockConfirmed());
+    return 0;
+}
 static int settlingReadback() {
  Kat500Model model; qint64 now=0; QList<QByteArray> wire;
  model.m_now=[&]{return now;}; model.m_write=[&](const QByteArray& bytes){wire.append(bytes);return true;};
@@ -278,7 +315,7 @@ static int ordinaryPollLatencyKeepsSafetyFresh()
     Peer peer;
     const QMap<QByteArray,QByteArray> extra{
         {"VRFL;","VRFL0;"}, {"VSWR;","VSWR1.00;"}, {"VSWRB;","VSWRB1.00;"},
-        {"F;","F14074;"}, {"BN;","BN5;"}, {"MD;","MDA;"}, {"AMPI;","AMPI0;"},
+        {"F;","F14074;"}, {"BN;","BN5;"}, {"MD;","MDA;"}, {"AMPI;","AMPI1;"},
         {"ATTN;","ATTN0;"}, {"FLT;","FLT0;"}, {"FY;","FY 14060-14079;"},
         {"FC;","FC14074;"}, {"FX;","FX14074;"}};
     const auto transport = peer.model.m_write;
@@ -295,11 +332,12 @@ static int ordinaryPollLatencyKeepsSafetyFresh()
             else { transport(request); }
         }
         CHECK(peer.model.unavailableReason(true).isEmpty());
-        for (const QString& field : {QStringLiteral("VSWR"), QStringLiteral("VRFL")}) {
+        for (const QString& field : {QStringLiteral("VSWR"), QStringLiteral("VRFL"), QStringLiteral("AMPI")}) {
             CHECK(peer.model.fieldAgeMs(field) <= 5000);
             CHECK(peer.now < 5000 || peer.model.fieldAgeMs(field) >= 0);
         }
     }
+    CHECK(peer.model.ampKeyBlockConfirmed());
     CHECK(peer.wire.count("SN;") >= 3); // Background round-robin is not starved.
     peer.rf = true;
     for (int i = 0; i < 35; ++i) {
@@ -559,7 +597,7 @@ static int run()
     model.transportOpened(); model.m_timer.stop(); sent.clear();
     CHECK(next() == ";"); CHECK(!sent.contains("MDM;MD;"));
     model.transportClosed();
-    const int failures = rejectUnsupportedMemoryFrequency() | followDoesNotRetryAdmittedIntent() | lateEepromRepliesStopRestore(false) | lateEepromRepliesStopRestore(true) |
+    const int failures = keyBlockReadback() | rejectUnsupportedMemoryFrequency() | followDoesNotRetryAdmittedIntent() | lateEepromRepliesStopRestore(false) | lateEepromRepliesStopRestore(true) |
         lateMemoryTerminatorCannotPublish() | antennaPermissionsLoadWhilePolling() | ordinaryPollLatencyKeepsSafetyFresh() | settlingReadback() | rejectNewUnsafeReadback() | doNotExposeFailedBackup() |
         cancelResetDuringDiagnostic() | canceledMemoryDrainsWithoutTelemetry();
     return failures ? 1 : stateful();

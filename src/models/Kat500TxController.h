@@ -64,7 +64,7 @@ private:
     QString m_message;
     Kat500::Status m_matchContext;
     using Presentation = std::tuple<bool, bool, bool, bool, std::optional<Kat500::Mode>,
-                                    std::optional<bool>, QString, QString>;
+                                    std::optional<bool>, bool, QString, QString>;
     std::optional<Presentation> m_presentation;
 };
 } // namespace AetherSDR

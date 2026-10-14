@@ -113,6 +113,13 @@ void Kat500Model::transportClosed(const QString& reason)
     if (m_autoReconnect && !m_deliberateDisconnect) { m_reconnectTimer.start(); }
 }
 bool Kat500Model::isResponding() const { return m_connected && m_now() - m_lastReply <= 5000; }
+bool Kat500Model::ampKeyBlockConfirmed() const
+{
+    const qint64 age = fieldAgeMs(QStringLiteral("AMPI"));
+    return m_detected && isResponding() && m_status.identity == QStringLiteral("KAT500")
+        && m_status.powerOn.value_or(false) && m_status.ampKeyInterrupted.value_or(false)
+        && age >= 0 && age <= 5000;
+}
 QString Kat500Model::description() const
 {
     return m_network ? QStringLiteral("NETWORK %1:%2 (bridge controls baud)").arg(m_host).arg(m_port)
@@ -233,6 +240,8 @@ void Kat500Model::tick()
                 query("TP;");
             } else if (forwardAge < 0 || forwardAge >= 1500) {
                 query("VFWD;");
+            } else if (fieldAgeMs(QStringLiteral("AMPI")) < 0 || fieldAgeMs(QStringLiteral("AMPI")) >= 3000) {
+                query("AMPI;");
             } else if (fieldAgeMs(QStringLiteral("VSWR")) < 0 || fieldAgeMs(QStringLiteral("VSWR")) >= 3000) {
                 query("VSWR;");
             } else if (fieldAgeMs(QStringLiteral("VRFL")) < 0 || fieldAgeMs(QStringLiteral("VRFL")) >= 3000) {

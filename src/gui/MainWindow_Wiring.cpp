@@ -6432,6 +6432,20 @@ void MainWindow::wireModemAudioCompletion()
     });
 }
 
+SharedTxMeterSelection MainWindow::sharedTxMeterSelection()
+{
+    int maxWatts = m_radioModel.transmitModel().maxPowerLevel();
+    if (m_radioModel.model().startsWith("AU-") && maxWatts <= 100) {
+        maxWatts = 500;
+    }
+    const bool amplifierActive = m_radioModel.amplifier().present()
+        && m_radioModel.amplifier().operate();
+    const bool kpa500Active = m_kpa500Conn.isConnected() && m_kpa500Conn.isResponding()
+        && m_kpa500Conn.lastStatus().operate.value_or(false);
+    return selectSharedTxMeters(maxWatts, amplifierActive, kpa500Active,
+                                m_kat500Model.ampKeyBlockConfirmed());
+}
+
 // One owner for amplifier TX meters on the shared readouts (S-Meter,
 // cross-needle, TMate2). The radio relay and port-9008 status agree within
 // 0.05 dB but run at different rates (meter packets vs 5 Hz poll), so the relay
@@ -6439,6 +6453,9 @@ void MainWindow::wireModemAudioCompletion()
 // S-Meter would jitter between them.
 void MainWindow::applyAmpTxMeters(float watts, float swr, bool fromRelay)
 {
+    if (sharedTxMeterSelection().source != SharedTxMeterSource::Amplifier) {
+        return;
+    }
     if (fromRelay) {
         m_ampRelayTxStamp.restart();
     } else if (m_ampRelayTxStamp.isValid()
@@ -6508,11 +6525,9 @@ void MainWindow::wireMeters()
     // (~100 W) and amp (~1500 W) values race into the same widget. (#2927)
     connect(&m_radioModel.meterModel(), &MeterModel::txMetersChanged,
             this, [this](float fwd, float swr, bool swrValid) {
-        if ((m_radioModel.amplifier().present() && m_radioModel.amplifier().operate())
-            || (m_kpa500Conn.isConnected()
-                && m_kpa500Conn.isResponding()
-                && m_kpa500Conn.lastStatus().operate.value_or(false)))
+        if (sharedTxMeterSelection().source == SharedTxMeterSource::Amplifier) {
             return;
+        }
         // Absent SWR is forwarded as 1.0: RadioSwrValidityFilter downstream
         // reads <1.0 WITH forward power as the radio's over-range sentinel
         // and would peg the S-meter full-scale on a matched antenna (#4536
@@ -6532,11 +6547,7 @@ void MainWindow::wireMeters()
             &MeterModel::directionalPowerMetersChanged,
             this, [this](float fwd, float reflected, float swr,
                          bool swrValid, bool reflectedPowerMeasured) {
-        if ((m_radioModel.amplifier().present()
-             && m_radioModel.amplifier().operate())
-            || (m_kpa500Conn.isConnected()
-                && m_kpa500Conn.isResponding()
-                && m_kpa500Conn.lastStatus().operate.value_or(false))) {
+        if (sharedTxMeterSelection().source == SharedTxMeterSource::Amplifier) {
             return;
         }
         // The cross-needle already clamps sub-1.0 values to 1.0 (its rest
@@ -7563,38 +7574,28 @@ void MainWindow::wireMeters()
 #endif
     }
 
-    // Fwd power gauge scale from radio max power and amp presence, applied to
-    // TxApplet, TunerApplet and SMeterWidget together; with the PGXL in STANDBY
-    // use the barefoot scale. Redundant re-applies are skipped inside each
-    // gauge's setPowerScale(), not here: infoChanged bursts on ordinary status,
-    // and an automation test action writes the widget scale directly, so a
-    // cache here could skip a needed re-apply.
+    // Data and scale use the same confirmed selection.
     auto updatePowerScale = [this]() {
-        int maxW = m_radioModel.transmitModel().maxPowerLevel();
-        // Aurora (AU-) radios have an integrated 600W PA (Overlord) but
-        // max_power_level only reports the exciter limit (100W). Use model
-        // name to detect the true PA capability. (#484)
-        const QString& model = m_radioModel.model();
-        if (model.startsWith("AU-") && maxW <= 100) {
-            maxW = 500;
+        const SharedTxMeterSelection selection = sharedTxMeterSelection();
+        if (selection.source != m_sharedTxMeterSource) {
+            m_sharedTxMeterSource = selection.source;
+            m_appletPanel->setMeterTxValues(0.0f, 1.0f);
+            m_ampRelayTxStamp.invalidate();
+#ifdef HAVE_HIDAPI
+            m_tmate2TxWatts = 0.0f;
+            if (m_radioModel.transmitModel().isTransmitting()) {
+                updateTMate2Display();
+            }
+#endif
         }
-        const bool ampActive = m_radioModel.amplifier().present()
-                            && m_radioModel.amplifier().operate();
-        // When KPA500 is in OPERATE (but no PGXL present), override maxW so
-        // the 600W gauge tier activates rather than the barefoot 200W range.
-        // hasAmplifier (ampActive) stays false — KPA500 is 500W, not 1.5kW,
-        // so the 2kW PGXL scale would make every reading look tiny.
-        if (!ampActive
-            && m_kpa500Conn.isConnected()
-            && m_kpa500Conn.isResponding()
-            && m_kpa500Conn.lastStatus().operate.value_or(false)) {
-            maxW = 500;
-        }
-        m_appletPanel->txApplet()->setPowerScale(maxW, ampActive);
-        m_appletPanel->tunerApplet()->setPowerScale(maxW, ampActive);
-        m_appletPanel->setMeterPowerScale(maxW, ampActive);
-        m_appletPanel->healthApplet()->setPowerScale(maxW, ampActive);
+        m_appletPanel->txApplet()->setPowerScale(selection.maxWatts, selection.highPowerAmplifier);
+        m_appletPanel->tunerApplet()->setPowerScale(selection.maxWatts, selection.highPowerAmplifier);
+        m_appletPanel->setMeterPowerScale(selection.maxWatts, selection.highPowerAmplifier);
+        m_appletPanel->healthApplet()->setPowerScale(selection.maxWatts, selection.highPowerAmplifier);
     };
+    connect(&m_kat500Model, &Kat500Model::statusUpdated, this, updatePowerScale);
+    connect(&m_kat500Model, &Kat500Model::availabilityChanged, this, updatePowerScale);
+    updatePowerScale();
     connect(&m_radioModel.amplifier(), &AmpModel::presenceChanged, this, updatePowerScale);
     connect(&m_radioModel.amplifier(), &AmpModel::stateChanged, this, updatePowerScale);
     // Re-evaluate scale when KPA500 operate state changes or disconnects.

@@ -1,5 +1,7 @@
 #include "TestSettingsProfile.h"
 #include "core/TxKeyingMarker.h"
+#include "core/ThemeManager.h"
+#include <QPalette>
 #include "gui/TxApplet.h"
 #include "gui/AtuPreTuneDialog.h"
 #include "models/Kat500Model.h"
@@ -434,6 +436,25 @@ void presentation() {
     check(atu->text()=="AUTO" && save->text()=="SAVE" && !save->isCheckable(),"Auto uses AUTO and momentary SAVE");
     bool pill=false; for(auto* l:applet.findChildren<QLabel*>()) { pill|=l->text()=="KAT500"; }
     check(pill,"KAT500 occupies existing memory status slot");
+    QLabel* katPill = nullptr;
+    for (auto* label : applet.findChildren<QLabel*>()) {
+        if (label->text() == "KAT500") { katPill = label; }
+    }
+    if (katPill) {
+        const QString passStyle = katPill->styleSheet();
+        Kat500ModelTest::observe(f.kat, "AMPI;", "AMPI1;");
+        katPill->ensurePolished();
+        check(katPill->toolTip().contains("KEY BLOCK")
+                  && katPill->accessibleDescription().contains("radio watts")
+                  && katPill->palette().color(QPalette::WindowText)
+                      == ThemeManager::instance().color("color.accent.warning"),
+              "confirmed key block turns the existing KAT500 pill amber with a radio-meter explanation");
+        Kat500ModelTest::observe(f.kat, "AMPI;", "AMPI0;");
+        check(katPill->styleSheet() == passStyle && !katPill->toolTip().contains("KEY BLOCK"),
+              "confirmed key pass restores the normal KAT500 pill");
+        f.serial.clear();
+    }
+
     Kat500ModelTest::mode(f.kat,Kat500::Mode::Manual);
     check(atu->text()=="ATU" && save->text()=="SAVE","Manual shows ATU and SAVE");
     Kat500ModelTest::mode(f.kat,Kat500::Mode::Bypass);

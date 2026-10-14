@@ -5016,6 +5016,11 @@ add_test(NAME cross_needle_meter_test COMMAND cross_needle_meter_test)
 set_tests_properties(cross_needle_meter_test PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+# Shared meter source and power range must follow the same hardware selection.
+add_executable(kat500_meter_source_test tests/kat500_meter_source_test.cpp)
+target_include_directories(kat500_meter_source_test PRIVATE src)
+add_test(NAME kat500_meter_source_test COMMAND kat500_meter_source_test)
+
 # Versioned standard S-meter face: responsive geometry, calibrated mappings,
 # resource validation/fallback, and offscreen rendering of every meter mode.
 add_executable(s_meter_geometry_test

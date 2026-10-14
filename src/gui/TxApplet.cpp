@@ -826,11 +826,17 @@ void TxApplet::syncAtuIndicators()
         setIndicatorState(m_bypInd, indicatorState(responding, m_kat500->status().bypassed == true), ThemeManager::instance().color("color.accent.warning"));
         m_memInd->setText(tr("KAT500"));
         m_memInd->setEnabled(responding);
-        m_memInd->setToolTip(tr("TX Controls use KAT500. SWR above is measured at the radio.") + "\n" + m_katTx->message());
+        const bool keyBlocked = m_kat500 && m_kat500->ampKeyBlockConfirmed();
+        const QString meterTip = keyBlocked
+            ? tr("KEY BLOCK confirmed: amplifier keying is blocked. With a KPA500 in Operate, the shared VU/PWR meters show radio watts, SWR and the radio scale. The KPA500 applet still shows amplifier readings.")
+            : tr("TX Controls use KAT500. SWR above is measured at the radio.");
+        m_memInd->setToolTip(meterTip + "\n" + m_katTx->message());
         m_memInd->setAccessibleDescription(m_memInd->toolTip());
         ThemeManager::instance().applyStyleSheet(m_memInd,
-            "QLabel { background: {{color.canon.nested}}; color: {{color.accent.success}}; border: 1px solid {{color.canon.lineHi}}; border-radius: 3px; padding: 2px 3px; font-size: 9px; font-weight: bold; }"
-            "QLabel:disabled { color: {{color.text.disabled}}; }");
+            QStringLiteral("QLabel { background: {{color.canon.nested}}; color: %1; border: 1px solid {{color.canon.lineHi}}; border-radius: 3px; padding: 2px 3px; font-size: 9px; font-weight: bold; }"
+            "QLabel:disabled { color: {{color.text.disabled}}; }")
+                .arg(keyBlocked ? QStringLiteral("{{color.accent.warning}}")
+                                : QStringLiteral("{{color.accent.success}}")));
     } else {
         m_memInd->setText(tr("Mem"));
         m_memInd->setToolTip(tr("Radio ATU is using a stored match"));

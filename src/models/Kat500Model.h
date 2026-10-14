@@ -28,6 +28,7 @@ public:
     bool isConnecting() const { return m_connecting; }
     bool isDetected() const { return m_detected; }
     bool isResponding() const;
+    bool ampKeyBlockConfirmed() const;
     bool isNetworkConnection() const { return m_network; }
     QString description() const;
     const Kat500::Status& status() const { return m_status; }

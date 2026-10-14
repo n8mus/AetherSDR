@@ -3,6 +3,7 @@
 #include "RadioTabBar.h"
 #include "DeferredSettingsWrites.h"
 #include "TxAudioPathPolicy.h"
+#include "SharedTxMeterSelection.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ⚠️  MainWindow is DECOMPOSED (#3351). Add member fields/declarations here ONLY
@@ -1529,6 +1530,8 @@ private:
     // See applyAmpTxMeters() and kRelayMeterFreshnessMs.
     QElapsedTimer m_ampRelayTxStamp;
     void applyAmpTxMeters(float watts, float swr, bool fromRelay);
+    SharedTxMeterSelection sharedTxMeterSelection();
+    SharedTxMeterSource m_sharedTxMeterSource{SharedTxMeterSource::Radio};
 #ifdef Q_OS_LINUX
     EvdevEncoderManager*       m_dialBackend{nullptr};
 #elif defined(Q_OS_WIN) && defined(HAVE_HIDAPI)

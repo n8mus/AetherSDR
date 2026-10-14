@@ -166,7 +166,8 @@ void Kat500TxController::publish()
 {
     const Kat500::Status status = m_tuner ? m_tuner->status() : Kat500::Status{};
     const Presentation current{m_selected, busy(), matched(), m_tuner && m_tuner->isResponding(),
-                               status.mode, status.bypassed, unavailableReason(), m_message};
+                               status.mode, status.bypassed, m_tuner && m_tuner->ampKeyBlockConfirmed(),
+                               unavailableReason(), m_message};
     if (m_presentation == current) { return; }
     m_presentation = current;
     emit changed();
