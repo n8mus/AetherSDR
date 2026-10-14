@@ -38,7 +38,7 @@ The single **SWR** meter shows adjusted SWR. Press and hold its pill (or hold **
 
 Expand **Manual** for C/L totals and eight relay checkboxes each. Checkbox labels show component values, largest first: capacitance in pF and inductance in nH, matching the Elecraft Utility. Numeric **Set** maps to the closest available relay combination. These requests can change the signal path. **Match frequency**, in kHz, starts at the confirmed tuner frequency and selects the frequency used by **Recall** and **Memorize**. Once you edit it, status refreshes preserve your choice. Both actions require 1800–54000 kHz, matching the [KAT500 operating range](https://elecraft.com/products/kat500-high-power-autotuner); an unknown or unsupported frequency sends no command. Recall retrieves the stored match; Memorize stores and verifies a match for that frequency. **Full tune without saving** requests FTNS explicitly.
 
-**History** plots last-observed SWR and forward/reflected ADC counts for five minutes. Each graph includes a trace legend, latest value, vertical scale and time labels; gaps mean missing replies. ADC counts are not watts. SWR can describe an earlier physical RF measurement.
+**History** plots last-observed SWR and forward/reflected ADC counts for five minutes. Each graph includes a trace legend, latest value, vertical scale and time labels; gaps mean missing replies. ADC counts are not watts. SWR can describe an earlier physical RF measurement. The graphs grow and shrink with the popout; smaller windows scroll when the expanded controls no longer fit.
 
 **Settings → Signal path** contains **Capacitor on antenna side**; checked places the capacitor on the antenna side. The **BYP**, **ATT** and **KEY** controls are directly available as pills in Full view. **BYP** operates only the matching-network bypass relays and leaves Auto/Manual mode unchanged; recall or tuning can engage the network again. Use the main **Bypass** mode button to disable tuning. All signal-path controls require confirmed readback and the same fresh, idle, no-RF conditions as Manual.
 
@@ -54,7 +54,7 @@ Settings also shows identity, installed firmware, serial, DIRECT/NETWORK endpoin
 
 F, FX and FC are displayed in kHz; FY is a range in kHz. They can remain after RF stops. A raw zero frequency is not a usable frequency; **—** means no reply has been received. Milliseconds since the SWR reply measure communication freshness, not the age of the physical RF measurement.
 
-**Debug** offers normal state/errors or **Verbose** wire and wake traffic, with copy, atomic save, clear and paused display. Debug TX means serial writes, not RF. Drawer triangles point down when expanded and right when collapsed.
+**Debug** offers normal state/errors or **Verbose** wire and wake traffic, with copy, atomic save, clear and paused display. New entries stay in view when scrolled to the bottom. Scroll up to inspect older entries without jumping, or pause the display; resuming catches up to the newest entry. Debug TX means serial writes, not RF. Drawer triangles point down when expanded and right when collapsed.
 
 **Follow TX frequency** defaults off. Enabling it follows the effective TX slice frequency, including XIT and split offsets. When eligibility returns, a frequency change that has not yet been attempted can proceed. A failed or canceled request is not retried for the same frequency; change the effective TX frequency or switch Follow off and on to authorize a fresh attempt. It does not key a radio. The applet’s own **Tune** button remains a tuner-only request.
 

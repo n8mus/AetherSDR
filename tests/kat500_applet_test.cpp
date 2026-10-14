@@ -8,6 +8,7 @@
 #include <QCheckBox>
 #include <QFileDialog>
 #include <QPointer>
+#include <QPlainTextEdit>
 #include <QLabel>
 #include <QPushButton>
 #include <QScrollArea>
@@ -146,6 +147,82 @@ class Kat500ModelTest
         }
         return 0;
     }
+    static int debugScrolling()
+    {
+        Kat500Model model;
+        Kat500Applet widget;
+        widget.setModel(&model);
+        widget.findChild<QPushButton*>("katSettings")->setChecked(true);
+        widget.findChild<QPushButton*>("katDebug")->setChecked(true);
+        widget.resize(400, 1000);
+        widget.show();
+        QTest::qWait(20);
+        auto* output = widget.findChild<QPlainTextEdit*>("katDebugOutput");
+        CHECK(output);
+        QScrollBar* scroll = output->verticalScrollBar();
+        for (int i = 0; i < 80; ++i) {
+            model.report(QStringLiteral("Diagnostic %1").arg(i));
+        }
+        CHECK(scroll->maximum() > 0);
+        CHECK(scroll->value() == scroll->maximum());
+        scroll->setValue(10);
+        model.report(QStringLiteral("New entry while reading older diagnostics"));
+        CHECK(scroll->value() == 10);
+        scroll->setValue(scroll->maximum());
+        for (int i = 0; i < 1100; ++i) {
+            model.report(QStringLiteral("Bounded diagnostic %1").arg(i));
+        }
+        CHECK(scroll->value() == scroll->maximum());
+        CHECK(output->toPlainText().endsWith("Bounded diagnostic 1099"));
+        QCheckBox* pause = nullptr;
+        for (QCheckBox* control : widget.findChildren<QCheckBox*>()) {
+            if (control->text() == "Pause display") {
+                pause = control;
+            }
+        }
+        CHECK(pause);
+        pause->setChecked(true);
+        const QString frozen = output->toPlainText();
+        model.report(QStringLiteral("Captured while paused"));
+        CHECK(output->toPlainText() == frozen);
+        pause->setChecked(false);
+        CHECK(output->toPlainText().endsWith("Captured while paused"));
+        CHECK(scroll->value() == scroll->maximum());
+        model.clearDebug();
+        CHECK(output->toPlainText().isEmpty() && scroll->maximum() == 0);
+        return 0;
+    }
+    static int historyResizing()
+    {
+        Kat500Applet widget;
+        widget.setFloating(true);
+        widget.findChild<QPushButton*>("katHistory")->setChecked(true);
+        widget.findChild<QPushButton*>("katSettings")->setChecked(true);
+        widget.findChild<QPushButton*>("katDebug")->setChecked(true);
+        widget.resize(350, 500);
+        widget.show();
+        QTest::qWait(30);
+        auto* graph = widget.findChild<QLabel*>("katHistoryGraph");
+        auto* scroll = widget.findChild<QScrollArea*>("katScroll");
+        CHECK(graph && scroll);
+        const QSize compact = graph->size();
+        for (int i = 0; i < 2; ++i) {
+            widget.resize(700, 1800);
+            QTest::qWait(30);
+            CHECK(graph->height() > compact.height() && graph->width() > compact.width());
+            widget.resize(350, 500);
+            QTest::qWait(30);
+            CHECK(graph->size() == compact);
+            CHECK(scroll->verticalScrollBar()->maximum() > 0);
+            CHECK(scroll->horizontalScrollBar()->maximum() == 0);
+            CHECK(graph->pixmap().deviceIndependentSize().toSize() == graph->size());
+        }
+        widget.findChild<QPushButton*>("katSettings")->setChecked(false);
+        QTest::qWait(30);
+        CHECK(scroll->verticalScrollBar()->maximum() == 0);
+        widget.findChild<QPushButton*>("katHistory")->setChecked(false);
+        return 0;
+    }
     static void off(Kat500Model& model)
     {
         model.m_lastReply = 100;
@@ -159,6 +236,9 @@ int main(int argc, char** argv)
     TestSettingsProfile profile("kat500-applet-test");
     QApplication app(argc, argv);
     AetherSDR::AppSettings::instance().load();
+    const int debugResult = AetherSDR::Kat500ModelTest::debugScrolling();
+    const int historyResult = AetherSDR::Kat500ModelTest::historyResizing();
+    CHECK(debugResult == 0 && historyResult == 0);
     CHECK(AetherSDR::Kat500ModelTest::signalPathToggles() == 0);
     AetherSDR::Kat500Applet widget;
     widget.resize(310, 300);

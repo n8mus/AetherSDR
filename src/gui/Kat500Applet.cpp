@@ -34,6 +34,22 @@ namespace AetherSDR
 {
 namespace
 {
+class HistoryGraphLabel : public QLabel
+{
+  public:
+    using QLabel::QLabel;
+    // The rendered pixmap must not become the layout's preferred size.
+    QSize sizeHint() const override { return QSize(220, 270); }
+    QSize minimumSizeHint() const override { return sizeHint(); }
+};
+void updateDebugText(QPlainTextEdit* output, const QString& content, bool followLatest = false)
+{
+    QScrollBar* scroll = output->verticalScrollBar();
+    const int position = scroll->value();
+    followLatest = followLatest || position == scroll->maximum();
+    output->setPlainText(content);
+    scroll->setValue(followLatest ? scroll->maximum() : position);
+}
 void availability(QWidget* widget, const QString& reason)
 {
     widget->setEnabled(reason.isEmpty());
@@ -390,7 +406,10 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
     m_historyPane = new QWidget(this);
     auto* history = new QVBoxLayout(m_historyPane);
     history->setContentsMargins(0, 0, 0, 0);
-    m_graph = label("katHistoryGraph", history);
+    m_graph = new HistoryGraphLabel(this);
+    m_graph->setObjectName("katHistoryGraph");
+    m_graph->setAccessibleName(tr("SWR and forward/reflected ADC history"));
+    history->addWidget(m_graph);
     m_graph->setMinimumHeight(270);
     m_graph->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
     m_graph->installEventFilter(this);
@@ -461,6 +480,7 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
     m_debug->setObjectName("katDebugOutput");
     m_debug->setAccessibleName(tr("Tuner protocol diagnostics"));
     m_debug->setReadOnly(true);
+    m_debug->setLineWrapMode(QPlainTextEdit::NoWrap);
     m_debug->setMaximumBlockCount(1000);
     m_debug->setFixedHeight(160);
     debug->addWidget(m_debug);
@@ -506,6 +526,11 @@ Kat500Applet::Kat500Applet(QWidget* parent) : CanonApplet(parent)
             m_model->setVerbose(on);
         }
         savePreferences();
+    });
+    connect(m_pause, &QCheckBox::toggled, this, [this](bool paused) {
+        if (!paused && m_model) {
+            updateDebugText(m_debug, m_model->debugText(), true);
+        }
     });
     connect(copy, &QPushButton::clicked, this,
             [this] { QApplication::clipboard()->setText(m_debug->toPlainText()); });
@@ -583,6 +608,9 @@ void Kat500Applet::setModel(Kat500Model* model)
         disconnect(m_model, nullptr, this, nullptr);
     }
     m_model = model;
+    if (!m_pause->isChecked()) {
+        updateDebugText(m_debug, model ? model->debugText() : QString(), true);
+    }
     m_frequencyEdited = false;
     { const QSignalBlocker blocker(m_frequencyRecall); m_frequencyRecall->setValue(0); }
     if (model) {
@@ -603,7 +631,7 @@ void Kat500Applet::setModel(Kat500Model* model)
         connect(model, &Kat500Model::configurationRead, this, &Kat500Applet::refresh);
         connect(model, &Kat500Model::debugChanged, this, [this] {
             if (m_model && !m_pause->isChecked()) {
-                m_debug->setPlainText(m_model->debugText());
+                updateDebugText(m_debug, m_model->debugText());
             }
         });
         connect(model, &Kat500Model::telemetryReceived, this,
