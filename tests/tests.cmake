@@ -4595,6 +4595,20 @@ target_include_directories(spe_protocol_test PRIVATE src)
 target_link_libraries(spe_protocol_test PRIVATE Qt6::Core)
 add_test(NAME spe_protocol_test COMMAND spe_protocol_test)
 
+add_executable(kxpa100_protocol_test tests/kxpa100_protocol_test.cpp src/core/Kxpa100Protocol.cpp)
+target_include_directories(kxpa100_protocol_test PRIVATE src)
+target_link_libraries(kxpa100_protocol_test PRIVATE Qt6::Core)
+add_test(NAME kxpa100_protocol_test COMMAND kxpa100_protocol_test)
+
+add_executable(kxpa100_maintenance_test tests/kxpa100_maintenance_test.cpp
+    src/core/Kxpa100Maintenance.cpp src/core/Kxpa100Protocol.cpp)
+target_include_directories(kxpa100_maintenance_test PRIVATE src)
+target_link_libraries(kxpa100_maintenance_test PRIVATE Qt6::Core)
+target_compile_definitions(kxpa100_maintenance_test PRIVATE
+    KXPA100_FIXTURE_PATH="${CMAKE_SOURCE_DIR}/tests/fixtures/kxpa100/synthetic.KXPAConfig"
+    KXPA100_INVALID_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures/kxpa100")
+add_test(NAME kxpa100_maintenance_test COMMAND kxpa100_maintenance_test)
+
 add_executable(kat500_protocol_test tests/kat500_protocol_test.cpp src/core/Kat500Protocol.cpp)
 target_include_directories(kat500_protocol_test PRIVATE src)
 target_link_libraries(kat500_protocol_test PRIVATE Qt6::Core)

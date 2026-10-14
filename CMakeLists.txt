@@ -1067,6 +1067,8 @@ set(CORE_SOURCES
     src/models/Kat500TxController.cpp
     src/models/Kat500TxController.h
     src/models/Kat500Model.cpp
+    src/core/Kxpa100Protocol.cpp
+    src/core/Kxpa100Maintenance.cpp
     src/core/Kat500Protocol.cpp
     src/core/Kat500Maintenance.cpp
     src/core/Kpa500Protocol.cpp
