@@ -124,7 +124,7 @@ failed or dropped link. Serial and network targets are saved separately.
 serial number from readback; unreported values remain unknown. The same
 information appears in the applet's **Settings**.
 
-<img src="/img/kpa500/kpa500-applet-full.png" width="360" alt="KPA500 applet in Standby with confirmed ON state and zero forward power." />
+<img src="/img/kpa500/kpa500-applet-full.png" width="360" alt="KPA500 compact applet with confirmed ON state and zero forward power." />
 
 *The KPA500 applet shows amplifier readback. This capture was taken without RF.*
 
@@ -202,7 +202,7 @@ changes the displayed history; polling chatter does not displace normal events. 
 continues collecting; **Resume** catches up. **Copy** and **Save…** export the
 visible paused log or the current buffer.
 
-<img src="/img/kpa500/kpa500-applet-settings-debug.png" width="480" alt="KPA500 Settings with Follow TX flag, device information, Advanced shortcut and Debug." />
+
 
 *Settings and Debug. Station identifiers are redacted.*
 
