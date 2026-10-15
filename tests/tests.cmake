@@ -464,6 +464,59 @@ target_include_directories(ctr2_hid_reference_test PRIVATE
 target_link_libraries(ctr2_hid_reference_test PRIVATE aethercore Qt6::Core)
 add_test(NAME ctr2_hid_reference_test COMMAND ctr2_hid_reference_test)
 
+# CTR2 firmware updates against a simulated device whose side of the link
+# runs the MIT firmware reference: success (stop-and-wait and windowed), a
+# slow re-enumeration, a rejected image, no Firmware extension, no answer, a
+# rollback to the old image, and cancel mid-transfer. No hidapi, no sockets.
+add_executable(ctr2_firmware_updater_test
+    tests/ctr2_firmware_updater_test.cpp
+    tools/ctr2-firmware-reference/ctr2_link.c)
+set_source_files_properties(tools/ctr2-firmware-reference/ctr2_link.c
+    TARGET_DIRECTORY ctr2_firmware_updater_test PROPERTIES LANGUAGE C)
+set_property(TARGET ctr2_firmware_updater_test PROPERTY C_STANDARD 99)
+target_include_directories(ctr2_firmware_updater_test PRIVATE
+    src tools/ctr2-firmware-reference)
+target_link_libraries(ctr2_firmware_updater_test PRIVATE aethercore Qt6::Core)
+add_test(NAME ctr2_firmware_updater_test COMMAND ctr2_firmware_updater_test)
+set_tests_properties(ctr2_firmware_updater_test PROPERTIES TIMEOUT 120)
+
+# EspFirmwareManifest and EspFirmwareInstaller against an in-memory flash:
+# protected regions are never written, a device that is not the manifest's is
+# left untouched, start rewrites only the boot selection, backups restore.
+add_executable(esp_firmware_installer_test tests/esp_firmware_installer_test.cpp)
+target_include_directories(esp_firmware_installer_test PRIVATE src)
+target_link_libraries(esp_firmware_installer_test PRIVATE aethercore Qt6::Core)
+add_test(NAME esp_firmware_installer_test COMMAND esp_firmware_installer_test)
+
+# EspFirmwareJob against a flash in memory: it acts only on the device the
+# operator confirmed (by MAC, before any write), and refuses an unreadable MAC.
+add_executable(esp_firmware_job_test tests/esp_firmware_job_test.cpp)
+target_include_directories(esp_firmware_job_test PRIVATE src)
+target_link_libraries(esp_firmware_job_test PRIVATE aethercore Qt6::Core)
+add_test(NAME esp_firmware_job_test COMMAND esp_firmware_job_test)
+
+# FirmwareInstallModel acts only on the device the operator confirmed:
+# injected device lists and an in-memory flash; no serial port, no network.
+add_executable(firmware_install_model_test tests/firmware_install_model_test.cpp)
+target_include_directories(firmware_install_model_test PRIVATE src tests)
+target_link_libraries(firmware_install_model_test PRIVATE aethercore Qt6::Core Qt6::Network)
+add_test(NAME firmware_install_model_test COMMAND firmware_install_model_test)
+
+# Ctr2MaxRegistration (read-only littlefs) against synthetic stock-firmware
+# volumes: registered, not registered, and no volume.
+add_executable(ctr2max_registration_test tests/ctr2max_registration_test.cpp)
+target_include_directories(ctr2max_registration_test PRIVATE src tests)
+target_link_libraries(ctr2max_registration_test PRIVATE aethercore Qt6::Core)
+add_test(NAME ctr2max_registration_test COMMAND ctr2max_registration_test)
+
+# EspFirmwareCatalog and EspFirmwareDownloader over file:// URLs: only a
+# manifest signed by a trusted Ed25519 key, with intact images, is accepted.
+add_executable(esp_firmware_catalog_test tests/esp_firmware_catalog_test.cpp)
+target_include_directories(esp_firmware_catalog_test PRIVATE src)
+target_link_libraries(esp_firmware_catalog_test PRIVATE aethercore aether_monocypher Qt6::Core
+    Qt6::Network)
+add_test(NAME esp_firmware_catalog_test COMMAND esp_firmware_catalog_test)
+
 # CTR2 HID I/O thread with injected device operations (no hidapi, no device,
 # no sockets): shutdown never blocks the owner on slow writes, discardQueued()
 # fences queued output and late acknowledgements, reads and failures surface.
@@ -3119,6 +3172,29 @@ if(ENABLE_NVIDIA_AFX AND ((UNIX AND NOT APPLE) OR WIN32) AND CMAKE_SYSTEM_PROCES
     add_test(NAME nvidia_afx_pack_log_test COMMAND nvidia_afx_pack_log_test)
 endif()
 
+# Exact qWAVE DSCP request/rollback, with injected native operations; no sockets.
+add_executable(vita_dscp_flow_test tests/vita_dscp_flow_test.cpp)
+target_include_directories(vita_dscp_flow_test PRIVATE src)
+add_test(NAME vita_dscp_flow_test COMMAND vita_dscp_flow_test)
+
+# SOCKETS: two ephemeral IPv4 UDP sockets on 127.0.0.1, our own sender/sink.
+# Tests the native marker across close/rebind; no firmware peer or RF.
+add_executable(vita_dscp_socket_test tests/vita_dscp_socket_test.cpp
+    src/core/backends/flex/VitaDscpMarker.cpp)
+target_include_directories(vita_dscp_socket_test PRIVATE src)
+target_link_libraries(vita_dscp_socket_test PRIVATE Qt6::Core Qt6::Network)
+add_test(NAME vita_dscp_socket_test COMMAND vita_dscp_socket_test)
+set_tests_properties(vita_dscp_socket_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 10)
+
+# SOCKETS: production ephemeral IPv4 VITA socket (LAN uses AnyIPv4, WAN too)
+# plus our own ephemeral loopback sink. Cold RadioConnection never dials;
+# no radio/firmware peer. Injected QoS denial must leave all bind paths usable.
+add_executable(vita_dscp_stream_test tests/vita_dscp_stream_test.cpp)
+target_include_directories(vita_dscp_stream_test PRIVATE src tests)
+target_link_libraries(vita_dscp_stream_test PRIVATE aethercore Qt6::Core Qt6::Network)
+add_test(NAME vita_dscp_stream_test COMMAND vita_dscp_stream_test)
+set_tests_properties(vita_dscp_stream_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 10)
+
 # PanadapterStream's rate-limited VITA-49 sequence-error line and its text, which
 # the docs Log Analyzer matches (#6285). Socket-free: meter packets are fed to
 # processDatagram() on a stream that never binds.
@@ -3872,6 +3948,34 @@ target_link_libraries(radio_setup_headphone_output_gate_test PRIVATE
     aetherdesktop_support Qt6::Widgets Qt6::Test)
 add_test(NAME radio_setup_headphone_output_gate_test COMMAND radio_setup_headphone_output_gate_test)
 set_tests_properties(radio_setup_headphone_output_gate_test PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
+
+# Socket-free Flex nickname encoding and production Radio Setup editing.
+add_executable(radio_nickname_test
+    tests/radio_nickname_test.cpp
+    src/gui/CanonWindow.cpp
+    src/gui/DragValuePopup.cpp
+    src/gui/FirmwareReleasesDialog.cpp
+    src/gui/RadioSetupDialog.cpp
+    src/gui/RtlReceiverSettingsWidget.cpp
+    src/gui/ControlAvailabilityRegistry.cpp
+    src/gui/RadioSetupDialog_Peripherals.cpp
+    src/gui/PersistentDialog.cpp
+    src/gui/FramelessResizer.cpp
+    src/gui/FramelessWindowTitleBar.cpp
+    src/gui/SliceColorManager.cpp
+    src/gui/KiwiPublicReceiverPicker.cpp
+    src/gui/GuardedSlider.h
+    ${THEME_TEST_RESOURCES}
+)
+# MainWindow's status-bar consumers have no socket-free construction seam.
+target_compile_definitions(radio_nickname_test PRIVATE
+    AETHER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(radio_nickname_test PRIVATE src tests)
+target_link_libraries(radio_nickname_test PRIVATE
+    aetherdesktop_support Qt6::Widgets Qt6::Test)
+add_test(NAME radio_nickname_test COMMAND radio_nickname_test)
+set_tests_properties(radio_nickname_test PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
 
 # Radio Setup's Show TX in Waterfall button on the production dialog: a click
@@ -6304,6 +6408,15 @@ target_include_directories(hl2_unkey_hold_test PRIVATE src)
 target_link_libraries(hl2_unkey_hold_test PRIVATE aethercore Qt6::Core Qt6::Network)
 add_test(NAME hl2_unkey_hold_test COMMAND hl2_unkey_hold_test)
 
+# #5998: the HL2's own PTT/key input is an observation: transmit state and receive
+# mute, never a key. Socket-free; EP6 status frames are fed to the backend's own
+# MetisClient. One leg waits out the 2 s silence timeout.
+add_executable(hl2_hardware_ptt_state_test tests/hl2_hardware_ptt_state_test.cpp)
+target_include_directories(hl2_hardware_ptt_state_test PRIVATE src tests)
+target_link_libraries(hl2_hardware_ptt_state_test PRIVATE aethercore Qt6::Core Qt6::Network)
+add_test(NAME hl2_hardware_ptt_state_test COMMAND hl2_hardware_ptt_state_test)
+set_tests_properties(hl2_hardware_ptt_state_test PROPERTIES TIMEOUT 60)
+
 # HL2 RQST/ACK state machine (docs/HERMES.md §13 item 13, oracle §5) — pure
 # policy, standalone (no Qt, no socket, no radio). The clock is EP6 frames.
 add_executable(hl2_rqst_ack_test
@@ -7202,9 +7315,8 @@ endif()
 add_executable(flex_control_dialog_size_test
     tests/flex_control_dialog_size_test.cpp
     src/gui/FlexControlDialog.cpp
-    src/gui/PersistentDialog.cpp
+    src/gui/CanonWindow.cpp
     src/gui/FramelessResizer.cpp
-    src/gui/FramelessWindowTitleBar.cpp
     src/gui/SliceLabel.cpp
     src/gui/DragValuePopup.cpp
     src/models/SliceModel.cpp
@@ -7223,6 +7335,35 @@ target_link_libraries(flex_control_dialog_size_test PRIVATE
 set_target_properties(flex_control_dialog_size_test PROPERTIES AUTOMOC ON)
 add_test(NAME flex_control_dialog_size_test COMMAND flex_control_dialog_size_test)
 set_tests_properties(flex_control_dialog_size_test PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# AetherControl is a canon workspace (#6239): geometry under its old key,
+# Escape releases a captured knob before it closes the window, and the
+# captured ring is the success token in both themes.
+add_executable(aethercontrol_window_test
+    tests/aethercontrol_window_test.cpp
+    src/gui/FlexControlDialog.cpp
+    src/gui/CanonWindow.cpp
+    src/gui/FramelessResizer.cpp
+    src/gui/SliceLabel.cpp
+    src/gui/DragValuePopup.cpp
+    src/models/SliceModel.cpp
+    src/core/DigitalVoiceModeRegistry.cpp
+    src/core/KiwiSdrProtocol.cpp
+    src/core/ThemeManager.cpp
+    src/core/ThemeSeedGenerated.cpp
+    $<TARGET_OBJECTS:aether_test_settings>
+    $<TARGET_OBJECTS:aether_test_log_manager>
+    $<TARGET_OBJECTS:aether_test_async_log_writer>
+    ${THEME_TEST_RESOURCES}
+)
+target_include_directories(aethercontrol_window_test PRIVATE src)
+target_link_libraries(aethercontrol_window_test PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test
+)
+set_target_properties(aethercontrol_window_test PROPERTIES AUTOMOC ON)
+add_test(NAME aethercontrol_window_test COMMAND aethercontrol_window_test)
+set_tests_properties(aethercontrol_window_test PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 add_executable(connection_panel_size_test
@@ -7705,6 +7846,14 @@ add_executable(hl2_auto_gain_law_test tests/hl2_auto_gain_law_test.cpp)
 target_include_directories(hl2_auto_gain_law_test PRIVATE src tests)
 target_link_libraries(hl2_auto_gain_law_test PRIVATE aethercore Qt6::Core Qt6::Network)
 add_test(NAME hl2_auto_gain_law_test COMMAND hl2_auto_gain_law_test)
+# The age gate of the ADC pairing as Hl2Backend::healthSnapshot() applies it:
+# a held slice peak on either side of kSliceStaleMs. Socket-free: the link edge
+# and telemetry go in through MetisClient's own signals, receiver 0 gets a real
+# Hl2RxDsp fed by hand, and the snapshot is read at a chosen instant.
+add_executable(hl2_adc_age_gate_test tests/hl2_adc_age_gate_test.cpp)
+target_include_directories(hl2_adc_age_gate_test PRIVATE src tests)
+target_link_libraries(hl2_adc_age_gate_test PRIVATE aethercore Qt6::Core Qt6::Network)
+add_test(NAME hl2_adc_age_gate_test COMMAND hl2_adc_age_gate_test)
 # Socket-free HL2 panadapter-limit DECLARATIONS: the span shape, the four
 # discrete rates and the dBm axis. NOT radioOwnsDbmScale -- the HL2 deliberately
 # leaves that undeclared and this target asserts only its DEFAULT, which is a
@@ -8610,6 +8759,7 @@ set(AETHER_SETTINGS_CONSUMERS
     atu_seam_gate_test
     transmit_seam_drop_notice_test
     model_control_routing_test
+    radio_nickname_test
     pan_display_drop_notice_test
     backend_capability_revision_test
     icom_panadapter_capacity_test
@@ -8656,6 +8806,7 @@ set(AETHER_SETTINGS_CONSUMERS
     hl2_client_side_spots_declaration_test
     hl2_gain_split_test
     hl2_auto_gain_law_test
+    hl2_adc_age_gate_test
     icom_identity_test
     icom_control_profile_test
     control_resource_service_test
@@ -8721,6 +8872,7 @@ set(AETHER_SETTINGS_CONSUMERS
     transmit_model_apd_test
     help_dialog_test
     flex_control_dialog_size_test
+    aethercontrol_window_test
     pan_layout_dialog_size_test
     transmit_model_test
     container_widget_test

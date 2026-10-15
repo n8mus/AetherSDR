@@ -55,12 +55,10 @@ struct SliceDspRequest {
     // Confirmed engines merge only `field` into their pending recipe, preserving
     // independently queued companion edits until their adoption is observed.
     enum class Field { Enabled, Level, Fill };
-    enum class Origin { Operator, ProfileRestore };
     Feature feature{Feature::Nb};
     Field field{Field::Enabled};
     bool enabled{false};
     int level{0};
-    Origin origin{Origin::Operator};
     NoiseBlankerKind kind{NoiseBlankerKind::Off};
     NoiseBlankerFill fill{NoiseBlankerFill::Zero};
 
@@ -80,10 +78,7 @@ struct SliceDspRequest {
                 || (feature == Feature::Nb && field == Field::Fill))
             && level >= 0 && level <= 100
             && isValidNoiseBlankerKind(static_cast<int>(kind))
-            && isValidNoiseBlankerFill(static_cast<int>(fill))
-            && (origin == Origin::Operator
-                || (origin == Origin::ProfileRestore && feature == Feature::Nrs
-                    && field == Field::Level));
+            && isValidNoiseBlankerFill(static_cast<int>(fill));
     }
 };
 
