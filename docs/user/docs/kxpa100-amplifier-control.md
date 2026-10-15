@@ -108,6 +108,8 @@ A rejected settings write leaves the previous association in effect and logs an 
 
 A timeout closes the stream to prevent a late response from confirming a later request. Reconnect, inspect the current state and make a new deliberate request. Writes are not replayed automatically. A canceled restore can leave some confirmed blocks applied; use the retained backup to recover deliberately.
 
+For a repeated idle disconnect, enable **Settings → Debug → Verbose** and retain the replies around the timeout. SWR replies such as `^SW01.3;` and `^SW013;` both mean 1.3:1 and are supported. The documented zero reply `^SW00.0;` is also valid and does not cause a disconnect.
+
 ### ANT1 appears after power-off
 
 The physical off-state routes to ANT1. Reconfirm the desired antenna after power cycling and before transmitting. Do not infer ANT2 from a previous session or saved UI preference.

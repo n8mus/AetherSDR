@@ -1,6 +1,7 @@
 #include "models/Kxpa100Model.h"
 #include "core/Kxpa100Maintenance.h"
 #include <QCoreApplication>
+#include <QPair>
 #include <QTcpSocket>
 #ifdef HAVE_SERIALPORT
 #include <QSerialPort>
@@ -102,8 +103,39 @@ public:
 #endif
         return 0;
     }
+    static int swrPolling()
+    {
+        const QList<QPair<QByteArray, double>> replies{{"^SW01.3;", 1.3}, {"^SW00.0;", 0.0},
+            {"^SW99.9;", 99.9}, {"^SW013;", 1.3}};
+        for (const auto& [reply, expected] : replies) {
+            Harness h;
+            QSignalSpy failed(&h.model, &Kxpa100Model::connectionFailed);
+            QSignalSpy disconnected(&h.model, &Kxpa100Model::disconnected);
+            QSignalSpy updated(&h.model, &Kxpa100Model::statusUpdated);
+            h.model.m_nextPoll = h.now;
+            h.model.tick();
+            CHECK(h.wire == QList<QByteArray>{"^SW;"} && h.model.m_active);
+            const int timeout = h.model.m_active->timeoutMs;
+            h.model.receiveBytes("^SW1.3;");
+            CHECK(h.model.m_active && !h.model.status().swr && updated.isEmpty());
+            h.model.receiveBytes(reply.left(5));
+            CHECK(h.model.m_active && updated.isEmpty());
+            h.model.receiveBytes(reply.mid(5));
+            CHECK(!h.model.m_active && h.model.status().swr == expected);
+            CHECK(updated.size() == 1 && h.model.fieldAgeMs(QStringLiteral("^SW")) == 0);
+            h.now += timeout + 1;
+            h.model.tick();
+            CHECK(h.model.isConnected() && h.model.isDetected() && h.model.isResponding());
+            CHECK(failed.isEmpty() && disconnected.isEmpty());
+            CHECK(h.wire.size() == 2 && h.wire.last() == "^TP;" && h.model.m_active);
+            h.model.receiveBytes("^TP0;");
+            CHECK(!h.model.m_active && h.model.status().swr == expected);
+        }
+        return 0;
+    }
     static int run() {
         CHECK(transportBoundaries() == 0);
+        CHECK(swrPolling() == 0);
         {
             Harness h; h.model.transportOpened();
             CHECK(!h.model.isDetected() && h.wire.isEmpty());

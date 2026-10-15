@@ -23,7 +23,19 @@ int main()
     CHECK(applyStatus("^TM0315", s) && s.temperatureC == 31.5);
     CHECK(applyStatus("^SW010", s) && s.swr == 1.0);
     CHECK(applyStatus("^SW013", s) && s.swr == 1.3);
-    CHECK(!applyStatus("^SW01.3", s) && !applyStatus("^SW009", s));
+    CHECK(applyStatus("^SW01.0", s) && s.swr == 1.0);
+    CHECK(applyStatus("^SW01.3", s) && s.swr == 1.3);
+    CHECK(applyStatus("^SW00.0", s) && s.swr == 0.0);
+    CHECK(applyStatus("^SW00.1", s) && s.swr == 0.1);
+    CHECK(applyStatus("^SW99.9", s) && s.swr == 99.9);
+    CHECK(applyStatus("^SW999", s) && s.swr == 99.9);
+    for (const QByteArray& invalid : {"^SW009", "^SW1.3", "^SW001.3", "^SW01.30", "^SW01,3",
+         "^SW-1.3", "^SW+1.3", "^SW 1.3", "^SW01.-", "^SW01.a", "^SW01.3extra", "^SW1e3"}) {
+        CHECK(!applyStatus(invalid, s) && s.swr == 99.9);
+        CHECK(!matchesStatusQuery("^SW;", invalid));
+    }
+    CHECK(matchesStatusQuery("^SW;", "^SW01.3") && matchesStatusQuery("^SW;", "^SW00.0"));
+    CHECK(matchesStatusQuery("^SW;", "^SW013"));
     CHECK(applyStatus("^SB012", s) && s.bypassSwr == 1.2);
     CHECK(applyStatus("^F14074", s) && s.frequencyKhz == 14074);
     CHECK(applyStatus("^FLP01234", s) && s.faultCode == 'P' && s.faultDetail == 123.4);

@@ -90,7 +90,11 @@ bool applyStatus(const QByteArray& frame, Status& status)
         }
     }
     if (frame.startsWith("^SW")) {
-        const auto value = number(frame.mid(3), 3, 10, 999);
+        QByteArray digits = frame.mid(3);
+        // The documented nn.n format includes zero; compact firmware replies use nnn.
+        const bool decimal = digits.size() == 4 && digits[2] == '.';
+        if (decimal) { digits.remove(2, 1); }
+        const auto value = number(digits, 3, decimal ? 0 : 10, 999);
         if (!value) { return false; }
         status.swr = *value / 10.0; return true;
     }
