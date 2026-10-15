@@ -94,11 +94,13 @@ class HistoryGraphLabel : public QLabel
     QSize sizeHint() const override { return QSize(220, 270); }
     QSize minimumSizeHint() const override { return sizeHint(); }
 };
-void availability(QWidget* widget, const QString& reason)
+void availability(QWidget* widget, const QString& reason, const QString& help = {})
 {
     widget->setEnabled(reason.isEmpty());
-    widget->setToolTip(reason);
-    widget->setAccessibleDescription(reason);
+    const QString detail = help.isEmpty() ? reason
+        : reason.isEmpty() ? help : help + QStringLiteral("\n") + reason;
+    widget->setToolTip(detail);
+    widget->setAccessibleDescription(detail);
 }
 QString flag(std::optional<bool> value)
 {
@@ -718,13 +720,24 @@ void Kat500Applet::refresh()
     availability(m_power, m_model && m_model->isDetected() && m_model->isResponding() &&
                                   !m_model->operationBusy() && s.powerOn
                               ? QString()
-                              : tr("Wait for confirmed tuner identity, power and an idle operation."));
+                              : tr("Wait for confirmed tuner identity, power and an idle operation."),
+                 tr("Turn the KAT500 on or off. The button shows confirmed tuner power, not radio power."));
     m_tune->setText(tuning ? tr("Cancel") : tr("Tune"));
     m_tune->setAccessibleName(m_tune->text());
-    availability(m_tune, tuning && m_model && m_model->isResponding() ? QString() : reason);
+    availability(m_tune, tuning && m_model && m_model->isResponding() ? QString() : reason,
+                 tuning ? tr("Cancel the KAT500's current tuning search. This does not stop a radio carrier.")
+                        : tr("Start a full KAT500 tuning search and save the match. Supply RF separately; "
+                             "this button does not start a radio carrier."));
+    const QStringList modeHelp{
+        tr("Auto mode: recall stored matches as frequency or antenna changes, and search for a new "
+           "match when SWR exceeds the auto-tune threshold."),
+        tr("Manual mode: recall stored matches as frequency or antenna changes. SWR changes do not "
+           "start a new search; use Tune when needed."),
+        tr("Bypass mode: bypass the matching network and disable tuning. Unlike the BYP pill, "
+           "this changes the operating mode.")};
     for (int i = 0; i < 3; ++i) {
         m_modes[i]->setChecked(s.mode && static_cast<int>(*s.mode) == i);
-        availability(m_modes[i], reason);
+        availability(m_modes[i], reason, modeHelp[i]);
         m_antennas[i]->setChecked(s.antenna == i + 1);
         QString antennaReason = reason;
         if (antennaReason.isEmpty()) {
@@ -737,9 +750,12 @@ void Kat500Applet::refresh()
                 antennaReason = tr("This antenna is disabled on the confirmed band.");
             }
         }
-        availability(m_antennas[i], antennaReason);
+        availability(m_antennas[i], antennaReason,
+                     tr("Select KAT500 antenna connector %1. The antenna must be enabled for the "
+                        "current band; the selection changes after tuner readback.").arg(i + 1));
     }
-    availability(findChild<QPushButton*>("katClearFault"), reason);
+    availability(findChild<QPushButton*>("katClearFault"), reason,
+                 tr("Clear the current KAT500 fault indication. Stored fault history is retained."));
     pill(m_fault, s.faultCode ? (*s.faultCode == 0 ? tr("NO FAULT") : tr("FAULT %1").arg(*s.faultCode))
                              : tr("FAULT ?"),
          s.faultCode ? Kat500::currentFaultName(*s.faultCode) : tr("Fault unknown"),
@@ -776,7 +792,8 @@ void Kat500Applet::refresh()
         s.ampKeyInterrupted ? (*s.ampKeyInterrupted ? tr("KEY BLOCK") : tr("KEY PASS")) : tr("KEY ?")};
     const QStringList physicalHelp{
         tr("Bypass network (relays only): %1. Auto/Manual mode stays unchanged; recall or tuning may "
-           "engage the network again. Use the main Bypass button to disable tuning. %2")
+           "engage the network again. A good antenna match can also leave BYP ON in Auto or Manual. "
+           "Use the main Bypass button to disable tuning. %2")
             .arg(flag(s.bypassed), s.bypassed ? (*s.bypassed ? tr("Click to engage the matching network.")
                                                           : tr("Click to bypass the matching network."))
                                              : QString()),
@@ -895,13 +912,23 @@ void Kat500Applet::refresh()
 void Kat500Applet::presentation()
 {
     const QStringList titles{tr("Manual"), tr("History"), tr("Settings"), tr("Debug")};
+    const QStringList drawerHelp{
+        tr("Show or hide manual relay and stored-match controls. This does not change the tuner mode."),
+        tr("Show or hide recent SWR and forward/reflected ADC history."),
+        tr("Show or hide tuner connection details, signal-path settings and diagnostics."),
+        tr("Show or hide tuner protocol diagnostics.")};
     const std::array<QPushButton*, 4> drawers{m_manualToggle, m_historyToggle, m_settings, m_debugToggle};
     for (int i = 0; i < 4; ++i) {
         drawers[i]->setText(QStringLiteral("%1 %2").arg(drawers[i]->isChecked() ? "▾" : "▸", titles[i]));
+        drawers[i]->setToolTip(drawerHelp[i]);
+        drawers[i]->setAccessibleDescription(drawerHelp[i]);
     }
     const bool mini = m_mini->isChecked();
     m_mini->setText(mini ? tr("Full") : tr("Mini"));
     m_mini->setAccessibleName(mini ? tr("Show full tuner controls") : tr("Show mini tuner controls"));
+    m_mini->setToolTip(mini ? tr("Show all tuner controls and expandable drawers.")
+                          : tr("Show compact power, Tune/Cancel and status controls."));
+    m_mini->setAccessibleDescription(m_mini->toolTip());
     m_modesPane->setVisible(!mini);
     m_antennasPane->setVisible(!mini);
     m_physicalPane->setVisible(!mini);
