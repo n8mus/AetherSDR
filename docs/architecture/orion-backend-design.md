@@ -166,9 +166,8 @@ two things:
 
 If slice 1 is tuned outside the 1 MHz capture, the radio is still tuned,
 but slice 1 has no SDR audio. The backend reports this, and AetherSDR's
-UI dims the slice. (The UI rule is "dimmed, not hidden".) Using the
-radio's own sub-RX audio through the SignaLink's input instead is a
-possible later option.
+UI dims the slice. (The UI rule is "dimmed, not hidden".) The operator
+has accepted this behaviour.
 
 **Split.**
 
@@ -304,14 +303,25 @@ the backend sends it to the **SignaLink**:
   - Convert 24 kHz to 48 kHz mono once, at connect.
 - `finishTxAudio()` returns the milliseconds still queued in the stream,
   so PTT is held through the tail. The reference program drains 250 ms.
-- **Microphone vs. digital source.** The radio's TX input is set to BOTH
-  on the front panel. The source is chosen by gain, through CAT:
-  - Digital: mic 0, processor 0, aux 100.
-  - Voice: aux 0, plus the saved mic and processor levels.
+- **Two TX audio paths, both kept (operator decision).** The radio's TX
+  input stays set to BOTH on the front panel, and the path is chosen by
+  gain through CAT, as the reference program's DIG and FreeDV buttons do:
+  - **Radio mic** (front-panel jack): aux 0, plus the saved mic and
+    processor levels. AetherSDR sends no TX audio.
+  - **PC audio** (SignaLink): mic 0, processor 0, aux 100. This is used
+    for digital modes, FreeDV, and voice from the PC mic. A PC mic is
+    needed for AetherSDR's TX EQ and processing to apply, so in this path
+    the radio's own processor is off.
 
-  `TxAudioSource` (`Microphone` vs. `ClientLeveled`) picks the profile on
-  key. **Open question for the operator:** does the AetherSDR mic chain
-  feed the SignaLink, or does voice keep using the radio's own mic jack?
+  The operator picks the path with one AetherSDR control (an extension
+  verb), not automatically by `TxAudioSource`. Digital and FreeDV
+  operation select PC audio; the reference program's
+  `audio/voiceMic` (51) and `audio/voiceSpeech` (2) defaults seed the
+  radio-mic levels, held in this fork's own settings.
+- **The Orion must still work stand-alone.** On disconnect, on exit, and
+  in the destructor, put back the radio-mic profile (PTT off first). The
+  radio is then usable from its front panel and mic with the PC off.
+  Never change the front-panel input selection or other menu settings.
 
 **PTT** is in `setKeying(on, op, completion)`:
 
@@ -331,11 +341,11 @@ the backend sends it to the **SignaLink**:
 - During TX, SdrEngine applies the desense guard (gain 59/8) and keeps
   clipped IQ out of the decoders.
 
-**CW.** The Orion's own keyer takes `/c` one character per command. The
-radio queues up to 20, and `*TU` cannot abort what it already holds.
-Before claiming `hasRadioSideCwKeyer`, decide whether CW goes through the
-radio keyer or through the WinKeyer (see Q4). Rule 3 applies: no
-unattended TX or CW tests.
+**CW goes through the WinKeyer only (operator decision).** The backend
+does not use the Orion's internal keyer (`/c` commands), so it declares
+`hasRadioSideCwKeyer = false`. AetherSDR's CW text, the cwdaemon port and
+the paddles all go to the WinKeyer peripheral (see Q4). Rule 3 applies:
+no unattended TX or CW tests.
 
 ## Q4. Other station devices and services
 
@@ -345,9 +355,9 @@ unattended TX or CW tests.
 | PowerMaster (38400, CRC-8 0xB1) | No | Low priority. If needed, a peripheral beside the LP-100A code, which is a hook-up point |
 | WinKeyer WK3 (FTDI `A904QF5Z`, 1200 8N2) | No (host keyer `IambicKeyer`, `CwxLocalKeyer` only) | Port as a peripheral: open sequence, `isWk3()`, re-send only adopted settings, never write the mode register unless opted in |
 | DCU-3 rotor (`/dev/portS4`, 4800, streams while turning) | No (Green Heron only) | Port the DCU-3 driver plus a rotctld server on :4533, so cqrlog and Not1MM keep working |
-| rigctld :4532 (fldigi, cqrlog, WSJT-X, Pat) | **Has it:** `CatPort` Rigctld dialect, default slot 0 on **4532** | Use theirs. **Test Pat's exact sequence** (the reference program's `tests/rigctldtest.cpp`: one-line `dump_caps`, `chk_vfo`, the `+` extended form for cqrlog) before relying on it |
+| rigctld :4532 (fldigi, cqrlog, WSJT-X, Pat) | **Has it:** `CatPort` Rigctld dialect, default slot 0 on **4532** | Use theirs (operator decision), provided it passes **Pat's exact sequence** from the reference program's `tests/rigctldtest.cpp` (one-line `dump_caps`, `chk_vfo`) and cqrlog's `+` extended form. Write that as a test |
 | TCI :50001 | Has it | Bonus: WSJT-X and others can use TCI with audio |
-| cwdaemon UDP :6789 (cqrlog CW) | No | Port, mapped to whichever CW path is chosen. Prosign mapping is in the reference program's `CwWindow.cpp` |
+| cwdaemon UDP :6789 (cqrlog CW) | No | Port, driving the WinKeyer. Prosign mapping is in the reference program's `CwWindow.cpp` |
 | DX-cluster server :7300 (skimmer spots, "HELLO") | Client only | Only needed if the skimmer is ported. Later |
 | cqrlog UDP ADIF :2334 | No | Port if the operator logs from this program. Later |
 | Pat websocket monitor (blocks voice TX during Winlink) | No | Port. It is a TX-inhibit input, so it must feed the above-seam TX gate, not the backend |
@@ -430,18 +440,14 @@ Constraints from upstream that still apply:
 | 6 | TX: PTT plus SignaLink audio | **Operator-attended only** |
 | 7 | Peripherals: WinKeyer, rotor and rotctld, cwdaemon, Pat monitor; rigctld verified with Pat | — |
 
-## Open questions for the operator
+## Operator decisions (2026-10-17)
 
-1. **Voice TX audio.** Does it go through AetherSDR's mic chain to the
-   SignaLink, or through the radio's own mic jack?
-2. **CW path.** WinKeyer, the Orion's internal keyer, or both selectable?
-   Which one should cwdaemon on :6789 drive?
-3. **Slice 1 outside the RSP2 window.** Is silent-and-dimmed acceptable
-   for v1, or should sub-RX audio come from the radio through the
-   SignaLink's input?
-4. **Rigctld.** Is AetherSDR's own CatPort on :4532 acceptable if it
-   passes Pat's sequence, or must it match the reference program's
-   behaviour line for line?
-5. **Folder.** Is the clone's location `~/aethersdr port` (not the
-   brief's `~/aether-orion`) final? The space in the path is legal but
-   awkward in scripts.
+1. **Voice TX audio:** both paths stay. The radio's front mic jack is for
+   stand-alone use, and the SignaLink carries PC audio (digital, FreeDV,
+   and the PC mic with AetherSDR's EQ), switched by gain as in Q3. The
+   Orion must keep working stand-alone.
+2. **CW:** WinKeyer only. cwdaemon on :6789 drives the WinKeyer.
+3. **Slice 1 outside the RSP2 window:** silent and dimmed is fine.
+4. **Rigctld:** AetherSDR's own CatPort on :4532, once it passes Pat's
+   sequence.
+5. **Folder:** the clone lives at `~/aether-orion`.
