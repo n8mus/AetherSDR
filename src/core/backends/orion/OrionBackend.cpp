@@ -463,9 +463,7 @@ void OrionBackend::onLine(const QByteArray& line)
                 const int wdsp = r.letter == 'O' ? 0 : r.letter == 'S' ? 2
                                  : r.letter == 'F' ? 4 : 3;
                 m_wdspAgcMode[r.rx == Rx::Main ? 0 : 1] = wdsp;
-                if (r.rx == Rx::Main) {
-                    pushRxTuning();
-                }
+                pushRxTuning();
             }
         } else if constexpr (std::is_same_v<T, RfGainReply>) {
             if (r.rx == Rx::Main) {
@@ -736,8 +734,8 @@ void OrionBackend::applyFrequency(Rx rx, qint64 hz)
     emit sliceChanged(sliceForRx(rx), d);
     if (rx == Rx::Main) {
         publishPan();
-        pushRxTuning();
     }
+    pushRxTuning();   // both receivers have a host demodulator (step 4)
 }
 
 void OrionBackend::applyMode(Rx rx, Mode mode)
@@ -809,9 +807,7 @@ void OrionBackend::publishPassband(Rx rx)
     d.filterLow = p.lowHz;
     d.filterHigh = p.highHz;
     emit sliceChanged(sliceForRx(rx), d);
-    if (rx == Rx::Main) {
-        pushRxTuning();   // the mode and the passband travel together
-    }
+    pushRxTuning();   // the mode and the passband travel together
 }
 
 void OrionBackend::publishPan()
@@ -1053,6 +1049,28 @@ void OrionBackend::onRxAudio(int slice, const QByteArray& stereoFloat)
 #endif
 }
 
+ReceiveDispatch OrionBackend::requestSliceAudio(int sliceId, const SliceAudioRequest& request)
+{
+    // AetherSDR's per-slice volume, mute and balance arrive here (refusing
+    // it left every fader dead: "Backend refused operation receive audio").
+    if (!request.valid() || request.origin != SliceAudioRequest::Origin::Operator
+        || !rxForSlice(sliceId)) {
+        return ReceiveDispatch::Unsupported;
+    }
+    switch (request.field) {
+    case SliceAudioRequest::Field::Gain:
+        setSliceAudioGain(sliceId, request.value);
+        break;
+    case SliceAudioRequest::Field::Mute:
+        setSliceAudioMute(sliceId, request.value != 0);
+        break;
+    case SliceAudioRequest::Field::Pan:
+        setSliceAudioPan(sliceId, request.value);
+        break;
+    }
+    return ReceiveDispatch::Dispatched;
+}
+
 void OrionBackend::setSliceAudioMute(int sliceId, bool mute)
 {
     if (rxForSlice(sliceId)) {
@@ -1284,8 +1302,8 @@ void OrionBackend::flushWrites()
             m_scheduler.noteDialMoved(rx, nowMs());
             if (rx == Rx::Main) {
                 publishPan();
-                pushRxTuning();
             }
+            pushRxTuning();
         }
         if (r.pendingFilter) {
             const Mode mode = r.mode.value_or(m_rx[0].mode.value_or(Mode::Usb));
