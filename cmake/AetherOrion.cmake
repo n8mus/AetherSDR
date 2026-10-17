@@ -24,7 +24,7 @@ else()
         src/core/backends/orion/OrionPollScheduler.cpp
         src/core/backends/orion/OrionPollScheduler.h)
 
-    # RSP2 panadapter (step 2). Needs the SDRplay API HEADERS from the
+    # RSP2 panadapter and receive audio (steps 2-3). Needs the SDRplay API HEADERS from the
     # operator's install and fftw3f. The library itself is dlopen()ed at run
     # time and never linked, so no package can bundle it (fork rule 5).
     option(ENABLE_ORION_SDRPLAY "Orion backend: SDRplay RSP2 panadapter" ON)
@@ -45,6 +45,8 @@ else()
         target_include_directories(aethercore PRIVATE ${ORION_SDRPLAY_INCLUDE_DIR})
         target_link_libraries(aethercore PRIVATE PkgConfig::ORION_FFTW3F ${CMAKE_DL_LIBS})
         target_sources(aethercore PRIVATE
+            src/core/backends/orion/OrionRxAudio.cpp
+            src/core/backends/orion/OrionRxAudio.h
             src/core/backends/orion/OrionSpectrum.cpp
             src/core/backends/orion/OrionSpectrum.h
             src/core/backends/orion/Rsp2Receiver.cpp

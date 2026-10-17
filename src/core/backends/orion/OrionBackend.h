@@ -31,6 +31,7 @@ class QSerialPort;
 namespace AetherSDR::orion {
 
 class Rsp2Receiver;
+class OrionRxAudio;
 
 class OrionBackend : public IRadioBackend {
     Q_OBJECT
@@ -76,6 +77,8 @@ public:
     void connectRadio(const RadioConnectRequest& request) override;
     void disconnectRadio() override;
     bool isConnected() const override { return m_connected; }
+    // Slice A is demodulated on this host from the RSP2 (step 3).
+    bool ownsRxAudio() const override { return true; }
 
     void setSliceFrequency(int sliceId, double hz) override;
     void setSliceMode(int sliceId, const QString& mode) override;
@@ -90,6 +93,10 @@ public:
     void setPanPreamp(const QString& panId, int step) override;
     void setPanAttenuator(const QString& panId, int step) override;
     void setActiveSlice(int sliceId) override;
+    void setSliceAudioMute(int sliceId, bool mute) override;
+    void setSliceAudioGain(int sliceId, int gainPercent) override;
+    void setSliceAudioPan(int sliceId, int panPercent) override;
+    void setCwPitch(int hz) override;
 
     void setKeying(bool key, const AetherSDR::TxCoordinator::Operation& operation,
                    const AetherSDR::TxCoordinator::Completion& completion = {}) override;
@@ -141,6 +148,8 @@ private:
     void stopSdr();
     void retuneSdr();
     [[nodiscard]] bool sdrRunning() const;
+    void pushRxTuning();
+    void onRxAudio(const QByteArray& stereoFloat);
     void publishMeterDefs();
     void publishInitialState();
     void startupQueries();
@@ -178,6 +187,15 @@ private:
     QTimer m_loRetuneTimer;
     QVariantMap m_connectParams;
     std::unique_ptr<Rsp2Receiver> m_sdr;
+    std::unique_ptr<OrionRxAudio> m_rxAudio;
+    // Slice A's monitor controls, applied in the speaker feed only (the
+    // per-slice feed stays pre-mute, pre-gain, for TCI and decoders).
+    bool m_sliceMuted = false;
+    float m_sliceGain = 1.0f;
+    int m_slicePan = 50;
+    int m_cwPitchHz = 600;
+    std::array<int, 2> m_wdspAgcMode{3, 3};
+    QByteArray m_mixBuffer;
     QString m_sdrStatus;
     qint64 m_sdrSamplesAtTick = 0;
     qint64 m_sdrTickMs = 0;

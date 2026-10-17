@@ -448,6 +448,21 @@ On air: stations show in the pan at the frequencies heard on the Orion,
 and tuning follows. Tune by double-click (AetherSDR's default; View ->
 Single-Click to Tune for one click). SPLIT is refused until step 4.
 
+**Step 3 (built 2026-10-17, awaiting the operator's on-air check):** slice
+A's receive audio from the RSP2 through WDSP (`OrionRxAudio`). The stream
+callback copies each IQ block to a queue; the audio thread mixes the dial to
+0 Hz, resamples 1 MS/s to 96 kHz with one complex polyphase filter
+(x12 / 125: WDSP needs whole-number ratios, and separate I and Q
+resamplers would slip against each other), and runs WDSP RXA at 96 / 48 /
+24 kHz. Findings pinned by `orion_rxaudio_test`:
+- WDSP needs the RSP2's IQ conjugated (as the reference program found).
+- WDSP must run in blocking mode on this dedicated thread. Fed in bursts
+  non-blocking, its output ring falls out of step and sideband rejection
+  drops to about 30 dB; blocking, it is over 150 dB.
+- CW tunes the dial minus the pitch and demodulates around the pitch.
+Slice A only; slice B audio is step 4. Mute, gain and balance apply to the
+speaker feed; the per-slice feed (TCI, decoders) is pre-mute.
+
 **Later steps, each one an operator on-air checkpoint:**
 
 | Step | Content | Operator check |

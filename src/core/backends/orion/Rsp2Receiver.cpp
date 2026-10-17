@@ -1,5 +1,6 @@
 #include "core/backends/orion/Rsp2Receiver.h"
 
+#include "core/backends/orion/OrionRxAudio.h"
 #include "core/backends/orion/SdrPlayApi.h"
 
 #include <QLoggingCategory>
@@ -221,6 +222,13 @@ void Rsp2Receiver::streamCallback(short* xi, short* xq, sdrplay_api_StreamCbPara
 void Rsp2Receiver::onStream(const short* xi, const short* xq, unsigned int n, bool rfChanged)
 {
     constexpr float kNorm = 1.0f / 32768.0f;
+    if (m_scratch.size() < n) {
+        m_scratch.resize(n);
+    }
+    for (unsigned int i = 0; i < n; ++i) {
+        m_scratch[i] = {xi[i] * kNorm, xq[i] * kNorm};
+    }
+    qint64 lo = 0;
     {
         std::lock_guard lock(m_ringLock);
         if (m_ring.empty()) {
@@ -234,12 +242,16 @@ void Rsp2Receiver::onStream(const short* xi, const short* xq, unsigned int n, bo
             m_resetAverage = true;
         }
         for (unsigned int i = 0; i < n; ++i) {
-            m_ring[m_writeIndex] = {xi[i] * kNorm, xq[i] * kNorm};
+            m_ring[m_writeIndex] = m_scratch[i];
             m_writeIndex = (m_writeIndex + 1) & (kRingSamples - 1);
         }
         m_samplesSinceRetune += n;
+        lo = m_activeLo.load();
     }
     m_samples.fetch_add(n, std::memory_order_relaxed);
+    if (m_audioSink) {
+        m_audioSink->push(m_scratch.data(), n, lo);
+    }
 }
 
 void Rsp2Receiver::eventCallback(sdrplay_api_EventT eventId, sdrplay_api_TunerSelectT tuner,

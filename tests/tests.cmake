@@ -9539,10 +9539,18 @@ add_test(NAME orion_cat_test COMMAND orion_cat_test)
 if(AETHER_ORION_SDRPLAY)
     add_executable(orion_spectrum_test
         tests/orion_spectrum_test.cpp
-        src/core/backends/orion/OrionSpectrum.cpp)
+        src/core/backends/orion/OrionSpectrum.cpp
+        src/core/dsp/FftwPlannerLock.cpp)
     target_include_directories(orion_spectrum_test PRIVATE src)
     target_link_libraries(orion_spectrum_test PRIVATE Qt6::Core PkgConfig::ORION_FFTW3F)
     add_test(NAME orion_spectrum_test COMMAND orion_spectrum_test)
+
+    # The host receive chain through the real WDSP: synthetic IQ only.
+    add_executable(orion_rxaudio_test tests/orion_rxaudio_test.cpp)
+    target_include_directories(orion_rxaudio_test PRIVATE src)
+    target_link_libraries(orion_rxaudio_test PRIVATE aethercore Qt6::Core)
+    add_test(NAME orion_rxaudio_test COMMAND orion_rxaudio_test)
+    set_tests_properties(orion_rxaudio_test PROPERTIES TIMEOUT 120)
 endif()
 
 if(AETHER_BACKEND_ORION AND UNIX AND NOT APPLE)

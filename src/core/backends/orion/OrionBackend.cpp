@@ -1,12 +1,14 @@
 #include "core/backends/orion/OrionBackend.h"
 
 #ifdef AETHER_ORION_SDRPLAY
+#include "core/backends/orion/OrionRxAudio.h"
 #include "core/backends/orion/Rsp2Receiver.h"
 #else
 namespace AetherSDR::orion {
 // Built without the SDRplay API headers: no RSP2, the pan shows the
 // placeholder trace. A complete type so the unique_ptr member compiles.
 class Rsp2Receiver {};
+class OrionRxAudio {};
 }  // namespace AetherSDR::orion
 #endif
 
@@ -452,6 +454,13 @@ void OrionBackend::onLine(const QByteArray& line)
                 SliceDelta d;
                 d.agcMode = *neutral;
                 emit sliceChanged(sliceForRx(r.rx), d);
+                // The host demodulator follows the radio's AGC speed.
+                const int wdsp = r.letter == 'O' ? 0 : r.letter == 'S' ? 2
+                                 : r.letter == 'F' ? 4 : 3;
+                m_wdspAgcMode[r.rx == Rx::Main ? 0 : 1] = wdsp;
+                if (r.rx == Rx::Main) {
+                    pushRxTuning();
+                }
             }
         } else if constexpr (std::is_same_v<T, RfGainReply>) {
             if (r.rx == Rx::Main) {
@@ -700,6 +709,7 @@ void OrionBackend::applyFrequency(Rx rx, qint64 hz)
     emit sliceChanged(sliceForRx(rx), d);
     if (rx == Rx::Main) {
         publishPan();
+        pushRxTuning();
     }
 }
 
@@ -772,6 +782,9 @@ void OrionBackend::publishPassband(Rx rx)
     d.filterLow = p.lowHz;
     d.filterHigh = p.highHz;
     emit sliceChanged(sliceForRx(rx), d);
+    if (rx == Rx::Main) {
+        pushRxTuning();   // the mode and the passband travel together
+    }
 }
 
 void OrionBackend::publishPan()
@@ -843,7 +856,22 @@ void OrionBackend::startSdr(const QVariantMap& params)
         m_view.centreHz = m_rx[0].hz.value_or(14'025'000);
         m_viewKnown = true;
     }
+    // Receive audio first: the RSP2's stream callback feeds it from the
+    // first block, so it must exist before the device starts.
+    m_rxAudio = std::make_unique<OrionRxAudio>();
+    connect(m_rxAudio.get(), &OrionRxAudio::audioReady, this, &OrionBackend::onRxAudio);
+    {
+        QString audioError;
+        OrionRxAudio::Tuning t;
+        t.dialHz = m_rx[0].hz.value_or(14'025'000);
+        if (!m_rxAudio->start(t, &audioError)) {
+            qCWarning(lcOrion) << "RX audio:" << audioError;
+            emit configurationWarning(tr("Receive audio: %1").arg(audioError));
+            m_rxAudio.reset();
+        }
+    }
     m_sdr = std::make_unique<Rsp2Receiver>();
+    m_sdr->setAudioSink(m_rxAudio.get());
     connect(m_sdr.get(), &Rsp2Receiver::frameReady, this, [this](const QByteArray& frame) {
         if (m_connected) {
             emit spectrumFrameReady(0, frame);
@@ -860,6 +888,7 @@ void OrionBackend::startSdr(const QVariantMap& params)
     QString error;
     if (!m_sdr->start(spectrum::loForView(m_view), settings, &error)) {
         m_sdr.reset();
+        m_rxAudio.reset();
         m_sdrStatus = error;
         qCWarning(lcOrion) << "RSP2:" << error;
         emit configurationWarning(
@@ -868,6 +897,7 @@ void OrionBackend::startSdr(const QVariantMap& params)
     }
     m_sdrStatus = tr("streaming");
     m_sdr->setView(m_view, m_panPoints);
+    pushRxTuning();
     m_sdrStartedMs = nowMs();
     m_sdrTickMs = m_sdrStartedMs;
     m_sdrSamplesAtTick = 0;
@@ -881,11 +911,101 @@ void OrionBackend::startSdr(const QVariantMap& params)
 #endif
 }
 
+void OrionBackend::pushRxTuning()
+{
+#ifdef AETHER_ORION_SDRPLAY
+    if (!m_rxAudio) {
+        return;
+    }
+    const Receiver& r = m_rx[0];
+    OrionRxAudio::Tuning t;
+    t.dialHz = r.hz.value_or(0);
+    switch (r.mode.value_or(Mode::Usb)) {
+    case Mode::Usb: t.mode = OrionRxAudio::Mode::Usb; break;
+    case Mode::Lsb: t.mode = OrionRxAudio::Mode::Lsb; break;
+    case Mode::Cw:  t.mode = OrionRxAudio::Mode::Cw; break;
+    case Mode::Cwl: t.mode = OrionRxAudio::Mode::Cwl; break;
+    case Mode::Am:  t.mode = OrionRxAudio::Mode::Am; break;
+    case Mode::Fm:  t.mode = OrionRxAudio::Mode::Fm; break;
+    }
+    if (r.mode && r.bandwidthHz && r.pbtHz) {
+        const Passband p = passbandFromFilter(*r.mode, *r.bandwidthHz, *r.pbtHz);
+        t.lowHz = p.lowHz;
+        t.highHz = p.highHz;
+    } else {
+        const Passband p = passbandFromFilter(r.mode.value_or(Mode::Usb), 2400, 0);
+        t.lowHz = p.lowHz;
+        t.highHz = p.highHz;
+    }
+    t.cwPitchHz = m_cwPitchHz;
+    t.agcMode = m_wdspAgcMode[0];
+    if (t.dialHz > 0) {
+        m_rxAudio->setTuning(t);
+    }
+#endif
+}
+
+void OrionBackend::onRxAudio(const QByteArray& stereoFloat)
+{
+    if (!m_connected) {
+        return;
+    }
+    // Slice A's own feed: pre-mute, pre-gain (TCI, decoders, recorder).
+    publishLegacySliceAudio(0, stereoFloat);
+    if (m_sliceMuted) {
+        return;
+    }
+    if (m_sliceGain == 1.0f && m_slicePan == 50) {
+        publishLegacyAudio(stereoFloat);
+        return;
+    }
+    // A balance, not a constant-power pan: centre is unity on both sides.
+    const float lw = m_sliceGain * (m_slicePan <= 50 ? 1.0f : (100 - m_slicePan) / 50.0f);
+    const float rw = m_sliceGain * (m_slicePan >= 50 ? 1.0f : m_slicePan / 50.0f);
+    m_mixBuffer = stereoFloat;
+    auto* f = reinterpret_cast<float*>(m_mixBuffer.data());
+    const qsizetype n = m_mixBuffer.size() / static_cast<qsizetype>(sizeof(float));
+    for (qsizetype k = 0; k + 1 < n; k += 2) {
+        f[k] *= lw;
+        f[k + 1] *= rw;
+    }
+    publishLegacyAudio(m_mixBuffer);
+}
+
+void OrionBackend::setSliceAudioMute(int sliceId, bool mute)
+{
+    if (sliceId == 0) {
+        m_sliceMuted = mute;
+    }
+}
+
+void OrionBackend::setSliceAudioGain(int sliceId, int gainPercent)
+{
+    if (sliceId == 0) {
+        m_sliceGain = std::clamp(gainPercent, 0, 100) / 100.0f;
+    }
+}
+
+void OrionBackend::setSliceAudioPan(int sliceId, int panPercent)
+{
+    if (sliceId == 0) {
+        m_slicePan = std::clamp(panPercent, 0, 100);
+    }
+}
+
+void OrionBackend::setCwPitch(int hz)
+{
+    m_cwPitchHz = std::clamp(hz, 200, 1200);
+    pushRxTuning();
+}
+
 void OrionBackend::stopSdr()
 {
-    // Joins the spectrum worker and releases the device before returning
-    // (IRadioBackend rule 5), so nothing reaches a seam signal afterwards.
+    // Device first (its callback feeds the audio chain), then the audio
+    // thread. Both join before returning (IRadioBackend rule 5), so nothing
+    // reaches a seam signal afterwards.
     m_sdr.reset();
+    m_rxAudio.reset();
 }
 
 // ---- intents down ------------------------------------------------------------
@@ -988,6 +1108,7 @@ void OrionBackend::flushWrites()
             m_scheduler.noteDialMoved(rx, nowMs());
             if (rx == Rx::Main) {
                 publishPan();
+                pushRxTuning();
             }
         }
         if (r.pendingFilter) {

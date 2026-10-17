@@ -1,5 +1,7 @@
 #include "core/backends/orion/OrionSpectrum.h"
 
+#include "core/dsp/FftwPlannerLock.h"
+
 #include <fftw3.h>
 
 #include <algorithm>
@@ -53,13 +55,6 @@ std::vector<float> cropToView(const std::vector<float>& powerDb, qint64 loHz,
     return out;
 }
 
-// FFTW's planner is not thread-safe; plans are rare, so one lock for all.
-static std::mutex& plannerLock()
-{
-    static std::mutex m;
-    return m;
-}
-
 struct SpectrumProcessor::Fft {
     fftwf_complex* in = nullptr;
     fftwf_complex* out = nullptr;
@@ -78,7 +73,7 @@ SpectrumProcessor::SpectrumProcessor(int fftSize)
         sum += w;
     }
     m_windowGain = sum;
-    std::lock_guard lock(plannerLock());
+    const auto lock = AetherSDR::fftwfPlannerLock();
     m_fft->in = fftwf_alloc_complex(static_cast<std::size_t>(fftSize));
     m_fft->out = fftwf_alloc_complex(static_cast<std::size_t>(fftSize));
     m_fft->plan = fftwf_plan_dft_1d(fftSize, m_fft->in, m_fft->out, FFTW_FORWARD, FFTW_ESTIMATE);
@@ -86,7 +81,7 @@ SpectrumProcessor::SpectrumProcessor(int fftSize)
 
 SpectrumProcessor::~SpectrumProcessor()
 {
-    std::lock_guard lock(plannerLock());
+    const auto lock = AetherSDR::fftwfPlannerLock();
     if (m_fft->plan) {
         fftwf_destroy_plan(m_fft->plan);
     }
