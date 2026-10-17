@@ -539,8 +539,13 @@ disconnect).
 On air 2026-10-17 (operator): the WinKeyer opened as a WK3; text typed in
 the WinKeyer panel sends, Esc and a paddle touch both stop it, and the
 panel's Speed changes the keyer (after a fix: the CW speed control was
-refused by the backend). Still to check: the keyer's speed pot, cqrlog over
-cwdaemon, the rotor from a rotctld client, Pat's warning.
+refused by the backend). The keyer's speed knob now sets the sending speed
+(after a second fix: the knob speed is sent back to the keyer, as the
+reference program does). Health shows the rotor's heading, rotctld,
+cwdaemon and the Pat watch all up. Deferred by the operator ("get the
+program working before the accessories"): turning the rotor, cqrlog over
+cwdaemon (not used here), Pat's warning, and a rotor control in AetherSDR
+(it has none for a DCU-3; rotctld clients only).
 Not ported (still optional): PowerMaster, skimmer and DX-cluster server,
 cqrlog ADIF sync, Not1MM log reader.
 
