@@ -466,7 +466,7 @@ radio. WDSP is now built on the audio thread, and a late poll tick restarts
 the silence clock. Slice A only; slice B audio is step 4. Mute, gain and balance apply to the
 speaker feed; the per-slice feed (TCI, decoders) is pre-mute.
 
-**Step 4 (built 2026-10-17, awaiting the operator's on-air check):**
+**Step 4 (built and on-air checked 2026-10-17):**
 - Slice B (sub receiver) audio: a second `OrionRxAudio` on the same RSP2
   stream, mixed with A for the speaker (sample-aligned; a stalled chain
   plays as silence after 0.2 s). Each slice keeps its own pre-mute feed.
@@ -483,7 +483,9 @@ Routing only: nothing in step 4 keys the transmitter.
 On air (2026-10-17): split works. AetherSDR's right-click SPLIT offsets
 (1, 5 and 10 kHz up) all reach the Orion. A plain left-click on SPLIT is
 still refused ("Split entry ignored"): that path creates a Flex slice and
-the Orion's two receivers are fixed.
+the Orion's two receivers are fixed. Both VFOs are heard together from the
+RSP2 after one fix: B's demodulator had only been retuned on A's changes,
+and AetherSDR's per-slice audio controls arrive as requestSliceAudio.
 
 **Later steps, each one an operator on-air checkpoint:**
 
