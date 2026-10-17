@@ -56,6 +56,12 @@ public:
     static constexpr int kLinkTickMs = 1000;
     // The pan's width until the RSP2 supplies a real capture (step 2).
     static constexpr double kPanViewMhz = 0.2;
+    // Until the RSP2 supplies real spectrum, a flat trace at the floor keeps
+    // the pan and waterfall alive (AetherSDR's connect overlay only clears on
+    // the first spectrum frame).
+    static constexpr int kPlaceholderSpectrumMs = 250;
+    static constexpr int kPlaceholderSpectrumBins = 512;
+    static constexpr float kPlaceholderFloorDbm = -127.0f;
 
     // ---- IRadioBackend ----
     RadioCapabilities capabilities() const override;
@@ -108,6 +114,7 @@ private:
     void onFirstReply();
     void onPollTick();
     void onLinkTick();
+    void onPlaceholderSpectrumTick();
     void flushWrites();
     void send(const QByteArray& command);
 
@@ -148,6 +155,7 @@ private:
     QTimer m_pollTimer;
     QTimer m_linkTimer;
     QTimer m_writeTimer;
+    QTimer m_placeholderSpectrumTimer;
     qint64 m_lastFrequencyWriteMs = -1'000'000;
 
     // Link accounting (owner thread only).

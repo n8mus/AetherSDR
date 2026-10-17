@@ -34,6 +34,10 @@ OrionBackend::OrionBackend(QObject* parent)
     m_writeTimer.setSingleShot(true);
     m_writeTimer.setInterval(kWriteCoalesceMs);
     connect(&m_writeTimer, &QTimer::timeout, this, &OrionBackend::flushWrites);
+
+    m_placeholderSpectrumTimer.setInterval(kPlaceholderSpectrumMs);
+    connect(&m_placeholderSpectrumTimer, &QTimer::timeout, this,
+            &OrionBackend::onPlaceholderSpectrumTick);
 }
 
 OrionBackend::~OrionBackend()
@@ -45,6 +49,7 @@ OrionBackend::~OrionBackend()
     m_pollTimer.stop();
     m_linkTimer.stop();
     m_writeTimer.stop();
+    m_placeholderSpectrumTimer.stop();
     if (m_port) {
         m_port->disconnect(this);
         m_port->close();
@@ -292,6 +297,7 @@ void OrionBackend::closeLink()
     m_pollTimer.stop();
     m_linkTimer.stop();
     m_writeTimer.stop();
+    m_placeholderSpectrumTimer.stop();
     for (Receiver& r : m_rx) {
         r.pendingHz.reset();
         r.pendingFilter.reset();
@@ -450,6 +456,8 @@ void OrionBackend::onFirstReply()
     startupQueries();
     m_pollTimer.start();
     m_linkTimer.start();
+    m_placeholderSpectrumTimer.start();
+    onPlaceholderSpectrumTick();
 }
 
 void OrionBackend::publishInitialState()
@@ -543,6 +551,24 @@ void OrionBackend::onPollTick()
         }
         send(q);
     }
+}
+
+void OrionBackend::onPlaceholderSpectrumTick()
+{
+    // Step 1 has no spectrum source. A flat floor says "no data" honestly and
+    // lets the pan finish connecting; step 2 replaces it with the RSP2.
+    if (!m_connected) {
+        return;
+    }
+    static const QByteArray kFrame = [] {
+        QByteArray frame(kPlaceholderSpectrumBins * static_cast<int>(sizeof(float)), Qt::Uninitialized);
+        auto* bins = reinterpret_cast<float*>(frame.data());
+        for (int i = 0; i < kPlaceholderSpectrumBins; ++i) {
+            bins[i] = kPlaceholderFloorDbm;
+        }
+        return frame;
+    }();
+    emit spectrumFrameReady(0, kFrame);
 }
 
 void OrionBackend::onLinkTick()
