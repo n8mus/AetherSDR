@@ -7,9 +7,30 @@
 #include <cstdlib>
 #include <type_traits>
 
+#if defined(Q_OS_UNIX)
+#include <sys/ioctl.h>
+#include <termios.h>
+#endif
+
 Q_LOGGING_CATEGORY(lcOrion, "aether.orion")
 
 namespace AetherSDR::orion {
+
+namespace {
+// QSerialPort opens the tty in exclusive mode (TIOCEXCL) and does not clear
+// it on close. The kernel clears it on the tty's LAST close, so a real port
+// is fine, but anything else holding the device open (a pty bridge, the fake
+// radio) would leave every later open failing with "busy". Release it here.
+void closeSerial(QSerialPort& port)
+{
+#if defined(Q_OS_UNIX) && defined(TIOCNXCL)
+    if (port.isOpen() && port.handle() >= 0) {
+        ::ioctl(port.handle(), TIOCNXCL);
+    }
+#endif
+    port.close();
+}
+}  // namespace
 
 OrionBackend::OrionBackend(QObject* parent)
     : IRadioBackend(parent)
@@ -52,7 +73,7 @@ OrionBackend::~OrionBackend()
     m_placeholderSpectrumTimer.stop();
     if (m_port) {
         m_port->disconnect(this);
-        m_port->close();
+        closeSerial(*m_port);
     }
 }
 
@@ -304,7 +325,7 @@ void OrionBackend::closeLink()
     }
     if (m_port) {
         m_port->disconnect(this);
-        m_port->close();
+        closeSerial(*m_port);
         m_port.reset();
     }
     m_connecting = false;

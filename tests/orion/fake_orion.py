@@ -22,6 +22,7 @@ Keys while running (type, then Enter):
 
 from __future__ import annotations
 
+import fcntl
 import os
 import random
 import select
@@ -119,7 +120,14 @@ def main() -> int:
     watch = [master, sys.stdin]
     try:
         while True:
-            ready, _, _ = select.select(watch, [], [])
+            ready, _, _ = select.select(watch, [], [], 0.5)
+            # The fake keeps the slave open, so a client's exclusive-mode lock
+            # (TIOCEXCL, set by QSerialPort) would outlive that client and the
+            # next open would fail "busy". Keep it cleared.
+            try:
+                fcntl.ioctl(slave, termios.TIOCNXCL)
+            except OSError:
+                pass
             if sys.stdin in ready:
                 text = sys.stdin.readline()
                 if text == "":
