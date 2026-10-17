@@ -410,8 +410,8 @@ void OrionBackend::onLine(const QByteArray& line)
     std::visit([this](const auto& r) {
         using T = std::decay_t<decltype(r)>;
         if constexpr (std::is_same_v<T, FrequencyReply>) {
+            m_scheduler.noteFrequencyReply(r.rx);
             if (r.rx == Rx::Main) {
-                m_scheduler.noteMainFrequencyReply();
                 if (m_frequencyQuerySentMs >= 0) {
                     m_rttMs = static_cast<int>(nowMs() - m_frequencyQuerySentMs);
                     m_frequencyQuerySentMs = -1;
@@ -630,8 +630,8 @@ void OrionBackend::applyFrequency(Rx rx, qint64 hz)
     r.candidateHz.reset();
     const bool knobMoved = r.hz.has_value();
     r.hz = hz;
-    if (knobMoved && rx == Rx::Main) {
-        m_scheduler.noteDialMoved(nowMs());
+    if (knobMoved) {
+        m_scheduler.noteDialMoved(rx, nowMs());
     }
     if (!m_connected) {
         return;   // published once the slices exist (publishInitialState)
@@ -829,8 +829,8 @@ void OrionBackend::flushWrites()
             SliceDelta d;
             d.frequency = static_cast<double>(*r.hz) / 1e6;
             emit sliceChanged(sliceForRx(rx), d);
+            m_scheduler.noteDialMoved(rx, nowMs());
             if (rx == Rx::Main) {
-                m_scheduler.noteDialMoved(nowMs());
                 publishPan();
             }
         }
@@ -907,6 +907,7 @@ void OrionBackend::setActiveSlice(int sliceId)
     // The radio has no "active" notion to echo, so clear the old one here.
     const int previous = m_activeSlice;
     m_activeSlice = sliceId;
+    m_scheduler.setActiveReceiver(*rxForSlice(sliceId));
     if (!m_connected) {
         return;
     }

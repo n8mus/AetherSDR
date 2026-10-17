@@ -7,13 +7,18 @@
 // (about 17 ms median, 110 ms tail). One query per 200 ms tick keeps the
 // link well inside that budget:
 //
-//   phase 0, 4  ?AF      dial A (one in flight at a time, re-armed after 600 ms)
+//   phase 0, 4  the ACTIVE slice's dial (?AF or ?BF; one in flight at a
+//               time, re-armed after 600 ms)
 //   phase 1, 3  ?S       both S-meters (2 Hz)
-//   phase 2     fast wheel: main mode, main filter, ?BF, sub mode, sub filter
+//   phase 2     fast wheel: main mode, main filter, the other dial, sub
+//               mode, sub filter
 //
 // Every 25th tick one S-meter slot is lent to a slow wheel (routing, AGC,
 // front end), about one item every 5 s. Within 800 ms of a dial move the
-// S-meter slots go to ?AF so the display tracks the knob.
+// S-meter slots go to that dial so the display tracks the knob, whichever
+// VFO it is (on-air finding, 2026-10-17: B lagged when only A had this).
+
+#include "core/backends/orion/OrionCat.h"
 
 #include <QByteArray>
 #include <QList>
@@ -30,22 +35,31 @@ public:
     // The queries to send on this tick (often one, a filter read is two).
     QList<QByteArray> next(qint64 nowMs);
 
-    // The operator moved a dial (ours or the radio's): favour ?AF for a while.
-    void noteDialMoved(qint64 nowMs) { m_lastDialMoveMs = nowMs; }
-    // A dial-A reply arrived: the next ?AF may go out immediately.
-    void noteMainFrequencyReply() { m_mainFrequencyInFlight = false; }
+    // The receiver whose dial gets the fast slots: the active slice's.
+    void setActiveReceiver(Rx rx) { m_activeRx = rx; }
+    [[nodiscard]] Rx activeReceiver() const { return m_activeRx; }
+    // A dial moved (ours or the radio's knob): favour it for a while.
+    void noteDialMoved(Rx rx, qint64 nowMs) { dial(rx).lastMoveMs = nowMs; }
+    // A frequency reply arrived: that dial's next query may go out at once.
+    void noteFrequencyReply(Rx rx) { dial(rx).inFlight = false; }
 
     void reset();
 
 private:
-    QList<QByteArray> mainFrequency(qint64 nowMs);
+    struct Dial {
+        bool inFlight = false;
+        qint64 sentMs = 0;
+        qint64 lastMoveMs = -1'000'000;
+    };
+    Dial& dial(Rx rx) { return rx == Rx::Main ? m_main : m_sub; }
+    QList<QByteArray> frequency(Rx rx, qint64 nowMs);
 
     int m_tick = 0;
     int m_fastWheel = 0;
     int m_slowWheel = 0;
-    bool m_mainFrequencyInFlight = false;
-    qint64 m_mainFrequencySentMs = 0;
-    qint64 m_lastDialMoveMs = -1'000'000;
+    Rx m_activeRx = Rx::Main;
+    Dial m_main;
+    Dial m_sub;
 };
 
 }  // namespace AetherSDR::orion

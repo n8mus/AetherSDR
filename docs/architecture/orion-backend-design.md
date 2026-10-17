@@ -429,6 +429,12 @@ Constraints from upstream that still apply:
     moves, and disconnect is clean.
   - No real radio, no TX.
 
+**Step 1 on-air result (2026-10-17, real Orion on `/dev/orion`):** both
+VFOs appear and follow the radio, the mouse wheel tunes it, and the S-meter
+works with slight lag. VFO B tuning was sluggish: the poller sped up only
+for dial A. Fixed by giving the active slice's dial the fast slots and
+lending the burst slots to whichever dial is moving.
+
 **Later steps, each one an operator on-air checkpoint:**
 
 | Step | Content | Operator check |

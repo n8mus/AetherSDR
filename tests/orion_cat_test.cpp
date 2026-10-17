@@ -193,7 +193,7 @@ static void testScheduler()
     now += 200;
     check(s.next(now) == QList<QByteArray>{"?AF"},
           "tick 4: ?AF re-armed after 600 ms without a reply");
-    s.noteMainFrequencyReply();
+    s.noteFrequencyReply(Rx::Main);
     now += 200;
     check(s.next(now) == QList<QByteArray>{"?AF"}, "tick 5: ?AF after a reply");
     now += 200;
@@ -205,10 +205,42 @@ static void testScheduler()
     OrionPollScheduler burst;
     now = 50'000;
     (void)burst.next(now);   // tick 0 ?AF
-    burst.noteMainFrequencyReply();
-    burst.noteDialMoved(now);
+    burst.noteFrequencyReply(Rx::Main);
+    burst.noteDialMoved(Rx::Main, now);
     now += 200;
     check(burst.next(now) == QList<QByteArray>{"?AF"}, "burst: S slot lent to ?AF");
+
+    // VFO B moving: the S slots go to ?BF (on-air finding: B lagged).
+    OrionPollScheduler sub;
+    now = 70'000;
+    (void)sub.next(now);   // tick 0 ?AF
+    sub.noteFrequencyReply(Rx::Main);
+    sub.noteDialMoved(Rx::Sub, now);
+    now += 200;
+    check(sub.next(now) == QList<QByteArray>{"?BF"}, "burst follows VFO B");
+
+    // B active: B gets the fast slots, A drops to the fast wheel.
+    OrionPollScheduler activeB;
+    activeB.setActiveReceiver(Rx::Sub);
+    now = 80'000;
+    check(activeB.next(now) == QList<QByteArray>{"?BF"}, "active B: tick 0 polls ?BF");
+    now += 200;
+    (void)activeB.next(now);   // tick 1 ?S
+    now += 200;
+    (void)activeB.next(now);   // tick 2 main mode
+    now += 200;
+    (void)activeB.next(now);   // tick 3 slow wheel
+    activeB.noteFrequencyReply(Rx::Sub);
+    now += 200;
+    check(activeB.next(now) == QList<QByteArray>{"?BF"}, "active B: tick 4 polls ?BF");
+    QList<QByteArray> lap;
+    for (int i = 0; i < 25; ++i) {
+        now += 200;
+        lap += activeB.next(now);
+        activeB.noteFrequencyReply(Rx::Main);
+        activeB.noteFrequencyReply(Rx::Sub);
+    }
+    check(lap.contains("?AF"), "active B: dial A is still read in the fast wheel");
 
     // The slow wheel lands on tick 3, 28, 53 ... and starts with ?KV.
     OrionPollScheduler slow;
@@ -219,7 +251,7 @@ static void testScheduler()
         if (i == 3 || i == 28) {
             seen += q;
         }
-        slow.noteMainFrequencyReply();
+        slow.noteFrequencyReply(Rx::Main);
         now += 200;
     }
     check((seen == QList<QByteArray>{"?KV", "?RMA"}), "slow wheel: ?KV then main AGC");

@@ -9,23 +9,26 @@ void OrionPollScheduler::reset()
     *this = OrionPollScheduler{};
 }
 
-QList<QByteArray> OrionPollScheduler::mainFrequency(qint64 nowMs)
+QList<QByteArray> OrionPollScheduler::frequency(Rx rx, qint64 nowMs)
 {
-    if (m_mainFrequencyInFlight && nowMs - m_mainFrequencySentMs < kFrequencyRearmMs) {
+    Dial& d = dial(rx);
+    if (d.inFlight && nowMs - d.sentMs < kFrequencyRearmMs) {
         return {};
     }
-    m_mainFrequencyInFlight = true;
-    m_mainFrequencySentMs = nowMs;
-    return {queryFrequency(Rx::Main)};
+    d.inFlight = true;
+    d.sentMs = nowMs;
+    return {queryFrequency(rx)};
 }
 
 QList<QByteArray> OrionPollScheduler::next(qint64 nowMs)
 {
     const int tick = m_tick++;
     const int phase = tick % 5;
+    const Rx other = m_activeRx == Rx::Main ? Rx::Sub : Rx::Main;
 
+    // The dial the operator is working gets the fast slots.
     if (phase == 0 || phase == 4) {
-        return mainFrequency(nowMs);
+        return frequency(m_activeRx, nowMs);
     }
 
     if (phase == 2) {
@@ -36,7 +39,7 @@ QList<QByteArray> OrionPollScheduler::next(qint64 nowMs)
         case 1:
             return {queryBandwidth(Rx::Main), queryPbt(Rx::Main)};
         case 2:
-            return {queryFrequency(Rx::Sub)};
+            return frequency(other, nowMs);
         case 3:
             return {queryMode(Rx::Sub)};
         default:
@@ -44,9 +47,14 @@ QList<QByteArray> OrionPollScheduler::next(qint64 nowMs)
         }
     }
 
-    // Phases 1 and 3: the S-meter slots.
-    if (nowMs - m_lastDialMoveMs < kBurstWindowMs) {
-        return mainFrequency(nowMs);
+    // Phases 1 and 3: the S-meter slots, lent to whichever dial is moving.
+    const bool mainMoving = nowMs - m_main.lastMoveMs < kBurstWindowMs;
+    const bool subMoving = nowMs - m_sub.lastMoveMs < kBurstWindowMs;
+    if (mainMoving && subMoving) {
+        return frequency(phase == 1 ? Rx::Main : Rx::Sub, nowMs);
+    }
+    if (mainMoving || subMoving) {
+        return frequency(mainMoving ? Rx::Main : Rx::Sub, nowMs);
     }
     if (tick % kSlowWheelEveryTicks == 3) {
         const int item = m_slowWheel++ % 6;
