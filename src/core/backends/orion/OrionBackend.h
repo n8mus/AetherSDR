@@ -51,6 +51,8 @@ public:
     // on-air experience; see the design doc).
     static constexpr int kConnectTimeoutMs = 3000;
     static constexpr int kSilenceTimeoutMs = 5000;
+    // A poll tick this late means the owner thread stalled, not the radio.
+    static constexpr int kStallToleranceMs = 1000;
     static constexpr int kWriteCoalesceMs = 40;
     static constexpr int kModeAfterRetuneMs = 120;
     static constexpr int kFilterRecallMs = 400;
@@ -211,6 +213,7 @@ private:
     quint64 m_repliesDecoded = 0;
     quint64 m_linesIgnored = 0;
     qint64 m_lastReplyMs = -1;
+    qint64 m_lastPollMs = -1;
     bool m_trafficSinceTick = false;
     qint64 m_frequencyQuerySentMs = -1;
     int m_rttMs = -1;

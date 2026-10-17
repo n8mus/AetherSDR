@@ -129,17 +129,8 @@ bool OrionRxAudio::start(const Tuning& tuning, QString* error)
     // of sideband rejection.
     c.blockForOutput = true;
 
-    std::string why;
-    m_channel = WdspChannel::create(c, &why);
-    if (!m_channel) {
-        if (error) {
-            *error = tr("cannot build the WDSP receive channel: %1").arg(QString::fromStdString(why));
-        }
-        return false;
-    }
-    if (!m_channel->isRunning()) {
-        (void)m_channel->setRunning(true);
-    }
+    Q_UNUSED(error);   // a WDSP failure is reported later, by failed()
+    m_config = c;
 
     m_phases = polyphasePrototype(kInterpolate, kTapsPerPhase, kFilterCutoffHz, kInputRateHz);
     m_history.assign(static_cast<std::size_t>(2 * kTapsPerPhase), {});
@@ -148,8 +139,6 @@ bool OrionRxAudio::start(const Tuning& tuning, QString* error)
     m_ncoPhase = 0.0;
     m_wdspI.clear();
     m_wdspQ.clear();
-    m_left.assign(m_channel->outputBlockSize(), 0.0f);
-    m_right.assign(m_channel->outputBlockSize(), 0.0f);
     m_dcX[0] = m_dcX[1] = m_dcY[0] = m_dcY[1] = 0.0f;
     // 20 Hz DC-blocker corner at 24 kHz: removes AM's carrier pedestal.
     m_dcR = static_cast<float>(1.0 - 2.0 * std::numbers::pi * 20.0 / kAudioRateHz);
@@ -168,6 +157,11 @@ bool OrionRxAudio::start(const Tuning& tuning, QString* error)
     m_dropped = 0;
     ++m_generation;
     m_stop = false;
+    m_ready = false;
+    // WDSP is built ON the audio thread: a cold open plans FFTW filters and
+    // can take seconds (measured: 12 s on this station). Built on the owner
+    // thread it froze the GUI and the CAT watchdog then declared the radio
+    // dead. Audio starts when the channel is ready; until then push() drops.
     m_worker = std::thread([this] { workerLoop(); });
     return true;
 }
@@ -180,6 +174,7 @@ void OrionRxAudio::stop()
         m_worker.join();
     }
     ++m_generation;   // drop audio already queued to the owner
+    m_ready = false;
     // processIq() is no longer called: the channel may be destroyed here.
     m_channel.reset();
 }
@@ -202,7 +197,7 @@ std::size_t OrionRxAudio::queuedSamples()
 
 void OrionRxAudio::push(const std::complex<float>* iq, std::size_t n, qint64 loHz)
 {
-    if (n == 0) {
+    if (n == 0 || !m_ready.load(std::memory_order_acquire)) {
         return;
     }
     {
@@ -223,6 +218,26 @@ void OrionRxAudio::push(const std::complex<float>* iq, std::size_t n, qint64 loH
 
 void OrionRxAudio::workerLoop()
 {
+    std::string why;
+    m_channel = WdspChannel::create(m_config, &why);
+    if (!m_channel) {
+        const quint64 generation = m_generation;
+        const QString reason = tr("cannot build the WDSP receive channel: %1")
+                                   .arg(QString::fromStdString(why));
+        QMetaObject::invokeMethod(this, [this, reason, generation] {
+            if (generation == m_generation) {
+                emit failed(reason);
+            }
+        }, Qt::QueuedConnection);
+        return;
+    }
+    if (!m_channel->isRunning()) {
+        (void)m_channel->setRunning(true);
+    }
+    m_left.assign(m_channel->outputBlockSize(), 0.0f);
+    m_right.assign(m_channel->outputBlockSize(), 0.0f);
+    m_ready = true;
+
     while (!m_stop) {
         Block block;
         {

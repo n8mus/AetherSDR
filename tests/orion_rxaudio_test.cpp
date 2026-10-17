@@ -49,6 +49,12 @@ static double audioRms(OrionRxAudio::Mode mode, int lowHz, int highHz, qint64 di
         ++g_failures;
         return 0.0;
     }
+    // The channel is built on the audio thread; feed once it is ready.
+    QElapsedTimer ready;
+    ready.start();
+    while (!rx.isReady() && ready.elapsed() < 60000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+    }
     double sumSq = 0.0;
     quint64 count = 0;
     quint64 blocks = 0;

@@ -291,6 +291,7 @@ void OrionBackend::openLink()
     m_repliesDecoded = 0;
     m_linesIgnored = 0;
     m_lastReplyMs = -1;
+    m_lastPollMs = -1;
     m_rttMs = -1;
     m_frequencyQuerySentMs = -1;
 
@@ -598,6 +599,16 @@ void OrionBackend::onPollTick()
     if (!m_connected) {
         return;
     }
+    // A late tick means OUR thread stalled (a slow plan, a busy machine):
+    // nothing could have been read meanwhile, so the radio is not to blame.
+    // Restart the silence clock instead of declaring the link dead.
+    const qint64 now = nowMs();
+    if (m_lastPollMs >= 0 && now - m_lastPollMs > kStallToleranceMs) {
+        qCInfo(lcOrion) << "Orion: event loop stalled" << (now - m_lastPollMs)
+                        << "ms - not counted against the radio";
+        m_lastReplyMs = now;
+    }
+    m_lastPollMs = now;
     if (m_lastReplyMs >= 0 && nowMs() - m_lastReplyMs > kSilenceTimeoutMs) {
         failLink(tr("The Orion stopped answering on %1.").arg(m_device));
         return;
@@ -860,6 +871,10 @@ void OrionBackend::startSdr(const QVariantMap& params)
     // first block, so it must exist before the device starts.
     m_rxAudio = std::make_unique<OrionRxAudio>();
     connect(m_rxAudio.get(), &OrionRxAudio::audioReady, this, &OrionBackend::onRxAudio);
+    connect(m_rxAudio.get(), &OrionRxAudio::failed, this, [this](const QString& reason) {
+        qCWarning(lcOrion) << "RX audio:" << reason;
+        emit configurationWarning(tr("Receive audio: %1").arg(reason));
+    });
     {
         QString audioError;
         OrionRxAudio::Tuning t;

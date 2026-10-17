@@ -70,7 +70,8 @@ public:
     explicit OrionRxAudio(QObject* parent = nullptr);
     ~OrionRxAudio() override;
 
-    // Builds the WDSP channel and starts the audio thread. Owner thread.
+    // Starts the audio thread, which builds the WDSP channel first (that can
+    // take seconds cold). Owner thread. A WDSP failure arrives as failed().
     bool start(const Tuning& tuning, QString* error);
     void stop();
     [[nodiscard]] bool isRunning() const { return m_worker.joinable(); }
@@ -92,10 +93,13 @@ public:
     [[nodiscard]] quint64 droppedBlocks() const { return m_dropped.load(); }
     // IQ samples waiting for the audio thread (any thread).
     [[nodiscard]] std::size_t queuedSamples();
+    // True once the WDSP channel is built and audio can flow (any thread).
+    [[nodiscard]] bool isReady() const { return m_ready.load(std::memory_order_acquire); }
 
 signals:
     // Interleaved float L,R at 24 kHz, one WDSP output block.
     void audioReady(const QByteArray& stereoFloat);
+    void failed(const QString& reason);
 
 private:
     struct Block {
@@ -106,7 +110,9 @@ private:
     void processBlock(const Block& block);
     void applyTuningIfChanged();
 
-    std::unique_ptr<WdspChannel> m_channel;
+    std::unique_ptr<WdspChannel> m_channel;   // built and used on the audio thread
+    WdspChannel::Config m_config;
+    std::atomic<bool> m_ready{false};
 
     std::mutex m_queueLock;
     std::condition_variable m_queueWake;
