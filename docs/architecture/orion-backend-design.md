@@ -514,7 +514,9 @@ real transmission is the operator's):**
   it needs, all AetherSDR's own: PC Audio on (title bar), and Radio Setup
   -> Audio -> Input = the PCM2900. A leftover capability line had hidden
   the MIC/PC choice; fixed. Key edges, radio TX/RX reports and path
-  changes are logged (aether.orion).
+  changes are logged (aether.orion). The MIC path checked too: on MIC the
+  front microphone modulates, on PC it does not (only the SignaLink does),
+  as designed.
 
 **Later steps, each one an operator on-air checkpoint:**
 
