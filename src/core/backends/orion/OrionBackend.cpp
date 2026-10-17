@@ -12,7 +12,11 @@ class OrionRxAudio {};
 }  // namespace AetherSDR::orion
 #endif
 
+#include "core/backends/orion/OrionCwDaemon.h"
+#include "core/backends/orion/OrionPatMonitor.h"
+#include "core/backends/orion/OrionRotor.h"
 #include "core/backends/orion/OrionTxAudio.h"
+#include "core/backends/orion/OrionWinKeyer.h"
 
 #include <QLoggingCategory>
 #include <QSerialPort>
@@ -111,6 +115,7 @@ OrionBackend::~OrionBackend()
     m_txGuardReleaseTimer.stop();
     // Never leave the radio keyed, and leave it usable stand-alone.
     leaveRadioSafe();
+    stopPeripherals();
     stopSdr();
     m_txAudio.reset();
     if (m_port) {
@@ -188,7 +193,16 @@ RadioCapabilities OrionBackend::capabilities() const
     c.hasTunerMemories = false;
     c.hasCwTune = false;
     // CW is the WinKeyer's job (operator decision), never the radio's keyer.
-    c.hasRadioSideCwKeyer = false;
+    // AetherSDR's CW text keyer is offered once the WinKeyer has answered.
+    const bool keyer = m_keyer && m_keyer->isReady();
+    c.hasRadioSideCwKeyer = keyer;
+    c.cwTextKeyerName = QStringLiteral("WinKeyer");
+    c.cwTextMinWpm = OrionWinKeyer::kMinWpm;
+    c.cwTextMaxWpm = OrionWinKeyer::kMaxWpm;
+    c.cwSpeedMinWpm = OrionWinKeyer::kMinWpm;
+    c.cwSpeedMaxWpm = OrionWinKeyer::kMaxWpm;
+    c.cwTextMaxMessageChars = 0;
+    c.cwTextAllowedCharacters = OrionWinKeyer::allowedCharacters(keyer && m_keyer->isWk3());
     c.cwTextHasProgress = false;
     c.cwTextHasStoredMacros = false;
     c.cwTextSupportsLive = false;
@@ -383,6 +397,7 @@ void OrionBackend::closeLink()
     if (m_txAudio) {
         m_txAudio->close();
     }
+    stopPeripherals();
     m_keyIntent = false;
     m_radioTx = false;
     ++m_generation;
@@ -610,6 +625,7 @@ void OrionBackend::onFirstReply()
     m_pollTimer.start();
     m_linkTimer.start();
     openTxAudio(m_connectParams);
+    startPeripherals(m_connectParams);
     startSdr(m_connectParams);
     if (!sdrRunning()) {
         m_placeholderSpectrumTimer.start();
@@ -1827,6 +1843,213 @@ int OrionBackend::finishTxAudio(const TxCoordinator::Context& context)
     return m_txAudio->queuedMs() + kTxAudioTailMs;
 }
 
+void OrionBackend::startPeripherals(const QVariantMap& params)
+{
+    const auto setting = [&params](const char* key, const QString& fallback) {
+        const QString v = params.value(QString::fromLatin1(key)).toString();
+        return v.isEmpty() ? fallback : v;
+    };
+    const auto off = [](const QString& v) { return v == QLatin1String("none"); };
+
+    // WinKeyer: the station's FTDI by serial number, never a raw ttyUSB.
+    const QString keyerDevice = setting("orion.winkeyer.device", OrionWinKeyer::findStationKeyer());
+    if (off(keyerDevice)) {
+        m_keyerStatus = tr("off");
+    } else if (keyerDevice.isEmpty()) {
+        m_keyerStatus = tr("not found (FTDI %1)").arg(QString::fromLatin1(OrionWinKeyer::kFtdiSerial));
+    } else {
+        m_keyer = std::make_unique<OrionWinKeyer>();
+        m_keyerStatus = tr("opening %1").arg(keyerDevice);
+        connect(m_keyer.get(), &OrionWinKeyer::ready, this, [this](int firmware) {
+            m_keyerStatus = tr("ready, firmware %1%2").arg(firmware)
+                                .arg(m_keyer && m_keyer->isWk3() ? tr(" (WK3)") : QString());
+            emit capabilitiesChanged();
+        });
+        connect(m_keyer.get(), &OrionWinKeyer::failed, this, [this](const QString& reason) {
+            m_keyerStatus = reason;
+            finishCwCompletions();
+            emit configurationWarning(tr("WinKeyer: %1").arg(reason));
+            emit capabilitiesChanged();
+        });
+        connect(m_keyer.get(), &OrionWinKeyer::busyChanged, this, [this](bool busy) {
+            if (!busy) {
+                finishCwCompletions();   // the keyer has sent everything queued
+            }
+        });
+        connect(m_keyer.get(), &OrionWinKeyer::breakIn, this, [this] {
+            // The paddle interrupted buffered text: it is not going out.
+            finishCwCompletions();
+        });
+        connect(m_keyer.get(), &OrionWinKeyer::speedPotChanged, this, [this](int wpm) {
+            TransmitDelta d;
+            d.cwSpeed = wpm;
+            emit transmitChanged(d);
+        });
+        m_keyer->open(keyerDevice);
+    }
+
+    // DCU-3 rotor and rotctld on :4533.
+    const QString rotorDevice = setting("orion.rotor.device", QString::fromLatin1(OrionRotor::kStationDevice));
+    if (off(rotorDevice)) {
+        m_rotorStatus = tr("off");
+    } else {
+        m_rotor = std::make_unique<OrionRotor>();
+        QString error;
+        if (!m_rotor->open(rotorDevice, &error)) {
+            m_rotorStatus = error;
+            emit configurationWarning(tr("Rotor: %1").arg(error));
+        } else {
+            m_rotorStatus = tr("open on %1").arg(rotorDevice);
+            connect(m_rotor.get(), &OrionRotor::azimuthChanged, this, [this](double az) {
+                QVariantMap f;
+                f.insert(QStringLiteral("azimuth"), az);
+                emit extensionStatus(QStringLiteral("orion"), QStringLiteral("rotor"), f);
+            });
+        }
+        // The server runs even if the rotor did not open: clients get a
+        // clean "no reading" (RPRT -5), not a refused connection.
+        m_rotctld = std::make_unique<OrionRotctld>(m_rotor.get());
+        const quint16 port = static_cast<quint16>(
+            params.value(QStringLiteral("orion.rotor.port"), OrionRotctld::kDefaultPort).toInt());
+        if (!m_rotctld->listen(port, &error)) {
+            m_rotorStatus += QStringLiteral("; rotctld: ") + error;
+            emit configurationWarning(tr("rotctld: %1").arg(error));
+        }
+    }
+
+    // cwdaemon on :6789, into the WinKeyer.
+    const quint16 cwPort = static_cast<quint16>(
+        params.value(QStringLiteral("orion.cwdaemon.port"), OrionCwDaemon::kDefaultPort).toInt());
+    if (params.value(QStringLiteral("orion.cwdaemon.port")).toString() == QLatin1String("none")) {
+        m_cwDaemonStatus = tr("off");
+    } else {
+        m_cwDaemon = std::make_unique<OrionCwDaemon>();
+        QString error;
+        if (!m_cwDaemon->listen(cwPort, &error)) {
+            m_cwDaemonStatus = error;
+            emit configurationWarning(tr("cwdaemon: %1").arg(error));
+            m_cwDaemon.reset();
+        } else {
+            m_cwDaemonStatus = tr("listening on localhost:%1").arg(m_cwDaemon->port());
+            // cqrlog's CW goes straight to the WinKeyer, whose key line keys
+            // the radio, as it did through the reference program. It does
+            // not pass AetherSDR's TX gate, so every send is logged.
+            connect(m_cwDaemon.get(), &OrionCwDaemon::textRequested, this, [this](const QString& t) {
+                if (!m_keyer || !m_keyer->isReady()) {
+                    qCWarning(lcOrion) << "cwdaemon: text dropped, the WinKeyer is not ready";
+                    return;
+                }
+                const QByteArray sent = m_keyer->sendText(t);
+                qCInfo(lcOrion) << "cwdaemon: CW to the WinKeyer:" << sent.size() << "characters";
+            });
+            connect(m_cwDaemon.get(), &OrionCwDaemon::prosignRequested, this, [this](char a, char b) {
+                if (m_keyer && m_keyer->isReady()) {
+                    qCInfo(lcOrion) << "cwdaemon: prosign" << a << b;
+                    m_keyer->sendProsign(a, b);
+                }
+            });
+            connect(m_cwDaemon.get(), &OrionCwDaemon::stopRequested, this, [this] {
+                if (m_keyer) {
+                    m_keyer->stop();
+                }
+                finishCwCompletions();
+            });
+            connect(m_cwDaemon.get(), &OrionCwDaemon::speedRequested, this, [this](int wpm) {
+                setCwSpeed(wpm);
+                TransmitDelta d;
+                d.cwSpeed = wpm;
+                emit transmitChanged(d);
+            });
+        }
+    }
+
+    // Pat (Winlink): WARN ONLY (operator decision); never blocks keying.
+    const QString patUrl = setting("orion.pat.url", QString::fromLatin1(OrionPatMonitor::kDefaultUrl));
+    if (off(patUrl)) {
+        m_patStatus = tr("off");
+    } else {
+        m_pat = std::make_unique<OrionPatMonitor>();
+        connect(m_pat.get(), &OrionPatMonitor::patUpChanged, this, [this](bool up) {
+            m_patStatus = up ? tr("watching Pat") : tr("Pat not running");
+        });
+        connect(m_pat.get(), &OrionPatMonitor::sessionChanged, this,
+                [this](bool active, const QString& remote) {
+            qCInfo(lcOrion) << "Pat: Winlink session" << (active ? "started" : "ended") << remote;
+            QVariantMap f;
+            f.insert(QStringLiteral("active"), active);
+            f.insert(QStringLiteral("remote"), remote);
+            emit extensionStatus(QStringLiteral("orion"), QStringLiteral("winlink"), f);
+            if (active) {
+                emit configurationWarning(
+                    tr("Winlink session active%1: Pat is using the radio. Don't key over it.")
+                        .arg(remote.isEmpty() ? QString() : tr(" with %1").arg(remote)));
+            }
+        });
+        m_patStatus = m_pat->start(QUrl(patUrl)) ? tr("Pat not running")
+                                                 : tr("this build has no websocket support");
+    }
+}
+
+void OrionBackend::stopPeripherals()
+{
+    finishCwCompletions();
+    m_pat.reset();
+    m_cwDaemon.reset();
+    m_rotctld.reset();
+    m_rotor.reset();
+    m_keyer.reset();   // stops anything buffered, then host close
+}
+
+void OrionBackend::finishCwCompletions()
+{
+    auto pending = std::move(m_cwCompletions);
+    m_cwCompletions.clear();
+    for (const auto& c : pending) {
+        c.finish();
+    }
+}
+
+QString OrionBackend::sendCwText(const QString& text, const TxCoordinator::Operation& operation,
+                                 const AetherSDR::TxCoordinator::Completion& completion)
+{
+    // CW text keys the radio through the WinKeyer's key line: it needs the
+    // TX coordinator's admission like any other key.
+    if (!TxCoordinator::Command{operation, true}.permitsDispatch(TxCoordinator::monotonicMs())) {
+        completion.finish();
+        return tr("transmit is not permitted right now");
+    }
+    if (!m_keyer || !m_keyer->isReady()) {
+        completion.finish();
+        return tr("the WinKeyer is not connected (%1)").arg(m_keyerStatus);
+    }
+    const QByteArray sent = m_keyer->sendText(text);
+    if (sent.isEmpty()) {
+        completion.finish();
+        return tr("nothing the WinKeyer can send in that text");
+    }
+    qCInfo(lcOrion) << "CW text to the WinKeyer:" << sent.size() << "characters";
+    m_cwCompletions.push_back(completion);
+    return {};
+}
+
+void OrionBackend::abortCwText(const TxCoordinator::Operation& operation,
+                               const AetherSDR::TxCoordinator::Completion& completion)
+{
+    Q_UNUSED(operation);   // stopping is always allowed
+    if (m_keyer) {
+        m_keyer->stop();
+    }
+    finishCwCompletions();
+    completion.finish();
+}
+
+void OrionBackend::setCwSpeed(int wpm)
+{
+    if (m_keyer) {
+        m_keyer->setSpeed(wpm);
+    }
+}
+
 void OrionBackend::invokeExtension(const QString& ns, const QString& verb,
                                    quint64 requestId, const QVariant& arg)
 {
@@ -1859,6 +2082,16 @@ IRadioBackend::HealthSnapshot OrionBackend::healthSnapshot() const
         h.values.insert(QStringLiteral("txAudioWritten"), QVariant::fromValue(m_txAudio->samplesWritten()));
         h.values.insert(QStringLiteral("txAudioDropped"), QVariant::fromValue(m_txAudio->samplesDropped()));
     }
+    h.values.insert(QStringLiteral("keyerStatus"), m_keyerStatus);
+    h.values.insert(QStringLiteral("rotorStatus"), m_rotorStatus);
+    if (m_rotor && m_rotor->azimuth() >= 0.0) {
+        h.values.insert(QStringLiteral("rotorAzimuth"), m_rotor->azimuth());
+    }
+    if (m_rotctld) {
+        h.values.insert(QStringLiteral("rotctldPort"), m_rotctld->port());
+    }
+    h.values.insert(QStringLiteral("cwDaemonStatus"), m_cwDaemonStatus);
+    h.values.insert(QStringLiteral("patStatus"), m_patStatus);
     h.values.insert(QStringLiteral("sdrStatus"), m_sdrStatus);
 #ifdef AETHER_ORION_SDRPLAY
     if (m_sdr) {
@@ -1874,7 +2107,10 @@ IRadioBackend::HealthSnapshot OrionBackend::healthSnapshot() const
                QStringLiteral("linesIgnored"), QStringLiteral("lastReplyAgeMs"),
                QStringLiteral("frequencyRoundTripMs"), QStringLiteral("txPath"),
                QStringLiteral("txAudioDevice"), QStringLiteral("txAudioWritten"),
-               QStringLiteral("txAudioDropped"), QStringLiteral("sdrStatus"),
+               QStringLiteral("txAudioDropped"), QStringLiteral("keyerStatus"),
+               QStringLiteral("cwDaemonStatus"), QStringLiteral("rotorStatus"),
+               QStringLiteral("rotorAzimuth"), QStringLiteral("rotctldPort"),
+               QStringLiteral("patStatus"), QStringLiteral("sdrStatus"),
                QStringLiteral("sdrLoHz"), QStringLiteral("sdrDeliveryPercent"),
                QStringLiteral("sdrOverloads")};
     h.sections.insert(QStringLiteral("txPath"), tr("Transmit"));
@@ -1882,6 +2118,13 @@ IRadioBackend::HealthSnapshot OrionBackend::healthSnapshot() const
     h.labels.insert(QStringLiteral("txAudioDevice"), tr("PC audio output"));
     h.labels.insert(QStringLiteral("txAudioWritten"), tr("TX audio samples sent"));
     h.labels.insert(QStringLiteral("txAudioDropped"), tr("TX audio samples held back"));
+    h.sections.insert(QStringLiteral("keyerStatus"), tr("Station"));
+    h.labels.insert(QStringLiteral("keyerStatus"), tr("WinKeyer"));
+    h.labels.insert(QStringLiteral("cwDaemonStatus"), tr("cwdaemon"));
+    h.labels.insert(QStringLiteral("rotorStatus"), tr("Rotor (DCU-3)"));
+    h.labels.insert(QStringLiteral("rotorAzimuth"), tr("Rotor heading (deg)"));
+    h.labels.insert(QStringLiteral("rotctldPort"), tr("rotctld port"));
+    h.labels.insert(QStringLiteral("patStatus"), tr("Pat (Winlink)"));
     h.sections.insert(QStringLiteral("sdrStatus"), tr("RSP2 panadapter"));
     h.labels.insert(QStringLiteral("sdrStatus"), tr("Status"));
     h.labels.insert(QStringLiteral("sdrLoHz"), tr("LO (Hz)"));

@@ -518,6 +518,27 @@ real transmission is the operator's):**
   front microphone modulates, on PC it does not (only the SignaLink does),
   as designed.
 
+**Step 7 (built 2026-10-17, bench-tested against fakes only):** the station
+peripherals, owned by the Orion session (opened on connect, released on
+disconnect).
+- WinKeyer (WK3, FTDI `A904QF5Z`, 1200 8N2): the reference program's open
+  sequence on timers (no blocking sleeps). AetherSDR's CW text keyer is the
+  WinKeyer once it answers; a send needs the TX coordinator's admission and
+  completes when the keyer reports idle. No shaping parameter and never the
+  mode register is written: the keyer keeps its owner's stored setup. Speed
+  from AetherSDR's CW speed; the pot reports back.
+- DCU-3 rotor (`/dev/portS4`, 4800 8N1) read as a stream; target, 500 ms
+  gap, execute. rotctld on loopback :4533 with the reference program's
+  replies (RPRT -5 with no reading, never a fake 0.0).
+- cwdaemon on loopback UDP :6789 into the WinKeyer, cwdaemon prosigns
+  translated to 0x1B merges. As in the reference program it keys through
+  the WinKeyer's own line, not AetherSDR's TX gate; every send is logged.
+- Pat monitor (ws://127.0.0.1:8080/ws): WARN ONLY (operator decision). A
+  Winlink session raises a notice and an `orion/winlink` extension status;
+  keying is never blocked (Pat itself keys through AetherSDR's rigctld).
+Not ported (still optional): PowerMaster, skimmer and DX-cluster server,
+cqrlog ADIF sync, Not1MM log reader.
+
 **Later steps, each one an operator on-air checkpoint:**
 
 | Step | Content | Operator check |

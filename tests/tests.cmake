@@ -9554,6 +9554,13 @@ if(AETHER_ORION_SDRPLAY)
 endif()
 
 if(AETHER_BACKEND_ORION AND UNIX AND NOT APPLE)
+    # Step 7: WinKeyer, DCU-3, rotctld, cwdaemon, Pat, all against fakes.
+    add_executable(orion_peripherals_test tests/orion_peripherals_test.cpp)
+    target_include_directories(orion_peripherals_test PRIVATE src tests)
+    target_link_libraries(orion_peripherals_test PRIVATE aethercore Qt6::Core Qt6::Network Qt6::Test util)
+    add_test(NAME orion_peripherals_test COMMAND orion_peripherals_test)
+    set_tests_properties(orion_peripherals_test PROPERTIES TIMEOUT 90)
+
     add_executable(orion_backend_test tests/orion_backend_test.cpp)
     target_include_directories(orion_backend_test PRIVATE src tests)
     target_link_libraries(orion_backend_test PRIVATE aethercore Qt6::Core Qt6::Test util)

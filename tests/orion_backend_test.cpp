@@ -294,6 +294,12 @@ int main(int argc, char** argv)
     req.params.insert(QStringLiteral("orion.sdr"), false);
     req.params.insert(QStringLiteral("orion.tx.audioDevice"), QStringLiteral("none"));
     req.params.insert(QStringLiteral("orion.tx.maxKeyMs"), 1500);
+    // Nor the station's WinKeyer, rotor or service ports (orion_peripherals_test
+    // covers those against fakes).
+    req.params.insert(QStringLiteral("orion.winkeyer.device"), QStringLiteral("none"));
+    req.params.insert(QStringLiteral("orion.rotor.device"), QStringLiteral("none"));
+    req.params.insert(QStringLiteral("orion.cwdaemon.port"), QStringLiteral("none"));
+    req.params.insert(QStringLiteral("orion.pat.url"), QStringLiteral("none"));
     backend.connectRadio(req);
     check(waitFor([&] { return connectedSpy.count() == 1; }, 2000),
           "connected() after the first CAT reply");

@@ -23,6 +23,7 @@
 #include <QTimer>
 
 #include <array>
+#include <vector>
 #include <memory>
 #include <optional>
 
@@ -33,6 +34,11 @@ namespace AetherSDR::orion {
 class Rsp2Receiver;
 class OrionRxAudio;
 class OrionTxAudio;
+class OrionWinKeyer;
+class OrionRotor;
+class OrionRotctld;
+class OrionCwDaemon;
+class OrionPatMonitor;
 
 class OrionBackend : public IRadioBackend {
     Q_OBJECT
@@ -132,6 +138,11 @@ public:
     void submitTxAudio(const QByteArray& int16Stereo, int sampleRateHz, TxAudioSource source,
                        const TxCoordinator::Context& context) override;
     int finishTxAudio(const TxCoordinator::Context& context) override;
+    QString sendCwText(const QString& text, const TxCoordinator::Operation& operation,
+                       const AetherSDR::TxCoordinator::Completion& completion = {}) override;
+    void abortCwText(const TxCoordinator::Operation& operation,
+                     const AetherSDR::TxCoordinator::Completion& completion = {}) override;
+    void setCwSpeed(int wpm) override;
     void invokeExtension(const QString& ns, const QString& verb,
                          quint64 requestId, const QVariant& arg = {}) override;
 
@@ -188,6 +199,12 @@ private:
     void setTxPath(TxPath path);
     void setRadioTx(bool on);
     void openTxAudio(const QVariantMap& params);
+
+    // Station peripherals (step 7), owned with the session: one owner per
+    // port while AetherSDR runs, none when it does not (fork rule 7).
+    void startPeripherals(const QVariantMap& params);
+    void stopPeripherals();
+    void finishCwCompletions();
     void applyViewToSdr();
     void startSdr(const QVariantMap& params);
     void stopSdr();
@@ -240,6 +257,17 @@ private:
     QString m_txAudioError;
     QTimer m_txFailsafeTimer;
     QTimer m_txGuardReleaseTimer;
+
+    std::unique_ptr<OrionWinKeyer> m_keyer;
+    std::vector<TxCoordinator::Completion> m_cwCompletions;
+    QString m_keyerStatus;
+    std::unique_ptr<OrionRotor> m_rotor;
+    std::unique_ptr<OrionRotctld> m_rotctld;
+    QString m_rotorStatus;
+    std::unique_ptr<OrionCwDaemon> m_cwDaemon;
+    QString m_cwDaemonStatus;
+    std::unique_ptr<OrionPatMonitor> m_pat;
+    QString m_patStatus;
     spectrum::View m_view;
     bool m_viewKnown = false;
     int m_panPoints = 1024;

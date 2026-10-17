@@ -24,7 +24,15 @@ else()
         src/core/backends/orion/OrionPollScheduler.cpp
         src/core/backends/orion/OrionPollScheduler.h
         src/core/backends/orion/OrionTxAudio.cpp
-        src/core/backends/orion/OrionTxAudio.h)
+        src/core/backends/orion/OrionTxAudio.h
+        src/core/backends/orion/OrionWinKeyer.cpp
+        src/core/backends/orion/OrionWinKeyer.h
+        src/core/backends/orion/OrionRotor.cpp
+        src/core/backends/orion/OrionRotor.h
+        src/core/backends/orion/OrionCwDaemon.cpp
+        src/core/backends/orion/OrionCwDaemon.h
+        src/core/backends/orion/OrionPatMonitor.cpp
+        src/core/backends/orion/OrionPatMonitor.h)
 
     # RSP2 panadapter and receive audio (steps 2-3). Needs the SDRplay API HEADERS from the
     # operator's install and fftw3f. The library itself is dlopen()ed at run

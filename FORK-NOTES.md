@@ -13,7 +13,7 @@ possible merge conflict when pulling from `upstream`.
 | `src/gui/ConnectionPanel.h` | `kFamilyOrion` constant | Same pattern as the other families |
 | `src/gui/ConnectionPanel.cpp` | Family normalisation (two places), the "Ten-Tec Orion (serial)" radio-type entry, the hint and placeholder text, and an `orion` branch at the top of `probeRadio()` that hands the device path to the session as `orion:<path>` | The manual-connect page is how the operator picks the radio; a serial radio has nothing to probe |
 | `src/gui/PhoneCwApplet.cpp` | `setSelectableMicInputs()` uses the model's mic-input list when it has one, instead of always FlexRadio's MIC/BAL/LINE/ACC/PC | Shows the Orion's MIC and PC; a Flex is unchanged (its list comes from `mic list`) |
-| `tests/tests.cmake` | `orion_cat_test`, `orion_spectrum_test`, `orion_rxaudio_test` and `orion_backend_test` appended at the end | Upstream requires every test target to be declared there |
+| `tests/tests.cmake` | `orion_cat_test`, `orion_spectrum_test`, `orion_rxaudio_test`, `orion_peripherals_test` and `orion_backend_test` appended at the end | Upstream requires every test target to be declared there |
 | `tests/backend_seam_affinity_test.cpp` | `orion` added to the constructed-families list | The seam contract test covers the new backend too |
 
 New files that upstream does not have (no merge risk):
@@ -22,10 +22,12 @@ New files that upstream does not have (no merge risk):
 - `cmake/AetherOrion.cmake`
 - `docs/architecture/orion-backend-design.md`
 - `src/core/backends/orion/` (`OrionBackend`, `OrionCat`, `OrionPollScheduler`,
-  `OrionTxAudio`, and for the RSP2 `Rsp2Receiver`, `OrionSpectrum`,
-  `OrionRxAudio`, `SdrPlayApi`)
+  `OrionTxAudio`, the station peripherals `OrionWinKeyer`, `OrionRotor`
+  (with `OrionRotctld`), `OrionCwDaemon`, `OrionPatMonitor`, and for the
+  RSP2 `Rsp2Receiver`, `OrionSpectrum`, `OrionRxAudio`, `SdrPlayApi`)
 - `tests/orion_cat_test.cpp`, `tests/orion_backend_test.cpp`,
-  `tests/orion_spectrum_test.cpp`, `tests/orion_rxaudio_test.cpp`
+  `tests/orion_spectrum_test.cpp`, `tests/orion_rxaudio_test.cpp`,
+  `tests/orion_peripherals_test.cpp`
 - `tests/orion/fake_orion.py`
 
 ## Running against the fake radio
@@ -50,3 +52,13 @@ ldd build/AetherSDR | grep -i sdrplay
 ```
 
 It must print nothing.
+
+## Station peripherals start with the Orion session
+
+Connecting the Orion also opens the WinKeyer (FTDI `A904QF5Z`), the DCU-3
+(`/dev/portS4`), rotctld on `localhost:4533` and cwdaemon on
+`localhost:6789`, and watches Pat. Disconnecting releases all of them. The
+Orion console must not be running (fork rule 7), and `rotctld.service`
+stays retired. Each can be switched off for a session with a connect option
+(`orion.winkeyer.device`, `orion.rotor.device`, `orion.cwdaemon.port`,
+`orion.pat.url` = `none`); the tests use these to stay off the hardware.
