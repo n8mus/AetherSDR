@@ -1578,6 +1578,8 @@ void OrionBackend::setKeying(bool key, const AetherSDR::TxCoordinator::Operation
                    "is keyed with no audio; select MIC to use the radio's microphone.")
                     .arg(m_txAudioError));
         }
+        qCInfo(lcOrion) << "Orion: KEY (*TK) on the"
+                        << (m_txPath == TxPath::Pc ? "PC" : "MIC") << "path";
         send(orion::setPtt(true));
         m_keyIntent = true;
         m_keyedAtMs = nowMs();
@@ -1601,6 +1603,9 @@ void OrionBackend::unkey()
 {
     // Gate first: no more audio into the SignaLink, which could key the
     // radio by itself.
+    if (m_keyIntent) {
+        qCInfo(lcOrion) << "Orion: UNKEY (*TU) after" << (nowMs() - m_keyedAtMs) << "ms";
+    }
     m_keyIntent = false;
     updateTxAudioGate();
     m_txFailsafeTimer.stop();
@@ -1635,6 +1640,8 @@ void OrionBackend::leaveRadioSafe()
 
 void OrionBackend::setRadioTx(bool on)
 {
+    qCInfo(lcOrion) << "Orion: radio reports" << (on ? "TRANSMIT" : "RECEIVE")
+                    << (on && !m_keyIntent ? "(keyed from the radio, not by AetherSDR)" : "");
     m_radioTx = on;
     TransmitDelta d;
     d.mox = on;
@@ -1727,6 +1734,7 @@ void OrionBackend::setTxPath(TxPath path)
     if (path == m_txPath) {
         return;
     }
+    qCInfo(lcOrion) << "Orion: TX audio path ->" << (path == TxPath::Pc ? "PC (SignaLink)" : "MIC (radio jack)");
     if (path == TxPath::Pc) {
         applyPcProfile();
     } else {
