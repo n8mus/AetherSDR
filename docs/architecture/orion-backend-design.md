@@ -507,10 +507,14 @@ real transmission is the operator's):**
   first, then put the radio-mic profile back (stand-alone rule); a radio
   found left in the PC profile is given its mic back on connect.
 - Not yet: TUNE (`setTune` is a no-op), the Omni VII's keepalive PTT.
-- On air (2026-10-17, operator at the radio): MOX keys and unkeys the
-  Orion by CAT. TX audio "doesn't seem to do anything" yet: under
-  investigation. Key edges, radio TX/RX reports and path changes are now
-  logged (aether.orion) so a session can be audited.
+- On air (2026-10-17, operator at the radio, dummy load): MOX keys and
+  unkeys the Orion by CAT, with the radio's TX/RX readback each time. The
+  PC path works end to end: the Alesis mic (PCM2900) -> AetherSDR's TX
+  chain -> SignaLink -> Orion, 6.5 W out at a 7 W setting. Operator setup
+  it needs, all AetherSDR's own: PC Audio on (title bar), and Radio Setup
+  -> Audio -> Input = the PCM2900. A leftover capability line had hidden
+  the MIC/PC choice; fixed. Key edges, radio TX/RX reports and path
+  changes are logged (aether.orion).
 
 **Later steps, each one an operator on-air checkpoint:**
 
