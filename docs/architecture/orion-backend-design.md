@@ -480,6 +480,10 @@ speaker feed; the per-slice feed (TCI, decoders) is pre-mute.
   the slice, and enforced on CAT tuning (the radio's lock freezes only
   its knob).
 Routing only: nothing in step 4 keys the transmitter.
+On air (2026-10-17): split works. AetherSDR's right-click SPLIT offsets
+(1, 5 and 10 kHz up) all reach the Orion. A plain left-click on SPLIT is
+still refused ("Split entry ignored"): that path creates a Flex slice and
+the Orion's two receivers are fixed.
 
 **Later steps, each one an operator on-air checkpoint:**
 
