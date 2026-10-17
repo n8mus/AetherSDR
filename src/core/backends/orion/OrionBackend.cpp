@@ -1789,6 +1789,18 @@ ReceiveDispatch OrionBackend::requestTransmitControl(const TransmitControlReques
     case Field::MicGain:
         setMicGain(std::get<int>(request.value));
         return ReceiveDispatch::Dispatched;
+    // CW speed is the WinKeyer's (the CWX panel and the CW applet both land
+    // here); the Orion's own keyer speed is left to the radio.
+    case Field::CwSpeed: {
+        if (!m_keyer || !m_keyer->isReady()) {
+            return ReceiveDispatch::Unsupported;
+        }
+        setCwSpeed(std::get<int>(request.value));
+        TransmitDelta d;
+        d.cwSpeed = m_keyer->speed();
+        emit transmitChanged(d);
+        return ReceiveDispatch::Dispatched;
+    }
     // AetherSDR's own TX chain shapes PC audio: these stay on the host.
     case Field::ProcessorEnabled: case Field::ProcessorLevel:
         return ReceiveDispatch::LocalOnly;

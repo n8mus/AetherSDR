@@ -536,6 +536,11 @@ disconnect).
 - Pat monitor (ws://127.0.0.1:8080/ws): WARN ONLY (operator decision). A
   Winlink session raises a notice and an `orion/winlink` extension status;
   keying is never blocked (Pat itself keys through AetherSDR's rigctld).
+On air 2026-10-17 (operator): the WinKeyer opened as a WK3; text typed in
+the WinKeyer panel sends, Esc and a paddle touch both stop it, and the
+panel's Speed changes the keyer (after a fix: the CW speed control was
+refused by the backend). Still to check: the keyer's speed pot, cqrlog over
+cwdaemon, the rotor from a rotctld client, Pat's warning.
 Not ported (still optional): PowerMaster, skimmer and DX-cluster server,
 cqrlog ADIF sync, Not1MM log reader.
 

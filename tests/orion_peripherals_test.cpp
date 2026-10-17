@@ -339,6 +339,16 @@ static void testBackend()
     keyerPty.reply(QByteArray(1, static_cast<char>(0xC0)));
     check(waitFor([&] { return done; }, 1000), "completion when the keyer reports idle");
 
+    // The CWX panel's and CW applet's speed arrive as a transmit control.
+    keyerPty.received.clear();
+    TransmitControlRequest speed;
+    speed.field = TransmitControlRequest::Field::CwSpeed;
+    speed.value = 31;
+    check(backend.requestTransmitControl(speed) == ReceiveDispatch::Dispatched,
+          "CW speed control accepted");
+    check(waitFor([&] { return keyerPty.received.contains(QByteArray("\x02\x1f", 2)); }, 500),
+          "CW speed 31 reaches the keyer");
+
     // cwdaemon, over UDP, on the port the backend reports.
     const QString status = backend.healthSnapshot().values.value("cwDaemonStatus").toString();
     const quint16 port = static_cast<quint16>(status.section(':', -1).toUInt());
