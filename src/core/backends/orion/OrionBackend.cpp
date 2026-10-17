@@ -1,8 +1,19 @@
 #include "core/backends/orion/OrionBackend.h"
 
+#ifdef AETHER_ORION_SDRPLAY
+#include "core/backends/orion/Rsp2Receiver.h"
+#else
+namespace AetherSDR::orion {
+// Built without the SDRplay API headers: no RSP2, the pan shows the
+// placeholder trace. A complete type so the unique_ptr member compiles.
+class Rsp2Receiver {};
+}  // namespace AetherSDR::orion
+#endif
+
 #include <QLoggingCategory>
 #include <QSerialPort>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <type_traits>
@@ -59,6 +70,12 @@ OrionBackend::OrionBackend(QObject* parent)
     m_placeholderSpectrumTimer.setInterval(kPlaceholderSpectrumMs);
     connect(&m_placeholderSpectrumTimer, &QTimer::timeout, this,
             &OrionBackend::onPlaceholderSpectrumTick);
+
+    // A pan drag moves the view at mouse rate; the RSP2 retunes at most
+    // every 50 ms.
+    m_loRetuneTimer.setSingleShot(true);
+    m_loRetuneTimer.setInterval(kLoRetuneMs);
+    connect(&m_loRetuneTimer, &QTimer::timeout, this, &OrionBackend::retuneSdr);
 }
 
 OrionBackend::~OrionBackend()
@@ -71,6 +88,8 @@ OrionBackend::~OrionBackend()
     m_linkTimer.stop();
     m_writeTimer.stop();
     m_placeholderSpectrumTimer.stop();
+    m_loRetuneTimer.stop();
+    stopSdr();
     if (m_port) {
         m_port->disconnect(this);
         closeSerial(*m_port);
@@ -247,6 +266,7 @@ void OrionBackend::connectRadio(const RadioConnectRequest& request)
     if (m_connected || m_connecting) {
         disconnectRadio();
     }
+    m_connectParams = request.params;
     m_device = deviceFromSerial(request.serial);
     if (m_device.isEmpty()) {
         m_device = defaultDevice();
@@ -258,7 +278,8 @@ void OrionBackend::openLink()
 {
     ++m_generation;
     m_rx = {};
-    m_panCentreMhz = 0.0;
+    m_view = {};
+    m_viewKnown = false;
     m_txVfo.reset();
     m_activeSlice = 0;
     m_rxBuffer.clear();
@@ -319,6 +340,8 @@ void OrionBackend::closeLink()
     m_linkTimer.stop();
     m_writeTimer.stop();
     m_placeholderSpectrumTimer.stop();
+    m_loRetuneTimer.stop();
+    stopSdr();
     for (Receiver& r : m_rx) {
         r.pendingHz.reset();
         r.pendingFilter.reset();
@@ -477,8 +500,11 @@ void OrionBackend::onFirstReply()
     startupQueries();
     m_pollTimer.start();
     m_linkTimer.start();
-    m_placeholderSpectrumTimer.start();
-    onPlaceholderSpectrumTick();
+    startSdr(m_connectParams);
+    if (!sdrRunning()) {
+        m_placeholderSpectrumTimer.start();
+        onPlaceholderSpectrumTick();
+    }
 }
 
 void OrionBackend::publishInitialState()
@@ -491,6 +517,8 @@ void OrionBackend::publishInitialState()
     // The pan is announced before the slices that name it. Geometry is
     // provisional until dial A answers.
     publishPan();
+    emit panBandwidthLimitsChanged(panId(), static_cast<double>(spectrum::kMinViewHz) / 1e6,
+                                   static_cast<double>(spectrum::kMaxViewHz) / 1e6);
 
     for (int slice = 0; slice < 2; ++slice) {
         SliceDelta s;
@@ -599,6 +627,37 @@ void OrionBackend::onLinkTick()
     }
     emit linkStatsUpdated(linkStats());
     m_trafficSinceTick = false;
+#ifdef AETHER_ORION_SDRPLAY
+    if (m_sdr) {
+        // Delivery check: the SDRplay service drops transfers silently when
+        // the host cannot keep up (a Debug build manages about 40%).
+        // Measured over 5 s windows: the API delivers in bursts, so a 1 s
+        // count reads anywhere from about 94% to 104% on a healthy stream.
+        const qint64 now = nowMs();
+        const qint64 samples = static_cast<qint64>(m_sdr->samplesReceived());
+        const qint64 dt = now - m_sdrTickMs;
+        if (dt >= kSdrDeliveryWindowMs) {
+            m_sdrDeliveryRatio = static_cast<double>(samples - m_sdrSamplesAtTick)
+                                 / (static_cast<double>(spectrum::kCaptureHz) * dt / 1000.0);
+            m_sdrSamplesAtTick = samples;
+            m_sdrTickMs = now;
+            m_sdrLowWindows = m_sdrDeliveryRatio < kMinDeliveryRatio ? m_sdrLowWindows + 1 : 0;
+        }
+        const bool settled = now - m_sdrStartedMs > kSdrSilentWarningMs;
+        if (settled && samples == 0 && !m_sdrDeliveryWarned) {
+            m_sdrDeliveryWarned = true;
+            emit configurationWarning(
+                tr("The RSP2 opened but sends no samples. After an unclean exit the "
+                   "SDRplay service can wedge: disconnect and connect again."));
+        } else if (samples > 0 && m_sdrLowWindows >= 2 && !m_sdrDeliveryWarned) {
+            m_sdrDeliveryWarned = true;
+            emit configurationWarning(
+                tr("The RSP2 is delivering %1% of its samples. Use an optimised "
+                   "(RelWithDebInfo or Release) build and check the machine is not busy.")
+                    .arg(qRound(m_sdrDeliveryRatio * 100.0)));
+        }
+    }
+#endif
 }
 
 // ---- decode → model ----------------------------------------------------------
@@ -717,19 +776,116 @@ void OrionBackend::publishPassband(Rx rx)
 
 void OrionBackend::publishPan()
 {
-    // No spectrum until the RSP2 arrives (step 2), so the pan is only a view.
-    // It keeps the centre the operator or the recenter policy chose, and
-    // follows dial A only when A leaves it, so the main slice stays in frame.
+    // The view keeps the centre the operator or the recenter policy chose,
+    // and follows dial A only when A leaves it, so the main slice stays in
+    // frame. With an RSP2 the LO follows the view (OrionSpectrum.h).
     if (!m_rx[0].hz) {
         emit panCenterBandwidthChanged(panId(), 0.0, 0.0);
         return;
     }
-    const double dialMhz = static_cast<double>(*m_rx[0].hz) / 1e6;
-    const double halfMhz = kPanViewMhz / 2.0;
-    if (m_panCentreMhz <= 0.0 || std::fabs(dialMhz - m_panCentreMhz) > halfMhz) {
-        m_panCentreMhz = dialMhz;
+    const qint64 dial = *m_rx[0].hz;
+    const qint64 half = m_view.spanHz / 2;
+    if (!m_viewKnown || dial < m_view.centreHz - half || dial > m_view.centreHz + half) {
+        m_view.centreHz = dial;
+        m_viewKnown = true;
     }
-    emit panCenterBandwidthChanged(panId(), m_panCentreMhz, kPanViewMhz);
+    emit panCenterBandwidthChanged(panId(), static_cast<double>(m_view.centreHz) / 1e6,
+                                   static_cast<double>(m_view.spanHz) / 1e6);
+    applyViewToSdr();
+}
+
+bool OrionBackend::sdrRunning() const
+{
+#ifdef AETHER_ORION_SDRPLAY
+    return m_sdr && m_sdr->isRunning();
+#else
+    return false;
+#endif
+}
+
+void OrionBackend::applyViewToSdr()
+{
+#ifdef AETHER_ORION_SDRPLAY
+    if (!sdrRunning() || !m_viewKnown) {
+        return;
+    }
+    m_sdr->setView(m_view, m_panPoints);
+    if (!spectrum::viewFits(m_view, m_sdr->lo()) && !m_loRetuneTimer.isActive()) {
+        m_loRetuneTimer.start();
+    }
+#endif
+}
+
+void OrionBackend::retuneSdr()
+{
+#ifdef AETHER_ORION_SDRPLAY
+    if (sdrRunning() && m_viewKnown) {
+        m_sdr->setLo(spectrum::loForView(m_view));
+    }
+#endif
+}
+
+void OrionBackend::startSdr(const QVariantMap& params)
+{
+#ifdef AETHER_ORION_SDRPLAY
+    if (!params.value(QStringLiteral("orion.sdr"), true).toBool()) {
+        m_sdrStatus = tr("off for this connection");
+        return;
+    }
+    Rsp2Receiver::Settings settings;
+    settings.gainReductionDb = params.value(QStringLiteral("orion.sdr.gRdB"),
+                                            settings.gainReductionDb).toInt();
+    settings.lnaState = params.value(QStringLiteral("orion.sdr.lna"), settings.lnaState).toInt();
+    settings.antennaB = params.value(QStringLiteral("orion.sdr.antenna")).toString()
+                        == QLatin1String("B");
+
+    if (!m_viewKnown) {
+        m_view.centreHz = m_rx[0].hz.value_or(14'025'000);
+        m_viewKnown = true;
+    }
+    m_sdr = std::make_unique<Rsp2Receiver>();
+    connect(m_sdr.get(), &Rsp2Receiver::frameReady, this, [this](const QByteArray& frame) {
+        if (m_connected) {
+            emit spectrumFrameReady(0, frame);
+        }
+    });
+    connect(m_sdr.get(), &Rsp2Receiver::deviceLost, this, [this](const QString& reason) {
+        stopSdr();
+        m_sdrStatus = reason;
+        emit configurationWarning(tr("Panadapter: %1.").arg(reason));
+        if (m_connected) {
+            m_placeholderSpectrumTimer.start();
+        }
+    });
+    QString error;
+    if (!m_sdr->start(spectrum::loForView(m_view), settings, &error)) {
+        m_sdr.reset();
+        m_sdrStatus = error;
+        qCWarning(lcOrion) << "RSP2:" << error;
+        emit configurationWarning(
+            tr("Panadapter: %1 The radio still works; the pan shows no spectrum.").arg(error));
+        return;
+    }
+    m_sdrStatus = tr("streaming");
+    m_sdr->setView(m_view, m_panPoints);
+    m_sdrStartedMs = nowMs();
+    m_sdrTickMs = m_sdrStartedMs;
+    m_sdrSamplesAtTick = 0;
+    m_sdrDeliveryRatio = -1.0;
+    m_sdrLowWindows = 0;
+    m_sdrDeliveryWarned = false;
+    m_placeholderSpectrumTimer.stop();
+#else
+    Q_UNUSED(params);
+    m_sdrStatus = tr("this build has no SDRplay support");
+#endif
+}
+
+void OrionBackend::stopSdr()
+{
+    // Joins the spectrum worker and releases the device before returning
+    // (IRadioBackend rule 5), so nothing reaches a seam signal afterwards.
+    m_sdr.reset();
 }
 
 // ---- intents down ------------------------------------------------------------
@@ -859,13 +1015,60 @@ void OrionBackend::setPanCenter(const QString& panId, double hz, PanCenterIntent
 {
     Q_UNUSED(panId);
     Q_UNUSED(intent);
-    // No receive window to move until the RSP2 (step 2): take the view centre
-    // as asked and report it, so a drag or a recenter sticks.
+    // The pan is an independent window (the RSP2), never the radio's dial:
+    // a drag or a recenter moves the view and, through it, the RSP2's LO.
     if (!m_connected || hz < static_cast<double>(kMinHz) || hz > static_cast<double>(kMaxHz)) {
         return;
     }
-    m_panCentreMhz = hz / 1e6;
-    emit panCenterBandwidthChanged(this->panId(), m_panCentreMhz, kPanViewMhz);
+    m_view.centreHz = std::llround(hz);
+    m_viewKnown = true;
+    emit panCenterBandwidthChanged(this->panId(), static_cast<double>(m_view.centreHz) / 1e6,
+                                   static_cast<double>(m_view.spanHz) / 1e6);
+    applyViewToSdr();
+}
+
+void OrionBackend::setPanBandwidth(const QString& panId, double hz)
+{
+    Q_UNUSED(panId);
+    if (!m_connected) {
+        return;
+    }
+    // A request: the span is capped by the DC-free half of the capture.
+    m_view = spectrum::clampView({m_view.centreHz, std::llround(hz)});
+    emit panCenterBandwidthChanged(this->panId(), static_cast<double>(m_view.centreHz) / 1e6,
+                                   static_cast<double>(m_view.spanHz) / 1e6);
+    applyViewToSdr();
+}
+
+void OrionBackend::setPanFrameRate(const QString& panId, int fps)
+{
+    Q_UNUSED(panId);
+#ifdef AETHER_ORION_SDRPLAY
+    if (m_sdr) {
+        m_sdr->setFrameRate(fps);
+    }
+#else
+    Q_UNUSED(fps);
+#endif
+}
+
+void OrionBackend::setPanAverage(const QString& panId, int average)
+{
+    Q_UNUSED(panId);
+#ifdef AETHER_ORION_SDRPLAY
+    if (m_sdr) {
+        m_sdr->setAverage(average);
+    }
+#else
+    Q_UNUSED(average);
+#endif
+}
+
+void OrionBackend::setPanPixelWidth(const QString& panId, int pixels)
+{
+    Q_UNUSED(panId);
+    m_panPoints = std::clamp(pixels, 64, 8192);
+    applyViewToSdr();
 }
 
 void OrionBackend::setPanRfGain(const QString& panId, int gainDb)
@@ -953,9 +1156,27 @@ IRadioBackend::HealthSnapshot OrionBackend::healthSnapshot() const
     if (m_rttMs >= 0) {
         h.values.insert(QStringLiteral("frequencyRoundTripMs"), m_rttMs);
     }
+    h.values.insert(QStringLiteral("sdrStatus"), m_sdrStatus);
+#ifdef AETHER_ORION_SDRPLAY
+    if (m_sdr) {
+        h.values.insert(QStringLiteral("sdrLoHz"), m_sdr->lo());
+        h.values.insert(QStringLiteral("sdrOverloads"), m_sdr->overloads());
+        if (m_sdrDeliveryRatio >= 0.0) {
+            h.values.insert(QStringLiteral("sdrDeliveryPercent"),
+                            qRound(m_sdrDeliveryRatio * 100.0));
+        }
+    }
+#endif
     h.order = {QStringLiteral("device"), QStringLiteral("repliesDecoded"),
                QStringLiteral("linesIgnored"), QStringLiteral("lastReplyAgeMs"),
-               QStringLiteral("frequencyRoundTripMs")};
+               QStringLiteral("frequencyRoundTripMs"), QStringLiteral("sdrStatus"),
+               QStringLiteral("sdrLoHz"), QStringLiteral("sdrDeliveryPercent"),
+               QStringLiteral("sdrOverloads")};
+    h.sections.insert(QStringLiteral("sdrStatus"), tr("RSP2 panadapter"));
+    h.labels.insert(QStringLiteral("sdrStatus"), tr("Status"));
+    h.labels.insert(QStringLiteral("sdrLoHz"), tr("LO (Hz)"));
+    h.labels.insert(QStringLiteral("sdrDeliveryPercent"), tr("Sample delivery (%)"));
+    h.labels.insert(QStringLiteral("sdrOverloads"), tr("ADC overload events"));
     h.sections.insert(QStringLiteral("device"), tr("CAT link"));
     h.labels.insert(QStringLiteral("device"), tr("Serial device"));
     h.labels.insert(QStringLiteral("repliesDecoded"), tr("Replies decoded"));

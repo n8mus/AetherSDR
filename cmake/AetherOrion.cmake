@@ -3,9 +3,8 @@
 # One include from CMakeLists.txt, placed after the Qt6::SerialPort block,
 # so every fork build rule lives here and upstream merges touch one line.
 #
-# Step 1 is serial CAT only and needs nothing beyond Qt6::SerialPort. The
-# SDRplay RSP2 (step 2) will add an ENABLE_SDRPLAY switch here; the
-# proprietary library is linked from the system, never bundled (fork rule 5).
+# The CAT link needs only Qt6::SerialPort. The SDRplay RSP2 panadapter is
+# optional (ENABLE_ORION_SDRPLAY below).
 
 option(ENABLE_ORION "Build the Ten-Tec Orion backend (N8EM fork)" ON)
 
@@ -24,4 +23,33 @@ else()
         src/core/backends/orion/OrionCat.h
         src/core/backends/orion/OrionPollScheduler.cpp
         src/core/backends/orion/OrionPollScheduler.h)
+
+    # RSP2 panadapter (step 2). Needs the SDRplay API HEADERS from the
+    # operator's install and fftw3f. The library itself is dlopen()ed at run
+    # time and never linked, so no package can bundle it (fork rule 5).
+    option(ENABLE_ORION_SDRPLAY "Orion backend: SDRplay RSP2 panadapter" ON)
+    find_path(ORION_SDRPLAY_INCLUDE_DIR sdrplay_api.h)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(ORION_FFTW3F IMPORTED_TARGET fftw3f)
+    endif()
+    if(NOT ENABLE_ORION_SDRPLAY)
+        message(STATUS "Ten-Tec Orion ... RSP2 panadapter disabled by ENABLE_ORION_SDRPLAY=OFF")
+    elseif(NOT ORION_SDRPLAY_INCLUDE_DIR)
+        message(STATUS "Ten-Tec Orion ... RSP2 panadapter disabled — sdrplay_api.h not found (install the SDRplay API)")
+    elseif(NOT ORION_FFTW3F_FOUND)
+        message(STATUS "Ten-Tec Orion ... RSP2 panadapter disabled — fftw3f not found")
+    else()
+        message(STATUS "Ten-Tec Orion ... RSP2 panadapter enabled (SDRplay API loaded at run time)")
+        set(AETHER_ORION_SDRPLAY ON)
+        target_compile_definitions(aethercore PRIVATE AETHER_ORION_SDRPLAY)
+        target_include_directories(aethercore PRIVATE ${ORION_SDRPLAY_INCLUDE_DIR})
+        target_link_libraries(aethercore PRIVATE PkgConfig::ORION_FFTW3F ${CMAKE_DL_LIBS})
+        target_sources(aethercore PRIVATE
+            src/core/backends/orion/OrionSpectrum.cpp
+            src/core/backends/orion/OrionSpectrum.h
+            src/core/backends/orion/Rsp2Receiver.cpp
+            src/core/backends/orion/Rsp2Receiver.h
+            src/core/backends/orion/SdrPlayApi.cpp
+            src/core/backends/orion/SdrPlayApi.h)
+    endif()
 endif()

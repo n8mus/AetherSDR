@@ -16,6 +16,7 @@
 #include "core/backends/IRadioBackend.h"
 #include "core/backends/orion/OrionCat.h"
 #include "core/backends/orion/OrionPollScheduler.h"
+#include "core/backends/orion/OrionSpectrum.h"
 
 #include <QElapsedTimer>
 #include <QPointer>
@@ -28,6 +29,8 @@
 class QSerialPort;
 
 namespace AetherSDR::orion {
+
+class Rsp2Receiver;
 
 class OrionBackend : public IRadioBackend {
     Q_OBJECT
@@ -54,14 +57,19 @@ public:
     static constexpr int kFilterEchoGuardMs = 2000;
     static constexpr qint64 kLargeJumpHz = 100000;
     static constexpr int kLinkTickMs = 1000;
-    // The pan's width until the RSP2 supplies a real capture (step 2).
-    static constexpr double kPanViewMhz = 0.2;
-    // Until the RSP2 supplies real spectrum, a flat trace at the floor keeps
-    // the pan and waterfall alive (AetherSDR's connect overlay only clears on
-    // the first spectrum frame).
+    // Without an RSP2 (not installed, in use, or turned off) a flat trace at
+    // the floor keeps the pan and waterfall alive: AetherSDR's connect
+    // overlay only clears on the first spectrum frame.
     static constexpr int kPlaceholderSpectrumMs = 250;
     static constexpr int kPlaceholderSpectrumBins = 512;
     static constexpr float kPlaceholderFloorDbm = -127.0f;
+    // RSP2 retunes during a pan drag are coalesced to this.
+    static constexpr int kLoRetuneMs = 50;
+    // Delivery below this share of 1 MS/s is reported (a Debug build or a
+    // busy machine makes the SDRplay service drop transfers silently).
+    static constexpr double kMinDeliveryRatio = 0.95;
+    static constexpr int kSdrSilentWarningMs = 3000;
+    static constexpr int kSdrDeliveryWindowMs = 5000;
 
     // ---- IRadioBackend ----
     RadioCapabilities capabilities() const override;
@@ -74,6 +82,10 @@ public:
     void setSliceFilter(int sliceId, int lowHz, int highHz) override;
     void setSliceAgc(int sliceId, const QString& mode, int thresholdDb) override;
     void setPanCenter(const QString& panId, double hz, PanCenterIntent intent) override;
+    void setPanBandwidth(const QString& panId, double hz) override;
+    void setPanFrameRate(const QString& panId, int fps) override;
+    void setPanAverage(const QString& panId, int average) override;
+    void setPanPixelWidth(const QString& panId, int pixels) override;
     void setPanRfGain(const QString& panId, int gainDb) override;
     void setPanPreamp(const QString& panId, int step) override;
     void setPanAttenuator(const QString& panId, int step) override;
@@ -124,6 +136,11 @@ private:
     void applyPbt(Rx rx, int hz);
     void publishPassband(Rx rx);
     void publishPan();
+    void applyViewToSdr();
+    void startSdr(const QVariantMap& params);
+    void stopSdr();
+    void retuneSdr();
+    [[nodiscard]] bool sdrRunning() const;
     void publishMeterDefs();
     void publishInitialState();
     void startupQueries();
@@ -146,7 +163,9 @@ private:
 
     std::array<Receiver, 2> m_rx;
     std::optional<char> m_txVfo;
-    double m_panCentreMhz = 0.0;
+    spectrum::View m_view;
+    bool m_viewKnown = false;
+    int m_panPoints = 1024;
     int m_activeSlice = 0;
 
     OrionPollScheduler m_scheduler;
@@ -156,6 +175,16 @@ private:
     QTimer m_linkTimer;
     QTimer m_writeTimer;
     QTimer m_placeholderSpectrumTimer;
+    QTimer m_loRetuneTimer;
+    QVariantMap m_connectParams;
+    std::unique_ptr<Rsp2Receiver> m_sdr;
+    QString m_sdrStatus;
+    qint64 m_sdrSamplesAtTick = 0;
+    qint64 m_sdrTickMs = 0;
+    double m_sdrDeliveryRatio = -1.0;
+    int m_sdrLowWindows = 0;
+    bool m_sdrDeliveryWarned = false;
+    qint64 m_sdrStartedMs = -1;
     qint64 m_lastFrequencyWriteMs = -1'000'000;
 
     // Link accounting (owner thread only).

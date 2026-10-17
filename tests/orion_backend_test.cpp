@@ -247,6 +247,8 @@ int main(int argc, char** argv)
     std::printf("-- connect\n");
     RadioConnectRequest req;
     req.serial = QStringLiteral("orion:") + radio.slavePath();
+    // Never touch the station's RSP2 from a unit test.
+    req.params.insert(QStringLiteral("orion.sdr"), false);
     backend.connectRadio(req);
     check(waitFor([&] { return connectedSpy.count() == 1; }, 2000),
           "connected() after the first CAT reply");
