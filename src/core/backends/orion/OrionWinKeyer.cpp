@@ -33,6 +33,9 @@ OrionWinKeyer::OrionWinKeyer(QObject* parent)
     connect(&m_potTimer, &QTimer::timeout, this, [this] {
         if (m_potPending >= 0 && m_potPending != m_potEmitted) {
             m_potEmitted = m_potPending;
+            // A host speed overrides the knob on the keyer, so following
+            // the knob means sending its speed back, as the reference did.
+            setSpeed(m_potEmitted);
             emit speedPotChanged(m_potEmitted);
         }
     });
@@ -142,6 +145,10 @@ void OrionWinKeyer::step()
         m_rx.clear();
         m_state = State::Ready;
         setSpeed(m_wpm);
+        // The knob's range, as the reference program set it (7..45 WPM,
+        // held in the keyer's RAM only), then ask where the knob is.
+        write(QByteArray::fromRawData("\x05\x07\x26\x00", 4));
+        write(QByteArray("\x07", 1));
         qCInfo(lcOrion) << "WinKeyer: ready on" << m_device << "firmware" << m_firmware
                         << (isWk3() ? "(WK3)" : "");
         emit ready(m_firmware);

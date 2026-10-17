@@ -153,6 +153,8 @@ static void testWinKeyer()
     check(waitFor([&] { return ready.count() == 1; }, 4000), "open sequence: echo, host open, ready");
     check(keyer.firmwareRevision() == 31 && keyer.isWk3(), "firmware 31 read from host open: WK3");
     check(fake.received.startsWith(QByteArray("\x13\x13\x13", 3)), "wakes with three 0x13");
+    check(waitFor([&] { return fake.received.contains(QByteArray("\x05\x07\x26\x00", 4)); }, 500),
+          "pot range 7..45 set when ready");
     fake.received.clear();
 
     keyer.setSpeed(28);
@@ -174,6 +176,8 @@ static void testWinKeyer()
     fake.reply(QByteArray(1, static_cast<char>(0x80 | 15)));   // pot: min 7 + 15
     check(waitFor([&] { return pot.count() == 1 && pot.last().at(0).toInt() == 22; }, 1500),
           "speed pot 22 WPM after the settle time");
+    check(waitFor([&] { return fake.received.contains(QByteArray("\x02\x16", 2)); }, 500),
+          "the keyer is sent the knob's speed");
 
     fake.received.clear();
     keyer.close();
