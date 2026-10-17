@@ -85,6 +85,9 @@ public:
     // RTL-SDR USB dongles (RTL2832U / R820T). USB-addressed (device index +
     // serial), not network. Receive-only (Principle VI).
     static constexpr const char* kFamilyRtl  = "rtl";
+    // N8EM fork: Ten-Tec Orion on serial CAT. The address field carries the
+    // serial device path (/dev/orion) instead of an IP address.
+    static constexpr const char* kFamilyOrion = "orion";
 
     // IConnectionAutomation — engine-facing connect/disconnect/dialog hook.
     QList<RadioInfo> automationLocalRadios() const override;

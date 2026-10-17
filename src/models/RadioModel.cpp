@@ -25,6 +25,9 @@
 #ifdef AETHER_BACKEND_RTL
 #include "core/backends/rtl/RtlSdrBackend.h"    // RTL-SDR backend (family "rtl")
 #endif
+#ifdef AETHER_BACKEND_ORION
+#include "core/backends/orion/OrionBackend.h"   // N8EM fork: Ten-Tec Orion (family "orion")
+#endif
 #include "core/AppSettings.h"
 #include "core/BandStackSettings.h"
 #include "core/RadioStateMemory.h"  // RFC #4603 typed restore handoff
@@ -812,6 +815,15 @@ std::unique_ptr<IRadioBackend> RadioModel::makeBackend(const QString& family)
         return std::make_unique<rtl::RtlSdrBackend>();
 #else
         qWarning() << "RadioModel: RTL-SDR backend requested but RTL support is disabled";
+        return nullptr;
+#endif
+    }
+    // N8EM fork: Ten-Tec Orion on serial CAT. Radio-authoritative, like Icom.
+    if (family.compare(QLatin1String("orion"), Qt::CaseInsensitive) == 0) {
+#ifdef AETHER_BACKEND_ORION
+        return std::make_unique<orion::OrionBackend>();
+#else
+        qWarning() << "RadioModel: Orion backend requested but this build has no serial port support";
         return nullptr;
 #endif
     }

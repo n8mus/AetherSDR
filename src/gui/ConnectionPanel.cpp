@@ -268,6 +268,8 @@ QString familyFromProfile(const QJsonObject& profile)
         return QString::fromLatin1(ConnectionPanel::kFamilyIcom);
     if (family == QLatin1String(ConnectionPanel::kFamilyRtl))
         return QString::fromLatin1(ConnectionPanel::kFamilyRtl);
+    if (family == QLatin1String(ConnectionPanel::kFamilyOrion))
+        return QString::fromLatin1(ConnectionPanel::kFamilyOrion);
     return QString::fromLatin1(ConnectionPanel::kFamilyFlex);
 }
 
@@ -775,6 +777,10 @@ ConnectionPanel::ConnectionPanel(QWidget* parent)
     m_manualRadioTypeCombo->addItem(tr("Icom (network)"), QString::fromLatin1(kFamilyIcom));
 #ifdef AETHER_BACKEND_RTL
     m_manualRadioTypeCombo->addItem(tr("RTL-SDR (USB)"), QString::fromLatin1(kFamilyRtl));
+#endif
+#ifdef AETHER_BACKEND_ORION
+    m_manualRadioTypeCombo->addItem(tr("Ten-Tec Orion (serial)"),
+                                    QString::fromLatin1(kFamilyOrion));
 #endif
     addManualRow(QStringLiteral("Radio type:"), m_manualRadioTypeCombo);
 
@@ -2429,6 +2435,7 @@ void ConnectionPanel::setManualFamily(const QString& family)
       : lowered == QLatin1String(kFamilyAnan) ? QString::fromLatin1(kFamilyAnan)
       : lowered == QLatin1String(kFamilyIcom) ? QString::fromLatin1(kFamilyIcom)
       : lowered == QLatin1String(kFamilyRtl)  ? QString::fromLatin1(kFamilyRtl)
+      : lowered == QLatin1String(kFamilyOrion) ? QString::fromLatin1(kFamilyOrion)
                                               : QString::fromLatin1(kFamilyFlex);
     const int index = m_manualRadioTypeCombo->findData(wanted);
     if (index < 0 || index == m_manualRadioTypeCombo->currentIndex()) {
@@ -2557,6 +2564,7 @@ void ConnectionPanel::updateManualFamilyHints()
     const bool hl2  = family == QLatin1String(kFamilyHl2);
     const bool anan = family == QLatin1String(kFamilyAnan);
     const bool icom = family == QLatin1String(kFamilyIcom);
+    const bool orion = family == QLatin1String(kFamilyOrion);
 
     // The credentials and network selectors belong to Icom alone. Hiding the
     // row CONTAINERS rather than the fields keeps their labels from being left
@@ -2629,7 +2637,12 @@ void ConnectionPanel::updateManualFamilyHints()
                   "This build has no QtKeychain support, so the password is kept for this "
                   "session only.");
         m_manualHintLabel->setText(
-            icom
+            orion
+                ? QStringLiteral(
+                      "Enter the serial device the Orion's CAT cable is on, normally "
+                      "/dev/orion. Close any other program using the radio first: the "
+                      "port has one owner.")
+                : icom
                 ? QStringLiteral(
                       "Enter the radio address and the network user name and password "
                       "configured for network control. Standard UDP ports are used unless "
@@ -2652,7 +2665,8 @@ void ConnectionPanel::updateManualFamilyHints()
     }
     if (m_manualIpEdit) {
         m_manualIpEdit->setPlaceholderText(
-            icom ? QStringLiteral("Example: radio.local or 192.168.1.90")
+            orion ? QStringLiteral("Example: /dev/orion")
+          : icom ? QStringLiteral("Example: radio.local or 192.168.1.90")
           : hl2  ? QStringLiteral("Example: 192.168.1.21")
           : anan ? QStringLiteral("Example: 172.16.10.14")
                  : QStringLiteral("Example: 10.0.0.25"));
@@ -2814,6 +2828,22 @@ void ConnectionPanel::probeRadio(const QString& ip, bool restoreSavedFamily)
         // Interactive connects keep the currently selected source path. Only
         // startup and an explicit recent-address selection restore profiles.
         applySavedSourceSelection(trimmedIp, /*restoreFamily=*/true);
+    }
+
+    if (currentManualFamily() == QLatin1String(kFamilyOrion)) {
+        // N8EM fork. A serial radio has nothing to probe and no source path:
+        // opening the port and hearing the first CAT reply IS the probe, and
+        // the backend reports a silent or busy port itself. The device path
+        // rides in the serial field.
+        RadioInfo info;
+        info.family   = QString::fromLatin1(kFamilyOrion);
+        info.model    = QStringLiteral("Orion");
+        info.name     = QStringLiteral("Ten-Tec Orion");
+        info.nickname = info.name;
+        info.serial   = QStringLiteral("orion:%1").arg(trimmedIp);
+        resetManualConnectButton();
+        finishManualProbe(info);
+        return;
     }
 
     bool staleSelection = false;

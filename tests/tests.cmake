@@ -9525,3 +9525,21 @@ if(HAVE_PIPEWIRE)
     target_link_libraries(pipewire_rx_bridge_test PRIVATE aethercore Qt6::Core)
     add_test(NAME pipewire_rx_bridge_test COMMAND pipewire_rx_bridge_test)
 endif()
+
+# N8EM fork: Ten-Tec Orion backend (family "orion"). The codec test is pure;
+# the backend test plays the radio on a pty and never keys (fork rule 3).
+add_executable(orion_cat_test
+    tests/orion_cat_test.cpp
+    src/core/backends/orion/OrionCat.cpp
+    src/core/backends/orion/OrionPollScheduler.cpp)
+target_include_directories(orion_cat_test PRIVATE src)
+target_link_libraries(orion_cat_test PRIVATE Qt6::Core)
+add_test(NAME orion_cat_test COMMAND orion_cat_test)
+
+if(AETHER_BACKEND_ORION AND UNIX AND NOT APPLE)
+    add_executable(orion_backend_test tests/orion_backend_test.cpp)
+    target_include_directories(orion_backend_test PRIVATE src tests)
+    target_link_libraries(orion_backend_test PRIVATE aethercore Qt6::Core Qt6::Test util)
+    add_test(NAME orion_backend_test COMMAND orion_backend_test)
+    set_tests_properties(orion_backend_test PROPERTIES TIMEOUT 60)
+endif()

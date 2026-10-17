@@ -2603,6 +2603,8 @@ if(Qt6SerialPort_FOUND)
     target_link_libraries(aethercore PRIVATE aether_esp_flasher)
 endif()
 
+include(cmake/AetherOrion.cmake)   # N8EM fork: Ten-Tec Orion backend
+
 if(Qt6WebSockets_FOUND)
     # PUBLIC: gui (MainWindow_Spots.cpp) uses QWebSocket directly.
     target_compile_definitions(aethercore PUBLIC HAVE_WEBSOCKETS)
