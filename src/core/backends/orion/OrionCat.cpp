@@ -375,6 +375,33 @@ QByteArray setVfoAssignment(char mainRx, char subRx, char tx)
     return out;
 }
 
+QByteArray setPtt(bool keyed) { return keyed ? QByteArrayLiteral("*TK") : QByteArrayLiteral("*TU"); }
+
+QByteArray setTxPower(int percent)
+{
+    return "*TP" + QByteArray::number(std::clamp(percent, 0, 100));
+}
+
+QByteArray setMicGain(int percent)
+{
+    return "*TM" + QByteArray::number(std::clamp(percent, 0, 100));
+}
+
+QByteArray setAuxGain(int percent)
+{
+    return "*TI" + QByteArray::number(std::clamp(percent, 0, 100));
+}
+
+QByteArray setSpeechProcessor(int level)
+{
+    return "*TS" + QByteArray::number(std::clamp(level, 0, 9));
+}
+
+QByteArray queryTxPower() { return QByteArrayLiteral("?TP"); }
+QByteArray queryMicGain() { return QByteArrayLiteral("?TM"); }
+QByteArray queryAuxGain() { return QByteArrayLiteral("?TI"); }
+QByteArray querySpeechProcessor() { return QByteArrayLiteral("?TS"); }
+
 QByteArray queryVfoLock(Rx rx)
 {
     QByteArray out("?");
@@ -442,6 +469,37 @@ std::optional<Reply> decodeReply(const QByteArray& line)
             return VfoAssignmentReply{line[3], line[4], line[5]};
         }
         return std::nullopt;
+    case 'T': {
+        // @TP / @TM / @TI <0..100>, @TS <0..9>
+        if (line.size() < 4 || !parseLeadingInt(line.mid(3), v)) {
+            return std::nullopt;
+        }
+        switch (line[2]) {
+        case 'P':
+            if (v >= 0 && v <= 100) {
+                return TxLevelReply{TxLevelReply::Kind::Power, static_cast<int>(v)};
+            }
+            break;
+        case 'M':
+            if (v >= 0 && v <= 100) {
+                return TxLevelReply{TxLevelReply::Kind::Mic, static_cast<int>(v)};
+            }
+            break;
+        case 'I':
+            if (v >= 0 && v <= 100) {
+                return TxLevelReply{TxLevelReply::Kind::Aux, static_cast<int>(v)};
+            }
+            break;
+        case 'S':
+            if (v >= 0 && v <= 9) {
+                return TxLevelReply{TxLevelReply::Kind::Processor, static_cast<int>(v)};
+            }
+            break;
+        default:
+            break;
+        }
+        return std::nullopt;
+    }
     case 'R':
         return decodeReceiverReply(line);
     default:

@@ -12,6 +12,8 @@ class OrionRxAudio {};
 }  // namespace AetherSDR::orion
 #endif
 
+#include "core/backends/orion/OrionTxAudio.h"
+
 #include <QLoggingCategory>
 #include <QSerialPort>
 
@@ -78,6 +80,20 @@ OrionBackend::OrionBackend(QObject* parent)
     m_loRetuneTimer.setSingleShot(true);
     m_loRetuneTimer.setInterval(kLoRetuneMs);
     connect(&m_loRetuneTimer, &QTimer::timeout, this, &OrionBackend::retuneSdr);
+
+    // A transmission nobody releases is stopped here, whatever above the seam
+    // thinks (the reference program's MOX failsafe).
+    m_txFailsafeTimer.setSingleShot(true);
+    m_txFailsafeTimer.setInterval(kMaxKeyMs);
+    connect(&m_txFailsafeTimer, &QTimer::timeout, this, &OrionBackend::onTxFailsafe);
+
+    m_txGuardReleaseTimer.setSingleShot(true);
+    m_txGuardReleaseTimer.setInterval(kTxGuardHangMs);
+    connect(&m_txGuardReleaseTimer, &QTimer::timeout, this, [this] {
+        if (!m_keyIntent && !m_radioTx) {
+            applyTxGuard(false);
+        }
+    });
 }
 
 OrionBackend::~OrionBackend()
@@ -91,7 +107,12 @@ OrionBackend::~OrionBackend()
     m_writeTimer.stop();
     m_placeholderSpectrumTimer.stop();
     m_loRetuneTimer.stop();
+    m_txFailsafeTimer.stop();
+    m_txGuardReleaseTimer.stop();
+    // Never leave the radio keyed, and leave it usable stand-alone.
+    leaveRadioSafe();
     stopSdr();
+    m_txAudio.reset();
     if (m_port) {
         m_port->disconnect(this);
         closeSerial(*m_port);
@@ -141,15 +162,24 @@ RadioCapabilities OrionBackend::capabilities() const
     c.receivePanBandwidthControl = std::nullopt;
     c.broadcastFmReceive = std::nullopt;
 
-    // STEP 1 IS RECEIVE-ONLY. Transmit, PTT and TX audio arrive in step 6,
-    // operator-attended (fork rule 3).
-    c.canTransmit = false;
-    c.txPowerMaxWatts = 0.0;
-    c.hasRadioPttReadback = false;
+    // TRANSMIT (step 6). PTT by CAT; the RADIO modulates. TX audio reaches
+    // it by one of two paths the operator picks in the Phone applet: MIC (the
+    // radio's own front jack; AetherSDR sends no audio) or PC (AetherSDR's mic
+    // chain, TCI/DAX audio, to the SignaLink). The radio's ?S reply turns
+    // into a TX meter while it transmits: that is the PTT readback.
+    c.canTransmit = true;
+    c.txPowerMaxWatts = 100.0;
+    c.hasRadioPttReadback = true;
     c.radioPttObservation = std::nullopt;
     c.hostModulates = false;
-    c.takesTxAudioOverSeam = false;
-    c.transmitDriveControl = std::nullopt;
+    c.takesTxAudioOverSeam = true;
+    c.hasSelectableMicInputs = true;
+    c.extensions.insert(QStringLiteral("micInputs"),
+                        QStringList{QString::fromLatin1(kMicInputRadio),
+                                    QString::fromLatin1(kMicInputPc)});
+    // *TP is read back from the radio, so the drive is confirmed state.
+    c.transmitDriveControl = RadioCapabilities::TransmitDriveControl{
+        SliceFrequencyControl::Authority::Radio, /*tunePowerAppliesLive=*/false};
     c.speechProcessorControl = std::nullopt;
     c.voxControl = std::nullopt;
     c.txMonitorControl = std::nullopt;
@@ -284,6 +314,12 @@ void OrionBackend::openLink()
     m_viewKnown = false;
     m_txVfo.reset();
     m_pendingTxVfo.reset();
+    m_txPath = TxPath::RadioMic;
+    m_keyIntent = false;
+    m_radioTx = false;
+    m_lastMicReading = -1;
+    m_lastAuxReading = -1;
+    m_repairedProfile = false;
     m_vfoLocked = {};
     m_kvMain = 'A';
     m_kvSub = 'B';
@@ -341,6 +377,15 @@ void OrionBackend::openLink()
 
 void OrionBackend::closeLink()
 {
+    // Unkey and give the radio back its own mic BEFORE the port closes.
+    leaveRadioSafe();
+    m_txFailsafeTimer.stop();
+    m_txGuardReleaseTimer.stop();
+    if (m_txAudio) {
+        m_txAudio->close();
+    }
+    m_keyIntent = false;
+    m_radioTx = false;
     ++m_generation;
     m_connectTimer.stop();
     m_pollTimer.stop();
@@ -478,11 +523,54 @@ void OrionBackend::onLine(const QByteArray& line)
                 emit panPreampChanged(panId(), r.on ? 1 : 0);
             }
         } else if constexpr (std::is_same_v<T, SMeterReply>) {
+            // In CW the radio answers in RX form between elements, so TX is
+            // only over after a hang without TX replies.
+            if (m_radioTx && nowMs() - m_lastTxMeterMs > kTxHangMs) {
+                setRadioTx(false);
+            }
             emit meterUpdate(QStringLiteral("SLC:LEVEL"), rawToDbm(r.mainRaw));
             emit meterUpdate(QStringLiteral("SLC1:LEVEL"), rawToDbm(r.subRaw));
         } else if constexpr (std::is_same_v<T, TxMeterReply>) {
-            // Step 1 never keys; a TX reply means the operator keyed from the
-            // front panel. Not published until the TX step defines its meters.
+            // The radio is transmitting: by us or from its own front panel.
+            // Either way that is the radio's state, and it is reported.
+            m_lastTxMeterMs = nowMs();
+            if (!m_radioTx) {
+                setRadioTx(true);
+            }
+            emit meterUpdate(QStringLiteral("TX:FWDPWR"), r.forwardWatts);
+            emit meterUpdate(QStringLiteral("TX:REFPWR"), r.reflectedWatts);
+            emit meterUpdate(QStringLiteral("TX:SWR"), r.swr);
+        } else if constexpr (std::is_same_v<T, TxLevelReply>) {
+            TransmitDelta d;
+            switch (r.kind) {
+            case TxLevelReply::Kind::Power:
+                d.rfPower = r.value;
+                break;
+            case TxLevelReply::Kind::Mic:
+                m_lastMicReading = r.value;
+                if (m_txPath == TxPath::RadioMic && r.value > 0) {
+                    m_radioMicLevel = r.value;
+                    d.micLevel = r.value;
+                }
+                break;
+            case TxLevelReply::Kind::Processor:
+                if (m_txPath == TxPath::RadioMic) {
+                    m_radioProcessorLevel = r.value;
+                }
+                break;
+            case TxLevelReply::Kind::Aux:
+                m_lastAuxReading = r.value;
+                break;
+            }
+            // A radio left in the PC profile (mic 0, aux up) by an earlier
+            // session that did not exit cleanly: give it its mic back.
+            if (m_txPath == TxPath::RadioMic && m_lastMicReading == 0 && m_lastAuxReading > 0
+                && !m_repairedProfile) {
+                m_repairedProfile = true;
+                qCInfo(lcOrion) << "Orion: radio was left in the PC audio profile; restoring its mic";
+                applyRadioMicProfile();
+            }
+            emit transmitChanged(d);
         } else if constexpr (std::is_same_v<T, VfoAssignmentReply>) {
             m_kvMain = r.mainRx;
             m_kvSub = r.subRx;
@@ -522,6 +610,7 @@ void OrionBackend::onFirstReply()
     startupQueries();
     m_pollTimer.start();
     m_linkTimer.start();
+    openTxAudio(m_connectParams);
     startSdr(m_connectParams);
     if (!sdrRunning()) {
         m_placeholderSpectrumTimer.start();
@@ -553,6 +642,11 @@ void OrionBackend::publishInitialState()
     }
 
     publishMeterDefs();
+
+    TransmitDelta tx;
+    tx.micSelection = QString::fromLatin1(kMicInputRadio);
+    tx.mox = false;
+    emit transmitChanged(tx);
 
     emit panRfGainInfoChanged(panId(), 0, 100, 1, QStringLiteral("%"));
     emit panPreampInfoChanged(panId(), {tr("OFF"), tr("ON")});
@@ -587,6 +681,22 @@ void OrionBackend::publishMeterDefs()
                                    : tr("Sub receiver signal level");
         emit meterDefined(d);
     }
+    // The radio's own TX meter (@STF): forward and reflected watts, SWR.
+    const struct { int index; const char* name; const char* unit; double low; double high; } tx[] = {
+        {10, "FWDPWR", "Watts", 0.0, 120.0},
+        {11, "REFPWR", "Watts", 0.0, 120.0},
+        {12, "SWR", "SWR", 1.0, 6.4},
+    };
+    for (const auto& m : tx) {
+        MeterDef d;
+        d.index = m.index;
+        d.source = QStringLiteral("TX");
+        d.name = QString::fromLatin1(m.name);
+        d.unit = QString::fromLatin1(m.unit);
+        d.low = m.low;
+        d.high = m.high;
+        emit meterDefined(d);
+    }
 }
 
 void OrionBackend::startupQueries()
@@ -603,6 +713,10 @@ void OrionBackend::startupQueries()
     send(queryVfoAssignment());
     send(queryVfoLock(Rx::Main));
     send(queryVfoLock(Rx::Sub));
+    send(queryTxPower());
+    send(queryMicGain());
+    send(querySpeechProcessor());
+    send(queryAuxGain());
     send(queryRfGain(Rx::Main));
     send(queryAttenuator(Rx::Main));
     send(queryPreamp(Rx::Main));
@@ -997,6 +1111,12 @@ void OrionBackend::onRxAudio(int slice, const QByteArray& stereoFloat)
     Q_UNUSED(stereoFloat);
 #else
     if (!m_connected || slice < 0 || slice > 1) {
+        return;
+    }
+    // While the Orion transmits the RSP2 hears our own signal: silence, not
+    // the operator's own hash (and no feedback into a PC microphone).
+    if (m_keyIntent || m_radioTx) {
+        m_mixPending = {};
         return;
     }
     // This slice's own feed: pre-mute, pre-gain (TCI, decoders, recorder).
@@ -1440,11 +1560,264 @@ void OrionBackend::setActiveSlice(int sliceId)
 void OrionBackend::setKeying(bool key, const AetherSDR::TxCoordinator::Operation& operation,
                              const AetherSDR::TxCoordinator::Completion& completion)
 {
-    Q_UNUSED(key);
-    Q_UNUSED(operation);
-    Q_UNUSED(completion);
-    // Step 1 is receive-only: canTransmit is false, so this is never
-    // authorized. Deliberately no wire command (fork rule 3).
+    // The decision is made above the seam (Constitution VI); this only
+    // translates it. A key needs an admitted operation; an UNKEY is never
+    // refused, whatever state the link or the operation is in.
+    if (key && !TxCoordinator::Command{operation, key}.permitsDispatch(TxCoordinator::monotonicMs())) {
+        completion.finish();
+        return;
+    }
+    if (key) {
+        if (!m_connected) {
+            completion.finish();
+            return;
+        }
+        if (m_txPath == TxPath::Pc && !(m_txAudio && m_txAudio->isOpen())) {
+            emit configurationWarning(
+                tr("PC audio is selected but the SignaLink is not available (%1). The radio "
+                   "is keyed with no audio; select MIC to use the radio's microphone.")
+                    .arg(m_txAudioError));
+        }
+        send(orion::setPtt(true));
+        m_keyIntent = true;
+        m_keyedAtMs = nowMs();
+        m_txFailsafeTimer.start();
+        applyTxGuard(true);
+        // Audio waits for the radio to report TX (or the lead-in fallback),
+        // so nothing reaches the SignaLink before the radio is transmitting.
+        const quint64 generation = m_generation;
+        QTimer::singleShot(kTxAudioLeadMs, this, [this, generation] {
+            if (generation == m_generation) {
+                updateTxAudioGate();
+            }
+        });
+    } else {
+        unkey();
+    }
+    completion.finish();
+}
+
+void OrionBackend::unkey()
+{
+    // Gate first: no more audio into the SignaLink, which could key the
+    // radio by itself.
+    m_keyIntent = false;
+    updateTxAudioGate();
+    m_txFailsafeTimer.stop();
+    if (m_port) {
+        send(orion::setPtt(false));
+    }
+    // The RSP2 stays desensitised a moment: the radio is still ringing down.
+    m_txGuardReleaseTimer.start();
+}
+
+void OrionBackend::leaveRadioSafe()
+{
+    if (!m_port || !m_port->isOpen()) {
+        return;
+    }
+    if (m_keyIntent) {
+        m_keyIntent = false;
+        if (m_txAudio) {
+            m_txAudio->setGate(false);
+        }
+        send(orion::setPtt(false));
+    }
+    // Stand-alone rule: the radio must work from its front panel with the PC
+    // off, so the radio-mic profile goes back before we let go.
+    if (m_txPath == TxPath::Pc) {
+        applyRadioMicProfile();
+        m_txPath = TxPath::RadioMic;
+    }
+    m_port->flush();
+    m_port->waitForBytesWritten(200);
+}
+
+void OrionBackend::setRadioTx(bool on)
+{
+    m_radioTx = on;
+    TransmitDelta d;
+    d.mox = on;
+    emit transmitChanged(d);
+    // The radio's own answer, by the ?S reply's form (its PTT readback).
+    emit keyingStateConfirmed(on);
+    updateTxAudioGate();
+    if (on) {
+        applyTxGuard(true);
+    } else {
+        emit meterUpdate(QStringLiteral("TX:FWDPWR"), 0.0);
+        emit meterUpdate(QStringLiteral("TX:REFPWR"), 0.0);
+        if (!m_keyIntent) {
+            m_txGuardReleaseTimer.start();
+        }
+    }
+}
+
+void OrionBackend::openTxAudio(const QVariantMap& params)
+{
+    // The SignaLink output, open for the whole session but silent: the gate
+    // stays shut unless we keyed the radio on the PC path.
+    m_txAudio = std::make_unique<OrionTxAudio>();
+    m_txAudioError.clear();
+    // Tests shorten the failsafe; the operator's build keeps 3 minutes.
+    const int maxKeyMs = params.value(QStringLiteral("orion.tx.maxKeyMs"), kMaxKeyMs).toInt();
+    m_txFailsafeTimer.setInterval(std::clamp(maxKeyMs, 500, kMaxKeyMs));
+    const QString device = params.value(QStringLiteral("orion.tx.audioDevice")).toString();
+    if (!m_txAudio->open(device, &m_txAudioError)) {
+        qCWarning(lcOrion) << "TX audio:" << m_txAudioError;
+        m_txAudio.reset();
+        return;
+    }
+    qCInfo(lcOrion) << "TX audio: PC path to" << m_txAudio->deviceName();
+}
+
+void OrionBackend::updateTxAudioGate()
+{
+    if (!m_txAudio) {
+        return;
+    }
+    const bool leadDone = m_keyIntent && nowMs() - m_keyedAtMs >= kTxAudioLeadMs;
+    m_txAudio->setGate(m_keyIntent && m_txPath == TxPath::Pc && (m_radioTx || leadDone));
+}
+
+void OrionBackend::onTxFailsafe()
+{
+    if (!m_keyIntent) {
+        return;
+    }
+    qCWarning(lcOrion) << "Orion: transmit failsafe - unkeyed after" << kMaxKeyMs / 1000 << "s";
+    unkey();
+    emit configurationWarning(tr("Transmit stopped: keyed for %1 minutes without release.")
+                                  .arg(kMaxKeyMs / 60000));
+}
+
+void OrionBackend::applyTxGuard(bool on)
+{
+#ifdef AETHER_ORION_SDRPLAY
+    // The RSP2 shares the antenna field: while the Orion transmits, park it
+    // at minimum gain so its front end is not driven into overload.
+    if (m_sdr) {
+        m_sdr->setTxGuard(on);
+    }
+#else
+    Q_UNUSED(on);
+#endif
+}
+
+void OrionBackend::applyRadioMicProfile()
+{
+    // The radio's front-panel microphone: aux (SignaLink) off, the operator's
+    // own mic gain and processor back.
+    send(orion::setAuxGain(0));
+    send(orion::setMicGain(m_radioMicLevel));
+    send(orion::setSpeechProcessor(m_radioProcessorLevel));
+}
+
+void OrionBackend::applyPcProfile()
+{
+    // AetherSDR's audio through the SignaLink: the radio's mic and processor
+    // off (AetherSDR's own chain does the shaping), aux full.
+    send(orion::setMicGain(0));
+    send(orion::setSpeechProcessor(0));
+    send(orion::setAuxGain(100));
+}
+
+void OrionBackend::setTxPath(TxPath path)
+{
+    if (path == m_txPath) {
+        return;
+    }
+    if (path == TxPath::Pc) {
+        applyPcProfile();
+    } else {
+        applyRadioMicProfile();
+    }
+    m_txPath = path;
+    updateTxAudioGate();
+    TransmitDelta d;
+    d.micSelection = QString::fromLatin1(path == TxPath::Pc ? kMicInputPc : kMicInputRadio);
+    d.micLevel = path == TxPath::Pc ? m_pcMicLevel : m_radioMicLevel;
+    emit transmitChanged(d);
+}
+
+ReceiveDispatch OrionBackend::requestTransmitControl(const TransmitControlRequest& request,
+                                                     TunePowerContext context)
+{
+    Q_UNUSED(context);
+    using Field = TransmitControlRequest::Field;
+    if (!request.valid()) {
+        return ReceiveDispatch::Unsupported;
+    }
+    switch (request.field) {
+    case Field::MicInput: {
+        const QString input = std::get<QString>(request.value).trimmed().toUpper();
+        if (input == QLatin1String(kMicInputPc)) {
+            setTxPath(TxPath::Pc);
+        } else if (input == QLatin1String(kMicInputRadio)) {
+            setTxPath(TxPath::RadioMic);
+        } else {
+            return ReceiveDispatch::Unsupported;
+        }
+        return ReceiveDispatch::Dispatched;
+    }
+    case Field::RfPower:
+        setTxPower(std::get<int>(request.value));
+        return ReceiveDispatch::Dispatched;
+    case Field::MicGain:
+        setMicGain(std::get<int>(request.value));
+        return ReceiveDispatch::Dispatched;
+    // AetherSDR's own TX chain shapes PC audio: these stay on the host.
+    case Field::ProcessorEnabled: case Field::ProcessorLevel:
+        return ReceiveDispatch::LocalOnly;
+    default:
+        return ReceiveDispatch::Unsupported;
+    }
+}
+
+void OrionBackend::setTxPower(int percent)
+{
+    if (!m_connected) {
+        return;
+    }
+    send(orion::setTxPower(percent));
+    send(queryTxPower());
+}
+
+void OrionBackend::setMicGain(int level)
+{
+    level = std::clamp(level, 0, 100);
+    if (m_txPath == TxPath::Pc) {
+        // The PC path's level is ours: it scales the audio to the SignaLink.
+        m_pcMicLevel = level;
+    } else if (m_connected) {
+        m_radioMicLevel = level;
+        send(orion::setMicGain(level));
+    }
+}
+
+void OrionBackend::submitTxAudio(const QByteArray& int16Stereo, int sampleRateHz,
+                                 TxAudioSource source, const TxCoordinator::Context& context)
+{
+    Q_UNUSED(source);
+    Q_UNUSED(context);
+    // Only the PC path carries host audio, and the gate (keyed by us, radio
+    // in TX) decides whether any of it reaches the SignaLink.
+    if (!m_txAudio || m_txPath != TxPath::Pc) {
+        return;
+    }
+    // 50 is unity on the PC mic slider, 100 is +6 dB.
+    m_txAudio->submit(int16Stereo, sampleRateHz, static_cast<float>(m_pcMicLevel) / 50.0f);
+}
+
+int OrionBackend::finishTxAudio(const TxCoordinator::Context& context)
+{
+    Q_UNUSED(context);
+    if (!m_txAudio || m_txPath != TxPath::Pc) {
+        return 0;
+    }
+    // What is still queued for the codec, plus the SignaLink and the radio's
+    // own audio path (the reference program drained 250 ms before unkey).
+    return m_txAudio->queuedMs() + kTxAudioTailMs;
 }
 
 void OrionBackend::invokeExtension(const QString& ns, const QString& verb,
@@ -1471,6 +1844,14 @@ IRadioBackend::HealthSnapshot OrionBackend::healthSnapshot() const
     if (m_rttMs >= 0) {
         h.values.insert(QStringLiteral("frequencyRoundTripMs"), m_rttMs);
     }
+    h.values.insert(QStringLiteral("txPath"),
+                    QString::fromLatin1(m_txPath == TxPath::Pc ? kMicInputPc : kMicInputRadio));
+    h.values.insert(QStringLiteral("txAudioDevice"),
+                    m_txAudio ? m_txAudio->deviceName() : m_txAudioError);
+    if (m_txAudio) {
+        h.values.insert(QStringLiteral("txAudioWritten"), QVariant::fromValue(m_txAudio->samplesWritten()));
+        h.values.insert(QStringLiteral("txAudioDropped"), QVariant::fromValue(m_txAudio->samplesDropped()));
+    }
     h.values.insert(QStringLiteral("sdrStatus"), m_sdrStatus);
 #ifdef AETHER_ORION_SDRPLAY
     if (m_sdr) {
@@ -1484,9 +1865,16 @@ IRadioBackend::HealthSnapshot OrionBackend::healthSnapshot() const
 #endif
     h.order = {QStringLiteral("device"), QStringLiteral("repliesDecoded"),
                QStringLiteral("linesIgnored"), QStringLiteral("lastReplyAgeMs"),
-               QStringLiteral("frequencyRoundTripMs"), QStringLiteral("sdrStatus"),
+               QStringLiteral("frequencyRoundTripMs"), QStringLiteral("txPath"),
+               QStringLiteral("txAudioDevice"), QStringLiteral("txAudioWritten"),
+               QStringLiteral("txAudioDropped"), QStringLiteral("sdrStatus"),
                QStringLiteral("sdrLoHz"), QStringLiteral("sdrDeliveryPercent"),
                QStringLiteral("sdrOverloads")};
+    h.sections.insert(QStringLiteral("txPath"), tr("Transmit"));
+    h.labels.insert(QStringLiteral("txPath"), tr("TX audio path"));
+    h.labels.insert(QStringLiteral("txAudioDevice"), tr("PC audio output"));
+    h.labels.insert(QStringLiteral("txAudioWritten"), tr("TX audio samples sent"));
+    h.labels.insert(QStringLiteral("txAudioDropped"), tr("TX audio samples held back"));
     h.sections.insert(QStringLiteral("sdrStatus"), tr("RSP2 panadapter"));
     h.labels.insert(QStringLiteral("sdrStatus"), tr("Status"));
     h.labels.insert(QStringLiteral("sdrLoHz"), tr("LO (Hz)"));

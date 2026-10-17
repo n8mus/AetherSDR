@@ -189,6 +189,23 @@ void Rsp2Receiver::setLo(qint64 loHz)
     }
 }
 
+void Rsp2Receiver::setTxGuard(bool on)
+{
+    if (!m_running || !m_params || m_txGuard == on) {
+        return;
+    }
+    m_txGuard = on;
+    auto& gain = m_params->rxChannelA->tunerParams.gain;
+    gain.gRdB = on ? 59 : m_settings.gainReductionDb;
+    gain.LNAstate = static_cast<unsigned char>(on ? 8 : m_settings.lnaState);
+    const sdrplay_api_ErrT e = m_api->update(m_device.dev, m_device.tuner,
+                                             sdrplay_api_Update_Tuner_Gr,
+                                             sdrplay_api_Update_Ext1_None);
+    if (e != sdrplay_api_Success) {
+        qCWarning(lcOrion) << "RSP2: TX guard" << on << "failed:" << m_api->errorText(e);
+    }
+}
+
 void Rsp2Receiver::setView(const spectrum::View& view, int points)
 {
     std::lock_guard lock(m_viewLock);

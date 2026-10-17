@@ -32,6 +32,7 @@ namespace AetherSDR::orion {
 
 class Rsp2Receiver;
 class OrionRxAudio;
+class OrionTxAudio;
 
 class OrionBackend : public IRadioBackend {
     Q_OBJECT
@@ -64,6 +65,18 @@ public:
     static constexpr qint64 kSplitParkCwHz = 1000;
     static constexpr qint64 kSplitParkVoiceHz = 5000;
     static constexpr int kRoutingReadbackMs = 300;
+
+    // ---- transmit (step 6) ----
+    // The two TX audio paths, as the Phone applet's mic-source list names them.
+    static constexpr const char* kMicInputRadio = "MIC";   // the radio's front jack
+    static constexpr const char* kMicInputPc = "PC";       // AetherSDR via the SignaLink
+    static constexpr int kMaxKeyMs = 180'000;      // failsafe: 3 minutes keyed
+    static constexpr int kTxAudioLeadMs = 300;     // key, then audio (reference program)
+    static constexpr int kTxAudioTailMs = 250;     // SignaLink + radio audio path
+    static constexpr int kTxHangMs = 1500;         // RX-form ?S replies inside a CW over
+    static constexpr int kTxGuardHangMs = 1500;    // RSP2 stays guarded after unkey
+    static constexpr int kDefaultRadioMic = 51;    // reference program's voice defaults
+    static constexpr int kDefaultRadioProcessor = 2;
     // Without an RSP2 (not installed, in use, or turned off) a flat trace at
     // the floor keeps the pan and waterfall alive: AetherSDR's connect
     // overlay only clears on the first spectrum frame.
@@ -112,6 +125,13 @@ public:
 
     void setKeying(bool key, const AetherSDR::TxCoordinator::Operation& operation,
                    const AetherSDR::TxCoordinator::Completion& completion = {}) override;
+    ReceiveDispatch requestTransmitControl(const TransmitControlRequest& request,
+                                           TunePowerContext context = TunePowerContext::Deferred) override;
+    void setTxPower(int percent) override;
+    void setMicGain(int level) override;
+    void submitTxAudio(const QByteArray& int16Stereo, int sampleRateHz, TxAudioSource source,
+                       const TxCoordinator::Context& context) override;
+    int finishTxAudio(const TxCoordinator::Context& context) override;
     void invokeExtension(const QString& ns, const QString& verb,
                          quint64 requestId, const QVariant& arg = {}) override;
 
@@ -156,6 +176,18 @@ private:
     void publishPassband(Rx rx);
     void publishPan();
     void publishTxVfo(char tx);
+
+    enum class TxPath { RadioMic, Pc };
+    void unkey();
+    void leaveRadioSafe();
+    void updateTxAudioGate();
+    void onTxFailsafe();
+    void applyTxGuard(bool on);
+    void applyRadioMicProfile();
+    void applyPcProfile();
+    void setTxPath(TxPath path);
+    void setRadioTx(bool on);
+    void openTxAudio(const QVariantMap& params);
     void applyViewToSdr();
     void startSdr(const QVariantMap& params);
     void stopSdr();
@@ -190,6 +222,24 @@ private:
     char m_kvMain = 'A';
     char m_kvSub = 'B';
     std::array<std::optional<bool>, 2> m_vfoLocked;
+
+    // Transmit state. m_keyIntent: WE keyed it. m_radioTx: the radio says it
+    // is transmitting (its ?S reply), whoever keyed it.
+    TxPath m_txPath = TxPath::RadioMic;
+    bool m_keyIntent = false;
+    bool m_radioTx = false;
+    qint64 m_keyedAtMs = 0;
+    qint64 m_lastTxMeterMs = 0;
+    int m_radioMicLevel = kDefaultRadioMic;
+    int m_radioProcessorLevel = kDefaultRadioProcessor;
+    int m_pcMicLevel = 50;
+    int m_lastMicReading = -1;
+    int m_lastAuxReading = -1;
+    bool m_repairedProfile = false;
+    std::unique_ptr<OrionTxAudio> m_txAudio;
+    QString m_txAudioError;
+    QTimer m_txFailsafeTimer;
+    QTimer m_txGuardReleaseTimer;
     spectrum::View m_view;
     bool m_viewKnown = false;
     int m_panPoints = 1024;

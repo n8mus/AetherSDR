@@ -95,6 +95,20 @@ inline constexpr double kS9Dbm = -73.0;
 // *KV<main><sub><tx>: route the VFOs. main is A or B; sub and tx A, B or N.
 // Empty when a letter is out of range. Split is TX on B with main RX on A.
 [[nodiscard]] QByteArray setVfoAssignment(char mainRx, char subRx, char tx);
+// ---- transmit (step 6) ---------------------------------------------------
+// *TK keys, *TU unkeys. An unkey is never refused anywhere in this backend.
+[[nodiscard]] QByteArray setPtt(bool keyed);
+// TX levels, each 0..100 (the radio rejects out-of-range values; clamped
+// here): power, mic gain, aux (line) input gain. Speech processor 0..9.
+[[nodiscard]] QByteArray setTxPower(int percent);
+[[nodiscard]] QByteArray setMicGain(int percent);
+[[nodiscard]] QByteArray setAuxGain(int percent);
+[[nodiscard]] QByteArray setSpeechProcessor(int level);
+[[nodiscard]] QByteArray queryTxPower();
+[[nodiscard]] QByteArray queryMicGain();
+[[nodiscard]] QByteArray queryAuxGain();
+[[nodiscard]] QByteArray querySpeechProcessor();
+
 // ?AL / ?BL (undocumented, live-verified): front-panel lock state. The lock
 // only freezes the knob; CAT still tunes, so the backend enforces it.
 [[nodiscard]] QByteArray queryVfoLock(Rx rx);
@@ -117,10 +131,17 @@ struct TxMeterReply { double forwardWatts; double reflectedWatts; double swr; };
 struct VfoAssignmentReply { char mainRx; char subRx; char tx; };
 // @AL / @AU / @BL / @BU
 struct VfoLockReply { Rx rx; bool locked; };
+// @TP / @TM / @TI <0..100>, @TS <0..9>
+struct TxLevelReply {
+    enum class Kind { Power, Mic, Aux, Processor };
+    Kind kind;
+    int value;
+};
 
 using Reply = std::variant<FrequencyReply, ModeReply, BandwidthReply, PbtReply,
                            AgcReply, RfGainReply, AttenuatorReply, PreampReply,
-                           SMeterReply, TxMeterReply, VfoAssignmentReply, VfoLockReply>;
+                           SMeterReply, TxMeterReply, VfoAssignmentReply, VfoLockReply,
+                           TxLevelReply>;
 
 // Decode one line (CR already stripped). nullopt for anything that is not a
 // well-formed, in-range reply this decoder knows; replies glued together on

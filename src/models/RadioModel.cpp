@@ -4342,6 +4342,16 @@ void RadioModel::publishCapabilities(bool connected)
     // host-modulates and may transmit collapses the mic source to PC. (#4449)
     m_transmitModel.setHostModulation(connected
                                       && caps.hostModulates && caps.canTransmit);
+    // N8EM fork: a backend with no command plane that still has selectable
+    // TX inputs (the Orion: its own mic jack, or the PC via a SignaLink) names
+    // them in its capabilities, since "mic list" is a Flex wire command.
+    if (connected && caps.hasSelectableMicInputs && !hasCommandPlane()) {
+        const QStringList inputs =
+            caps.extensions.value(QStringLiteral("micInputs")).toStringList();
+        if (!inputs.isEmpty() && inputs != m_transmitModel.micInputList()) {
+            m_transmitModel.setMicInputList(inputs);
+        }
+    }
     // Whether an antenna tuner exists at all. Same shape and the same
     // reason: the capability is the backend's to report, and the widgets
     // that need it only see the model.

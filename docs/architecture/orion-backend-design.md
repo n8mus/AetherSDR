@@ -487,6 +487,27 @@ the Orion's two receivers are fixed. Both VFOs are heard together from the
 RSP2 after one fix: B's demodulator had only been retuned on A's changes,
 and AetherSDR's per-slice audio controls arrive as requestSliceAudio.
 
+**Step 6 (built 2026-10-17, bench-tested on a fake radio only; the first
+real transmission is the operator's):**
+- PTT by CAT (`*TK`/`*TU`). A key needs an operation admitted by the TX
+  coordinator; an unkey is never refused. MOX comes only from the radio's
+  readback: its `?S` reply turns into `@STF` while it transmits (1.5 s
+  hang for CW), which also drives TX:FWDPWR, TX:REFPWR and TX:SWR.
+- Two TX audio paths in the Phone applet's mic-source list: MIC (the
+  radio's front jack; aux 0, the operator's mic and processor levels) and
+  PC (AetherSDR's chain to the SignaLink; mic 0, processor 0, aux 100).
+  The list reaches the model through one RadioModel hook (FORK-NOTES).
+- SignaLink output (`OrionTxAudio`): its PipeWire node by full name, 48 kHz.
+  Audio passes ONLY while we keyed the radio on the PC path and the radio
+  reports TX (or 300 ms after the key): a SignaLink keys a radio by itself
+  when audio reaches it. Unkeying drops anything queued.
+- While transmitting: RX audio muted, RSP2 parked at gRdB 59 / LNA 8,
+  restored 1.5 s after.
+- Failsafes: a 3-minute key limit; disconnect, link loss and exit unkey
+  first, then put the radio-mic profile back (stand-alone rule); a radio
+  found left in the PC profile is given its mic back on connect.
+- Not yet: TUNE (`setTune` is a no-op), the Omni VII's keepalive PTT.
+
 **Later steps, each one an operator on-air checkpoint:**
 
 | Step | Content | Operator check |

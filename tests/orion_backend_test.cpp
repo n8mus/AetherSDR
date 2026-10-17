@@ -6,6 +6,7 @@
 // keys: the test fails if the backend ever writes a transmit command.
 
 #include "core/backends/orion/OrionBackend.h"
+#include "core/TxCoordinator.h"
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
@@ -103,6 +104,11 @@ public:
     QByteArray kv = "ABA";
     bool aLocked = false;
     bool bLocked = false;
+    bool keyed = false;
+    int txPower = 50;
+    int micGain = 51;
+    int procLevel = 2;
+    int auxGain = 0;
 
 private:
     void reply(const QByteArray& line)
@@ -148,7 +154,20 @@ private:
         } else if (q == "BF") {
             reply("@BF" + QByteArray::number(bfHz));
         } else if (q == "S") {
-            reply("@SRM" + QByteArray::number(sMain) + "S" + QByteArray::number(sSub));
+            // Keyed, the Orion answers with its TX meter (the PTT readback).
+            if (keyed) {
+                reply("@STF040R002S384");   // 40 W fwd, 2 W ref, SWR 1.5
+            } else {
+                reply("@SRM" + QByteArray::number(sMain) + "S" + QByteArray::number(sSub));
+            }
+        } else if (q == "TP") {
+            reply("@TP" + QByteArray::number(txPower));
+        } else if (q == "TM") {
+            reply("@TM" + QByteArray::number(micGain));
+        } else if (q == "TS") {
+            reply("@TS" + QByteArray::number(procLevel));
+        } else if (q == "TI") {
+            reply("@TI" + QByteArray::number(auxGain));
         } else if (q == "RMM") {
             reply("@RMM" + QByteArray::number(mainMode));
         } else if (q == "RSM") {
@@ -203,6 +222,18 @@ private:
             mainAgc = cmd[4];
         } else if (cmd.startsWith("*KV") && cmd.size() == 6) {
             kv = cmd.mid(3);
+        } else if (cmd == "*TK") {
+            keyed = true;    // nothing radiates: this is a pty
+        } else if (cmd == "*TU") {
+            keyed = false;
+        } else if (cmd.startsWith("*TP")) {
+            txPower = cmd.mid(3).toInt();
+        } else if (cmd.startsWith("*TM")) {
+            micGain = cmd.mid(3).toInt();
+        } else if (cmd.startsWith("*TS")) {
+            procLevel = cmd.mid(3).toInt();
+        } else if (cmd.startsWith("*TI")) {
+            auxGain = cmd.mid(3).toInt();
         }
     }
 
@@ -227,6 +258,7 @@ int main(int argc, char** argv)
 {
     QCoreApplication app(argc, argv);
     qRegisterMetaType<SliceDelta>();
+    qRegisterMetaType<TransmitDelta>();
 
     FakeOrion radio;
     if (!radio.open()) {
@@ -257,13 +289,18 @@ int main(int argc, char** argv)
     std::printf("-- connect\n");
     RadioConnectRequest req;
     req.serial = QStringLiteral("orion:") + radio.slavePath();
-    // Never touch the station's RSP2 from a unit test.
+    // Never touch the station's RSP2 or the SignaLink from a unit test: the
+    // SignaLink can key a real radio by itself when audio reaches it.
     req.params.insert(QStringLiteral("orion.sdr"), false);
+    req.params.insert(QStringLiteral("orion.tx.audioDevice"), QStringLiteral("none"));
+    req.params.insert(QStringLiteral("orion.tx.maxKeyMs"), 1500);
     backend.connectRadio(req);
     check(waitFor([&] { return connectedSpy.count() == 1; }, 2000),
           "connected() after the first CAT reply");
     check(backend.capabilities().family == QLatin1String("orion"), "family is orion");
-    check(!backend.capabilities().canTransmit, "step 1 is receive-only");
+    check(backend.capabilities().canTransmit, "the Orion can transmit (step 6)");
+    check(!backend.capabilities().hostModulates && backend.capabilities().takesTxAudioOverSeam,
+          "the radio modulates; PC audio crosses the seam");
     check(backend.capabilities().maxSlices == 2, "two receivers");
 
     check(waitFor([&] {
@@ -390,7 +427,8 @@ int main(int argc, char** argv)
     backend.requestSliceControl(0, toB);
     radio.bLocked = false;
 
-    std::printf("-- the transmit guard\n");
+    std::printf("-- a key without an admitted operation is refused\n");
+    radio.sets.clear();
     backend.setKeying(true, {}, {});
     QElapsedTimer guard;
     guard.start();
@@ -398,11 +436,110 @@ int main(int argc, char** argv)
         QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
         usleep(2000);
     }
-    bool keyed = false;
-    for (const QByteArray& s : radio.sets) {
-        if (s.startsWith("*T")) keyed = true;
+    check(!radio.sets.contains("*TK"), "no *TK without an operation from the TX coordinator");
+
+    // An admitted operation, the way the engine's TX gate hands one out.
+    TxCoordinator coordinator([](const TxCoordinator::Operation&, TxCoordinator::StopReason) {});
+    const auto admission = coordinator.acquire(coordinator.registerActor({true, 0}),
+                                               TxCoordinator::monotonicMs());
+    check(admission.accepted(), "test operation admitted");
+    const TxCoordinator::Operation op = admission.operation;
+
+    QSignalSpy txSpy(&backend, &IRadioBackend::transmitChanged);
+    QSignalSpy confirmSpy(&backend, &IRadioBackend::keyingStateConfirmed);
+    const auto health = [&](const char* key) {
+        return backend.healthSnapshot().values.value(QString::fromLatin1(key));
+    };
+    const auto sawMox = [&](bool on) {
+        for (const auto& args : txSpy) {
+            const auto d = args.at(0).value<TransmitDelta>();
+            if (d.mox && *d.mox == on) return true;
+        }
+        return false;
+    };
+    QByteArray block(480 * 2 * 2, '\0');   // 20 ms of 24 kHz int16 stereo
+    for (int i = 0; i < 480; ++i) {
+        reinterpret_cast<qint16*>(block.data())[2 * i] = 8000;
+        reinterpret_cast<qint16*>(block.data())[2 * i + 1] = 8000;
     }
-    check(!keyed, "setKeying writes nothing: no *T command ever reached the radio");
+
+    std::printf("-- the PC path\n");
+    radio.sets.clear();
+    TransmitControlRequest pc;
+    pc.field = TransmitControlRequest::Field::MicInput;
+    pc.value = QStringLiteral("PC");
+    check(backend.requestTransmitControl(pc) == ReceiveDispatch::Dispatched, "PC path accepted");
+    check(waitFor([&] { return radio.sets.contains("*TM0") && radio.sets.contains("*TS0")
+                               && radio.sets.contains("*TI100"); }, 1000),
+          "PC path: radio mic 0, processor 0, aux 100 (the reference DIG profile)");
+    const auto txAudioWritten = [&] { return health("txAudioWritten").toULongLong(); };
+    const quint64 before = txAudioWritten();
+    backend.submitTxAudio(block, 24000, TxAudioSource::Microphone, {});
+    check(txAudioWritten() == before, "unkeyed: not one sample reaches the SignaLink");
+
+    std::printf("-- key, readback, audio, unkey\n");
+    txSpy.clear();
+    confirmSpy.clear();
+    radio.sets.clear();
+    backend.setKeying(true, op, {});
+    check(waitFor([&] { return radio.sets.contains("*TK"); }, 500), "*TK keys the (fake) radio");
+    check(waitFor([&] { return sawMox(true); }, 3000), "MOX comes from the radio's @STF readback");
+    check(confirmSpy.count() >= 1 && confirmSpy.last().at(0).toBool(),
+          "keyingStateConfirmed(true) from the readback");
+    check(waitFor([&] { return meters.count(QStringLiteral("TX:FWDPWR"))
+                               && meters[QStringLiteral("TX:FWDPWR")] == 40.0; }, 2000),
+          "TX:FWDPWR 40 W from @STF040R002S384");
+    check(std::fabs(meters[QStringLiteral("TX:SWR")] - 1.5) < 1e-9, "TX:SWR 1.5");
+    backend.submitTxAudio(block, 24000, TxAudioSource::Microphone, {});
+    check(txAudioWritten() == before + 960, "keyed on PC: 20 ms at 24 kHz -> 960 samples at 48 kHz");
+    check(backend.finishTxAudio({}) >= OrionBackend::kTxAudioTailMs, "finishTxAudio holds PTT for the tail");
+    radio.sets.clear();
+    backend.setKeying(false, op, {});
+    check(waitFor([&] { return radio.sets.contains("*TU"); }, 500), "*TU unkeys");
+    const quint64 afterUnkey = txAudioWritten();
+    backend.submitTxAudio(block, 24000, TxAudioSource::Microphone, {});
+    check(txAudioWritten() == afterUnkey, "after unkey: nothing more to the SignaLink");
+    check(waitFor([&] { return sawMox(false); }, 4000), "MOX off once the radio is back in RX");
+
+    std::printf("-- the radio-mic path sends no PC audio\n");
+    TransmitControlRequest mic;
+    mic.field = TransmitControlRequest::Field::MicInput;
+    mic.value = QStringLiteral("MIC");
+    radio.sets.clear();
+    backend.requestTransmitControl(mic);
+    check(waitFor([&] { return radio.sets.contains("*TI0") && radio.sets.contains("*TM51")
+                               && radio.sets.contains("*TS2"); }, 1000),
+          "MIC path: aux 0, the radio's own mic 51 and processor 2 back");
+    backend.setKeying(true, op, {});
+    check(waitFor([&] { return sawMox(true); }, 3000), "keyed on MIC");
+    const quint64 micBefore = txAudioWritten();
+    backend.submitTxAudio(block, 24000, TxAudioSource::Microphone, {});
+    check(txAudioWritten() == micBefore, "MIC path: host audio is never played to the SignaLink");
+    backend.setKeying(false, op, {});
+    check(waitFor([&] { return !radio.keyed; }, 500), "unkeyed");
+
+    std::printf("-- failsafe\n");
+    radio.sets.clear();
+    backend.setKeying(true, op, {});
+    check(waitFor([&] { return radio.keyed; }, 500), "keyed and left keyed");
+    check(waitFor([&] { return !radio.keyed && radio.sets.contains("*TU"); }, 4000),
+          "the failsafe unkeys a transmission nobody released");
+
+    std::printf("-- disconnect while keyed on PC\n");
+    backend.requestTransmitControl(pc);
+    backend.setKeying(true, op, {});
+    check(waitFor([&] { return radio.keyed && radio.auxGain == 100; }, 1000), "keyed on the PC path");
+    radio.sets.clear();
+    backend.disconnectRadio();
+    check(waitFor([&] { return !radio.keyed; }, 500), "disconnect unkeys first");
+    check(waitFor([&] { return radio.auxGain == 0 && radio.micGain == 51 && radio.procLevel == 2; }, 500),
+          "and gives the radio its own mic back (stand-alone rule)");
+    check(radio.sets.indexOf("*TU") >= 0 && radio.sets.indexOf("*TU") < radio.sets.indexOf("*TI0"),
+          "unkey before the profile change");
+    // Reconnect for the remaining sections.
+    disconnectedSpy.clear();
+    backend.connectRadio(req);
+    check(waitFor([&] { return backend.isConnected(); }, 2000), "reconnected");
 
     std::printf("-- disconnect\n");
     backend.disconnectRadio();

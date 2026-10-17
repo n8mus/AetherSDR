@@ -67,6 +67,11 @@ public:
         m_audioSinks = {main, sub};
     }
 
+    // While the Orion transmits: hardware gain to minimum (gRdB 59, LNA 8)
+    // so the RSP2's front end is not driven into overload by our own signal;
+    // off restores the operator's gain. Owner thread.
+    void setTxGuard(bool on);
+
     void setLo(qint64 loHz);
     [[nodiscard]] qint64 lo() const { return m_requestedLo; }
     void setView(const spectrum::View& view, int points);
@@ -98,6 +103,7 @@ private:
     sdrplay_api_DeviceParamsT* m_params = nullptr;
     Settings m_settings;
     qint64 m_requestedLo = 0;
+    bool m_txGuard = false;
 
     // Ring of the newest IQ, written by the stream callback.
     std::mutex m_ringLock;
