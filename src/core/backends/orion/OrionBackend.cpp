@@ -283,6 +283,10 @@ void OrionBackend::openLink()
     m_view = {};
     m_viewKnown = false;
     m_txVfo.reset();
+    m_pendingTxVfo.reset();
+    m_vfoLocked = {};
+    m_kvMain = 'A';
+    m_kvSub = 'B';
     m_activeSlice = 0;
     m_rxBuffer.clear();
     m_scheduler.reset();
@@ -482,14 +486,24 @@ void OrionBackend::onLine(const QByteArray& line)
             // Step 1 never keys; a TX reply means the operator keyed from the
             // front panel. Not published until the TX step defines its meters.
         } else if constexpr (std::is_same_v<T, VfoAssignmentReply>) {
-            if (m_txVfo != r.tx) {
-                m_txVfo = r.tx;
-                SliceDelta a;
-                a.txSlice = r.tx == 'A';
-                emit sliceChanged(0, a);
-                SliceDelta b;
-                b.txSlice = r.tx == 'B';
-                emit sliceChanged(1, b);
+            m_kvMain = r.mainRx;
+            m_kvSub = r.subRx;
+            // A routing change we asked for is held until the radio agrees,
+            // so a reply already in flight cannot flip the badge back.
+            if (m_pendingTxVfo && m_sinceRoutingEdit.isValid()
+                && m_sinceRoutingEdit.elapsed() < kFrequencyEchoGuardMs
+                && r.tx != *m_pendingTxVfo) {
+                return;
+            }
+            m_pendingTxVfo.reset();
+            publishTxVfo(r.tx);
+        } else if constexpr (std::is_same_v<T, VfoLockReply>) {
+            auto& known = m_vfoLocked[r.rx == Rx::Main ? 0 : 1];
+            if (known != r.locked) {
+                known = r.locked;
+                SliceDelta d;
+                d.locked = r.locked;
+                emit sliceChanged(sliceForRx(r.rx), d);
             }
         }
     }, *reply);
@@ -589,6 +603,8 @@ void OrionBackend::startupQueries()
         send(queryAgc(rx));
     }
     send(queryVfoAssignment());
+    send(queryVfoLock(Rx::Main));
+    send(queryVfoLock(Rx::Sub));
     send(queryRfGain(Rx::Main));
     send(queryAttenuator(Rx::Main));
     send(queryPreamp(Rx::Main));
@@ -845,6 +861,7 @@ void OrionBackend::retuneSdr()
 #ifdef AETHER_ORION_SDRPLAY
     if (sdrRunning() && m_viewKnown) {
         m_sdr->setLo(spectrum::loForView(m_view));
+        pushRxTuning();   // a receiver may have moved in or out of the capture
     }
 #endif
 }
@@ -867,26 +884,30 @@ void OrionBackend::startSdr(const QVariantMap& params)
         m_view.centreHz = m_rx[0].hz.value_or(14'025'000);
         m_viewKnown = true;
     }
-    // Receive audio first: the RSP2's stream callback feeds it from the
-    // first block, so it must exist before the device starts.
-    m_rxAudio = std::make_unique<OrionRxAudio>();
-    connect(m_rxAudio.get(), &OrionRxAudio::audioReady, this, &OrionBackend::onRxAudio);
-    connect(m_rxAudio.get(), &OrionRxAudio::failed, this, [this](const QString& reason) {
-        qCWarning(lcOrion) << "RX audio:" << reason;
-        emit configurationWarning(tr("Receive audio: %1").arg(reason));
-    });
-    {
+    // Receive audio first: the RSP2's stream callback feeds both chains from
+    // the first block, so they must exist before the device starts. One per
+    // receiver: main (slice 0) and sub (slice 1).
+    for (int slice = 0; slice < 2; ++slice) {
+        auto audio = std::make_unique<OrionRxAudio>();
+        connect(audio.get(), &OrionRxAudio::audioReady, this,
+                [this, slice](const QByteArray& pcm) { onRxAudio(slice, pcm); });
+        connect(audio.get(), &OrionRxAudio::failed, this, [this](const QString& reason) {
+            qCWarning(lcOrion) << "RX audio:" << reason;
+            emit configurationWarning(tr("Receive audio: %1").arg(reason));
+        });
         QString audioError;
         OrionRxAudio::Tuning t;
-        t.dialHz = m_rx[0].hz.value_or(14'025'000);
-        if (!m_rxAudio->start(t, &audioError)) {
+        t.dialHz = m_rx[static_cast<std::size_t>(slice)].hz.value_or(14'025'000);
+        if (!audio->start(t, &audioError)) {
             qCWarning(lcOrion) << "RX audio:" << audioError;
             emit configurationWarning(tr("Receive audio: %1").arg(audioError));
-            m_rxAudio.reset();
+            audio.reset();
         }
+        m_rxAudio[static_cast<std::size_t>(slice)] = std::move(audio);
     }
+    m_mixPending = {};
     m_sdr = std::make_unique<Rsp2Receiver>();
-    m_sdr->setAudioSink(m_rxAudio.get());
+    m_sdr->setAudioSinks(m_rxAudio[0].get(), m_rxAudio[1].get());
     connect(m_sdr.get(), &Rsp2Receiver::frameReady, this, [this](const QByteArray& frame) {
         if (m_connected) {
             emit spectrumFrameReady(0, frame);
@@ -903,7 +924,7 @@ void OrionBackend::startSdr(const QVariantMap& params)
     QString error;
     if (!m_sdr->start(spectrum::loForView(m_view), settings, &error)) {
         m_sdr.reset();
-        m_rxAudio.reset();
+        m_rxAudio = {};
         m_sdrStatus = error;
         qCWarning(lcOrion) << "RSP2:" << error;
         emit configurationWarning(
@@ -929,82 +950,127 @@ void OrionBackend::startSdr(const QVariantMap& params)
 void OrionBackend::pushRxTuning()
 {
 #ifdef AETHER_ORION_SDRPLAY
-    if (!m_rxAudio) {
-        return;
-    }
-    const Receiver& r = m_rx[0];
-    OrionRxAudio::Tuning t;
-    t.dialHz = r.hz.value_or(0);
-    switch (r.mode.value_or(Mode::Usb)) {
-    case Mode::Usb: t.mode = OrionRxAudio::Mode::Usb; break;
-    case Mode::Lsb: t.mode = OrionRxAudio::Mode::Lsb; break;
-    case Mode::Cw:  t.mode = OrionRxAudio::Mode::Cw; break;
-    case Mode::Cwl: t.mode = OrionRxAudio::Mode::Cwl; break;
-    case Mode::Am:  t.mode = OrionRxAudio::Mode::Am; break;
-    case Mode::Fm:  t.mode = OrionRxAudio::Mode::Fm; break;
-    }
-    if (r.mode && r.bandwidthHz && r.pbtHz) {
-        const Passband p = passbandFromFilter(*r.mode, *r.bandwidthHz, *r.pbtHz);
+    for (int slice = 0; slice < 2; ++slice) {
+        OrionRxAudio* audio = m_rxAudio[static_cast<std::size_t>(slice)].get();
+        if (!audio) {
+            continue;
+        }
+        const Receiver& r = m_rx[static_cast<std::size_t>(slice)];
+        // The sub receiver runs the main's mode (the radio copies it) until
+        // it reports its own.
+        const Mode mode = r.mode.value_or(m_rx[0].mode.value_or(Mode::Usb));
+        OrionRxAudio::Tuning t;
+        t.dialHz = r.hz.value_or(0);
+        switch (mode) {
+        case Mode::Usb: t.mode = OrionRxAudio::Mode::Usb; break;
+        case Mode::Lsb: t.mode = OrionRxAudio::Mode::Lsb; break;
+        case Mode::Cw:  t.mode = OrionRxAudio::Mode::Cw; break;
+        case Mode::Cwl: t.mode = OrionRxAudio::Mode::Cwl; break;
+        case Mode::Am:  t.mode = OrionRxAudio::Mode::Am; break;
+        case Mode::Fm:  t.mode = OrionRxAudio::Mode::Fm; break;
+        }
+        const Passband p = passbandFromFilter(mode, r.bandwidthHz.value_or(2400),
+                                              r.pbtHz.value_or(0));
         t.lowHz = p.lowHz;
         t.highHz = p.highHz;
-    } else {
-        const Passband p = passbandFromFilter(r.mode.value_or(Mode::Usb), 2400, 0);
-        t.lowHz = p.lowHz;
-        t.highHz = p.highHz;
-    }
-    t.cwPitchHz = m_cwPitchHz;
-    t.agcMode = m_wdspAgcMode[0];
-    if (t.dialHz > 0) {
-        m_rxAudio->setTuning(t);
+        t.cwPitchHz = m_cwPitchHz;
+        t.agcMode = m_wdspAgcMode[static_cast<std::size_t>(slice)];
+        if (t.dialHz <= 0) {
+            continue;
+        }
+        audio->setTuning(t);
+
+        // Whether the RSP2 can hear this receiver at all. A slice outside
+        // the capture is silent (operator decision) and shown as such.
+        const bool heard = sdrRunning() && OrionRxAudio::inCapture(t, m_sdr->lo());
+        auto& known = m_inCapture[static_cast<std::size_t>(slice)];
+        if (m_connected && known != heard) {
+            known = heard;
+            SliceDelta d;
+            d.inCapture = heard;
+            emit sliceChanged(slice, d);
+        }
     }
 #endif
 }
 
-void OrionBackend::onRxAudio(const QByteArray& stereoFloat)
+void OrionBackend::onRxAudio(int slice, const QByteArray& stereoFloat)
 {
-    if (!m_connected) {
+#ifndef AETHER_ORION_SDRPLAY
+    Q_UNUSED(slice);
+    Q_UNUSED(stereoFloat);
+#else
+    if (!m_connected || slice < 0 || slice > 1) {
         return;
     }
-    // Slice A's own feed: pre-mute, pre-gain (TCI, decoders, recorder).
-    publishLegacySliceAudio(0, stereoFloat);
-    if (m_sliceMuted) {
+    // This slice's own feed: pre-mute, pre-gain (TCI, decoders, recorder).
+    publishLegacySliceAudio(slice, stereoFloat);
+
+    // The speaker mix. Both chains are clocked by the same RSP2 stream and
+    // produce equal blocks, so they are summed sample-aligned; a chain that
+    // falls far behind is mixed as silence rather than holding the other.
+    auto& mine = m_mixPending[static_cast<std::size_t>(slice)];
+    mine.append(stereoFloat);
+    const int other = 1 - slice;
+    const bool otherRunning = m_rxAudio[static_cast<std::size_t>(other)]
+                              && m_rxAudio[static_cast<std::size_t>(other)]->isReady();
+    auto& theirs = m_mixPending[static_cast<std::size_t>(other)];
+    qsizetype bytes = otherRunning ? std::min(mine.size(), theirs.size()) : mine.size();
+    if (bytes == 0) {
+        if (mine.size() < kMixStarvationBytes) {
+            return;   // wait for the other receiver's block
+        }
+        bytes = mine.size();   // the other has stalled: play this one alone
+    }
+    bytes -= bytes % static_cast<qsizetype>(2 * sizeof(float));   // whole stereo frames
+    if (bytes <= 0) {
         return;
     }
-    if (m_sliceGain == 1.0f && m_slicePan == 50) {
-        publishLegacyAudio(stereoFloat);
-        return;
+
+    const qsizetype n = bytes / static_cast<qsizetype>(sizeof(float));
+    m_mixBuffer.fill('\0', bytes);
+    auto* out = reinterpret_cast<float*>(m_mixBuffer.data());
+    for (int s = 0; s < 2; ++s) {
+        auto& pending = m_mixPending[static_cast<std::size_t>(s)];
+        const qsizetype take = std::min(pending.size(), bytes);
+        if (take > 0 && !m_sliceMuted[static_cast<std::size_t>(s)]) {
+            // A balance, not a constant-power pan: centre is unity both sides.
+            const float g = m_sliceGain[static_cast<std::size_t>(s)];
+            const int pan = m_slicePan[static_cast<std::size_t>(s)];
+            const float lw = g * (pan <= 50 ? 1.0f : (100 - pan) / 50.0f);
+            const float rw = g * (pan >= 50 ? 1.0f : pan / 50.0f);
+            const auto* in = reinterpret_cast<const float*>(pending.constData());
+            const qsizetype m = take / static_cast<qsizetype>(sizeof(float));
+            for (qsizetype k = 0; k + 1 < m; k += 2) {
+                out[k] += in[k] * lw;
+                out[k + 1] += in[k + 1] * rw;
+            }
+        }
+        pending.remove(0, take);
     }
-    // A balance, not a constant-power pan: centre is unity on both sides.
-    const float lw = m_sliceGain * (m_slicePan <= 50 ? 1.0f : (100 - m_slicePan) / 50.0f);
-    const float rw = m_sliceGain * (m_slicePan >= 50 ? 1.0f : m_slicePan / 50.0f);
-    m_mixBuffer = stereoFloat;
-    auto* f = reinterpret_cast<float*>(m_mixBuffer.data());
-    const qsizetype n = m_mixBuffer.size() / static_cast<qsizetype>(sizeof(float));
-    for (qsizetype k = 0; k + 1 < n; k += 2) {
-        f[k] *= lw;
-        f[k + 1] *= rw;
-    }
+    Q_UNUSED(n);
     publishLegacyAudio(m_mixBuffer);
+#endif
 }
 
 void OrionBackend::setSliceAudioMute(int sliceId, bool mute)
 {
-    if (sliceId == 0) {
-        m_sliceMuted = mute;
+    if (rxForSlice(sliceId)) {
+        m_sliceMuted[static_cast<std::size_t>(sliceId)] = mute;
     }
 }
 
 void OrionBackend::setSliceAudioGain(int sliceId, int gainPercent)
 {
-    if (sliceId == 0) {
-        m_sliceGain = std::clamp(gainPercent, 0, 100) / 100.0f;
+    if (rxForSlice(sliceId)) {
+        m_sliceGain[static_cast<std::size_t>(sliceId)] = std::clamp(gainPercent, 0, 100) / 100.0f;
     }
 }
 
 void OrionBackend::setSliceAudioPan(int sliceId, int panPercent)
 {
-    if (sliceId == 0) {
-        m_slicePan = std::clamp(panPercent, 0, 100);
+    if (rxForSlice(sliceId)) {
+        m_slicePan[static_cast<std::size_t>(sliceId)] = std::clamp(panPercent, 0, 100);
     }
 }
 
@@ -1020,7 +1086,9 @@ void OrionBackend::stopSdr()
     // thread. Both join before returning (IRadioBackend rule 5), so nothing
     // reaches a seam signal afterwards.
     m_sdr.reset();
-    m_rxAudio.reset();
+    m_rxAudio = {};
+    m_mixPending = {};
+    m_inCapture = {};
 }
 
 // ---- intents down ------------------------------------------------------------
@@ -1032,12 +1100,105 @@ void OrionBackend::setSliceFrequency(int sliceId, double hz)
     if (!rx || !m_connected || rounded < kMinHz || rounded > kMaxHz) {
         return;
     }
+    // The radio's lock only freezes its knob; CAT would still tune. Honour
+    // it here, as the reference program does, and put the slice back.
+    if (m_vfoLocked[static_cast<std::size_t>(sliceId)].value_or(false)) {
+        if (const auto hz = receiver(*rx).hz) {
+            SliceDelta d;
+            d.frequency = static_cast<double>(*hz) / 1e6;
+            emit sliceChanged(sliceId, d);
+        }
+        return;
+    }
     Receiver& r = receiver(*rx);
     r.pendingHz = rounded;
     r.sinceFrequencyEdit.start();
     if (!m_writeTimer.isActive()) {
         m_writeTimer.start();
     }
+}
+
+ReceiveDispatch OrionBackend::requestSliceControl(int sliceId, const SliceControlRequest& request)
+{
+    using Field = SliceControlRequest::Field;
+    if (!request.valid() || !rxForSlice(sliceId)) {
+        return ReceiveDispatch::Unsupported;
+    }
+    switch (request.field) {
+    case Field::TxSlice:
+        if (!m_connected) {
+            return ReceiveDispatch::Unsupported;
+        }
+        if (std::get<bool>(request.value)) {
+            setTxSlice(sliceId);
+        }
+        return ReceiveDispatch::Dispatched;
+    case Field::ActiveSlice:
+        if (std::get<bool>(request.value)) {
+            setActiveSlice(sliceId);
+        }
+        return ReceiveDispatch::LocalOnly;
+    default:
+        return IRadioBackend::requestSliceControl(sliceId, request);
+    }
+}
+
+void OrionBackend::setTxSlice(int sliceId)
+{
+    // Routing only: which VFO the transmitter WOULD use. Nothing here keys.
+    const std::optional<Rx> rx = rxForSlice(sliceId);
+    if (!rx || !m_connected) {
+        return;
+    }
+    const char tx = *rx == Rx::Main ? 'A' : 'B';
+    if (m_txVfo == tx && !m_pendingTxVfo) {
+        return;
+    }
+    // Snapshot BEFORE the radio call: the routing reply may arrive before
+    // this returns (the Omni VII reports synchronously, live-found).
+    const bool newlyOnB = tx == 'B' && m_txVfo != 'B';
+
+    // The operator's split habit: TX onto B parks B just above A (1 kHz in
+    // CW, 5 kHz in voice) so he can tune it onto a clear spot; unless B is
+    // locked. No mode is sent: the radio's menu copies it to B.
+    if (newlyOnB && !m_vfoLocked[1].value_or(false) && m_rx[0].hz) {
+        const Mode mode = m_rx[0].mode.value_or(Mode::Usb);
+        const qint64 offset = (mode == Mode::Cw || mode == Mode::Cwl) ? kSplitParkCwHz
+                                                                      : kSplitParkVoiceHz;
+        const qint64 target = *m_rx[0].hz + offset;
+        if (target <= kMaxHz) {
+            Receiver& b = m_rx[1];
+            b.pendingHz = target;
+            b.sinceFrequencyEdit.start();
+            flushWrites();
+        }
+    }
+
+    send(setVfoAssignment(m_kvMain, m_kvSub, tx));
+    m_pendingTxVfo = tx;
+    m_sinceRoutingEdit.start();
+    publishTxVfo(tx);
+    // Read the routing back once the radio has applied it.
+    const quint64 generation = m_generation;
+    QTimer::singleShot(kRoutingReadbackMs, this, [this, generation] {
+        if (generation == m_generation && m_connected) {
+            send(queryVfoAssignment());
+        }
+    });
+}
+
+void OrionBackend::publishTxVfo(char tx)
+{
+    if (m_txVfo == tx) {
+        return;
+    }
+    m_txVfo = tx;
+    SliceDelta a;
+    a.txSlice = tx == 'A';
+    emit sliceChanged(0, a);
+    SliceDelta b;
+    b.txSlice = tx == 'B';
+    emit sliceChanged(1, b);
 }
 
 void OrionBackend::setSliceMode(int sliceId, const QString& neutral)

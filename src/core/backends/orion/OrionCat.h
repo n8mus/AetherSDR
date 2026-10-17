@@ -92,6 +92,12 @@ inline constexpr double kS9Dbm = -73.0;
 [[nodiscard]] QByteArray queryPreamp(Rx rx);
 [[nodiscard]] QByteArray querySMeter();
 [[nodiscard]] QByteArray queryVfoAssignment();
+// *KV<main><sub><tx>: route the VFOs. main is A or B; sub and tx A, B or N.
+// Empty when a letter is out of range. Split is TX on B with main RX on A.
+[[nodiscard]] QByteArray setVfoAssignment(char mainRx, char subRx, char tx);
+// ?AL / ?BL (undocumented, live-verified): front-panel lock state. The lock
+// only freezes the knob; CAT still tunes, so the backend enforces it.
+[[nodiscard]] QByteArray queryVfoLock(Rx rx);
 
 // ---- replies ---------------------------------------------------------------
 struct FrequencyReply { Rx rx; qint64 hz; };
@@ -109,10 +115,12 @@ struct TxMeterReply { double forwardWatts; double reflectedWatts; double swr; };
 // @KV<main><sub><tx>: which VFO feeds each receiver and the transmitter.
 // Letters A/B, N = unassigned (main is never N).
 struct VfoAssignmentReply { char mainRx; char subRx; char tx; };
+// @AL / @AU / @BL / @BU
+struct VfoLockReply { Rx rx; bool locked; };
 
 using Reply = std::variant<FrequencyReply, ModeReply, BandwidthReply, PbtReply,
                            AgcReply, RfGainReply, AttenuatorReply, PreampReply,
-                           SMeterReply, TxMeterReply, VfoAssignmentReply>;
+                           SMeterReply, TxMeterReply, VfoAssignmentReply, VfoLockReply>;
 
 // Decode one line (CR already stripped). nullopt for anything that is not a
 // well-formed, in-range reply this decoder knows; replies glued together on

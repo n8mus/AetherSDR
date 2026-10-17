@@ -297,7 +297,10 @@ void OrionRxAudio::processBlock(const Block& block)
     }
     applyTuningIfChanged();
 
-    // Mix the wanted frequency down to 0 Hz.
+    // Mix the wanted frequency down to 0 Hz. Outside the capture there is
+    // nothing to hear: WDSP is still clocked, with silence, so its latency
+    // stays constant and the receiver comes back cleanly.
+    const bool audible = inCapture(m_applied, block.loHz);
     const double offsetHz = static_cast<double>(centreHz(m_applied) - block.loHz);
     const double step = -2.0 * std::numbers::pi * offsetHz / kInputRateHz;
     const std::size_t taps = kTapsPerPhase;
@@ -310,7 +313,7 @@ void OrionRxAudio::processBlock(const Block& block)
         }
         // Doubled delay line, newest first: window[0] is this sample.
         m_historyPos = (m_historyPos + taps - 1) % taps;
-        const std::complex<float> x = s * rot;
+        const std::complex<float> x = audible ? s * rot : std::complex<float>{};
         m_history[m_historyPos] = x;
         m_history[m_historyPos + taps] = x;
         // At most one output per input (decimate > interpolate).

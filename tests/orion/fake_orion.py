@@ -52,6 +52,8 @@ class Orion:
             return f"@SRM{max(0, self.s_main + jitter)}S{random.randint(5, 20)}"
         if q == "KV":
             return f"@KV{self.kv}"
+        if q in ("AL", "BL"):
+            return f"@{q[0]}U"
         if len(q) == 3 and q[0] == "R" and q[1] in "MS":
             rx, field = q[1], q[2]
             if field == "M":

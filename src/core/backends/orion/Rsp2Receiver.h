@@ -22,6 +22,7 @@
 #include <QObject>
 #include <QString>
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <mutex>
@@ -58,10 +59,13 @@ public:
     void stop();
     [[nodiscard]] bool isRunning() const { return m_running; }
 
-    // The receive-audio chain that also gets every IQ block, with the LO it
-    // was taken at. Set before start() and left alone until after stop():
-    // the stream callback reads it without a lock.
-    void setAudioSink(OrionRxAudio* sink) { m_audioSink = sink; }
+    // The receive-audio chains (one per slice) that also get every IQ block,
+    // with the LO it was taken at. Set before start() and left alone until
+    // after stop(): the stream callback reads them without a lock.
+    void setAudioSinks(OrionRxAudio* main, OrionRxAudio* sub)
+    {
+        m_audioSinks = {main, sub};
+    }
 
     void setLo(qint64 loHz);
     [[nodiscard]] qint64 lo() const { return m_requestedLo; }
@@ -104,7 +108,7 @@ private:
     bool m_resetAverage = false;
     std::atomic<qint64> m_pendingLo{0};
     std::atomic<qint64> m_activeLo{0};
-    OrionRxAudio* m_audioSink = nullptr;
+    std::array<OrionRxAudio*, 2> m_audioSinks{nullptr, nullptr};
     std::vector<std::complex<float>> m_scratch;   // stream-callback thread only
 
     // What the worker draws (owner writes, worker reads).

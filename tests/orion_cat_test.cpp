@@ -53,6 +53,11 @@ static void testCommands()
     check(setPreamp(Rx::Main, true) == "*RME1", "*RME1");
     check(querySMeter() == "?S", "?S");
     check(queryVfoAssignment() == "?KV", "?KV");
+    check(setVfoAssignment('A', 'B', 'B') == "*KVABB", "*KVABB: split, TX on B");
+    check(setVfoAssignment('A', 'N', 'A') == "*KVANA", "sub unassigned");
+    check(setVfoAssignment('N', 'B', 'A').isEmpty(), "main receiver is never unassigned");
+    check(setVfoAssignment('A', 'B', 'X').isEmpty(), "bad letter refused");
+    check(queryVfoLock(Rx::Sub) == "?BL", "?BL");
 }
 
 static void testReplies()
@@ -111,6 +116,13 @@ static void testReplies()
           "@KVABB: split, TX on B");
     check(!decodeReply("@KVNAA"), "main receiver is never unassigned");
 
+    const auto bl = decodeReply("@BL");
+    check(as<VfoLockReply>(bl) && as<VfoLockReply>(bl)->rx == Rx::Sub
+              && as<VfoLockReply>(bl)->locked,
+          "@BL: B locked");
+    const auto au = decodeReply("@AU");
+    check(as<VfoLockReply>(au) && !as<VfoLockReply>(au)->locked, "@AU: A unlocked");
+    check(!decodeReply("@ALX"), "lock reply is exactly three characters");
     check(as<RfGainReply>(decodeReply("@RMG73")) != nullptr, "@RMG73");
     check(as<AttenuatorReply>(decodeReply("@RMT3")) != nullptr, "@RMT3");
     check(as<PreampReply>(decodeReply("@RME0")) != nullptr, "@RME0");

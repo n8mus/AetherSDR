@@ -11,7 +11,7 @@
 //               time, re-armed after 600 ms)
 //   phase 1, 3  ?S       both S-meters (2 Hz)
 //   phase 2     fast wheel: main mode, main filter, the other dial, sub
-//               mode, sub filter
+//               mode, sub filter, B lock, A lock
 //
 // Every 25th tick one S-meter slot is lent to a slow wheel (routing, AGC,
 // front end), about one item every 5 s. Within 800 ms of a dial move the

@@ -249,8 +249,10 @@ void Rsp2Receiver::onStream(const short* xi, const short* xq, unsigned int n, bo
         lo = m_activeLo.load();
     }
     m_samples.fetch_add(n, std::memory_order_relaxed);
-    if (m_audioSink) {
-        m_audioSink->push(m_scratch.data(), n, lo);
+    for (OrionRxAudio* sink : m_audioSinks) {
+        if (sink) {
+            sink->push(m_scratch.data(), n, lo);
+        }
     }
 }
 

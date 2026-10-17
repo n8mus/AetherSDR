@@ -50,6 +50,11 @@ public:
     static constexpr int kAudioRateHz = 24'000;   // the seam's rate
     static constexpr int kWdspBlock = 1024;       // at 96 kHz
     static constexpr double kFilterCutoffHz = 40'000.0;
+    // How far from the LO a receiver can be heard: the capture is +-500 kHz
+    // and the resampler's passband 40 kHz. Further out the mixer would fold
+    // other signals in, so the receiver plays silence instead.
+    static constexpr qint64 kMaxOffsetHz = kInputRateHz / 2 - static_cast<qint64>(kFilterCutoffHz);
+
     // Half a second of IQ queued at most; older blocks are dropped so a
     // stall never turns into seconds of delay.
     static constexpr std::size_t kMaxQueuedSamples = kInputRateHz / 2;
@@ -66,6 +71,12 @@ public:
         double agcMaxGainDb = 39.0;
         bool operator==(const Tuning&) const = default;
     };
+
+    [[nodiscard]] static bool inCapture(const Tuning& t, qint64 loHz)
+    {
+        const qint64 off = centreHz(t) - loHz;
+        return off >= -kMaxOffsetHz && off <= kMaxOffsetHz;
+    }
 
     explicit OrionRxAudio(QObject* parent = nullptr);
     ~OrionRxAudio() override;

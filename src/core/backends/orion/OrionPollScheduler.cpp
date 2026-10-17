@@ -32,7 +32,7 @@ QList<QByteArray> OrionPollScheduler::next(qint64 nowMs)
     }
 
     if (phase == 2) {
-        const int item = m_fastWheel++ % 5;
+        const int item = m_fastWheel++ % 7;
         switch (item) {
         case 0:
             return {queryMode(Rx::Main)};
@@ -42,8 +42,14 @@ QList<QByteArray> OrionPollScheduler::next(qint64 nowMs)
             return frequency(other, nowMs);
         case 3:
             return {queryMode(Rx::Sub)};
-        default:
+        case 4:
             return {queryBandwidth(Rx::Sub), queryPbt(Rx::Sub)};
+        case 5:
+            // The locks gate the split park and CAT tuning, so they are
+            // read every lap (~7 s), not in the slow wheel.
+            return {queryVfoLock(Rx::Sub)};
+        default:
+            return {queryVfoLock(Rx::Main)};
         }
     }
 

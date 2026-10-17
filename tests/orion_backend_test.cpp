@@ -101,6 +101,8 @@ public:
     int sMain = 94;
     int sSub = 10;
     QByteArray kv = "ABA";
+    bool aLocked = false;
+    bool bLocked = false;
 
 private:
     void reply(const QByteArray& line)
@@ -165,6 +167,10 @@ private:
             reply("@RSAS");
         } else if (q == "KV") {
             reply("@KV" + kv);
+        } else if (q == "AL") {
+            reply(aLocked ? "@AL" : "@AU");
+        } else if (q == "BL") {
+            reply(bLocked ? "@BL" : "@BU");
         } else if (q == "RMG") {
             reply("@RMG80");
         } else if (q == "RMT") {
@@ -195,6 +201,8 @@ private:
             mainPbt = cmd.mid(4).toInt();
         } else if (cmd.startsWith("*RMA") && cmd.size() == 5) {
             mainAgc = cmd[4];
+        } else if (cmd.startsWith("*KV") && cmd.size() == 6) {
+            kv = cmd.mid(3);
         }
     }
 
@@ -212,6 +220,7 @@ struct SliceView {
     std::optional<int> high;
     std::optional<bool> txSlice;
     std::optional<QString> agc;
+    std::optional<bool> locked;
 };
 
 int main(int argc, char** argv)
@@ -237,6 +246,7 @@ int main(int argc, char** argv)
                          if (d.filterHigh) v.high = d.filterHigh;
                          if (d.txSlice) v.txSlice = d.txSlice;
                          if (d.agcMode) v.agc = d.agcMode;
+                         if (d.locked) v.locked = d.locked;
                      });
     QObject::connect(&backend, &IRadioBackend::meterUpdate,
                      [&](const QString& id, double value) { meters[id] = value; });
@@ -328,6 +338,57 @@ int main(int argc, char** argv)
     check(waitFor([&] { return radio.sets.contains("*RMAF"); }, 1000), "fast writes *RMAF");
     check(waitFor([&] { return slices[0].agc == QStringLiteral("fast"); }, 2000),
           "AGC read back as fast");
+
+    std::printf("-- split: TX to B parks B above A (the operator's habit)\n");
+    // Mode is LSB from the section above: voice, so B parks A + 5 kHz.
+    radio.sets.clear();
+    const qint64 aBefore = radio.afHz;
+    SliceControlRequest toB;
+    toB.field = SliceControlRequest::Field::TxSlice;
+    toB.value = true;
+    check(backend.requestSliceControl(1, toB) == ReceiveDispatch::Dispatched,
+          "TX-slice request is accepted (not refused as before)");
+    const QByteArray park = "*BF" + QByteArray::number(aBefore + 5000);
+    check(waitFor([&] { return radio.sets.contains(park) && radio.sets.contains("*KVABB"); }, 1000),
+          "B parks at A + 5 kHz, then *KVABB routes TX to B");
+    check(radio.sets.indexOf(park) < radio.sets.indexOf("*KVABB"),
+          "B is parked before the routing changes");
+    check(waitFor([&] { return slices[1].txSlice == true && slices[0].txSlice == false; }, 2000),
+          "TX badge moves to slice B and stays after the radio's readback");
+    check(waitFor([&] { return slices[1].mhz
+                               && std::fabs(*slices[1].mhz * 1e6 - (aBefore + 5000)) < 1.0; }, 2000),
+          "slice B shows the parked frequency");
+
+    std::printf("-- split off: TX back to A, B is left alone\n");
+    radio.sets.clear();
+    backend.requestSliceControl(0, toB);
+    check(waitFor([&] { return radio.sets.contains("*KVABA"); }, 1000), "*KVABA routes TX back to A");
+    bool movedB = false;
+    for (const QByteArray& c : radio.sets) {
+        if (c.startsWith("*BF")) movedB = true;
+    }
+    check(!movedB, "moving TX back to A does not touch B");
+
+    std::printf("-- a locked B is never parked or tuned\n");
+    radio.bLocked = true;
+    check(waitFor([&] { return slices[1].locked == true; }, 10000), "B's front-panel lock is read within a poll lap");
+    radio.sets.clear();
+    backend.requestSliceControl(1, toB);
+    check(waitFor([&] { return radio.sets.contains("*KVABB"); }, 1000), "TX still moves to B");
+    backend.setSliceFrequency(1, 7'200'000.0);
+    QElapsedTimer quiet;
+    quiet.start();
+    while (quiet.elapsed() < 400) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        usleep(2000);
+    }
+    movedB = false;
+    for (const QByteArray& c : radio.sets) {
+        if (c.startsWith("*BF")) movedB = true;
+    }
+    check(!movedB, "no *BF while B is locked: neither the park nor a tune");
+    backend.requestSliceControl(0, toB);
+    radio.bLocked = false;
 
     std::printf("-- the transmit guard\n");
     backend.setKeying(true, {}, {});

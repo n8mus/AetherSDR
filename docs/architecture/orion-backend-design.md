@@ -466,6 +466,21 @@ radio. WDSP is now built on the audio thread, and a late poll tick restarts
 the silence clock. Slice A only; slice B audio is step 4. Mute, gain and balance apply to the
 speaker feed; the per-slice feed (TCI, decoders) is pre-mute.
 
+**Step 4 (built 2026-10-17, awaiting the operator's on-air check):**
+- Slice B (sub receiver) audio: a second `OrionRxAudio` on the same RSP2
+  stream, mixed with A for the speaker (sample-aligned; a stalled chain
+  plays as silence after 0.2 s). Each slice keeps its own pre-mute feed.
+  A receiver more than 460 kHz from the LO (the capture's +-500 kHz less
+  the resampler's 40 kHz) is silent and reported `inCapture = false`.
+- Split: AetherSDR's TX-slice control now reaches the backend
+  (`requestSliceControl`), which sends `*KV<main><sub><tx>` and reads it
+  back. Moving TX onto B parks B at A + 1 kHz (CW) or + 5 kHz (voice)
+  first, unless B is locked; moving it back leaves B alone.
+- VFO locks (`?AL`/`?BL`) are read every fast-wheel lap (~7 s), shown on
+  the slice, and enforced on CAT tuning (the radio's lock freezes only
+  its knob).
+Routing only: nothing in step 4 keys the transmitter.
+
 **Later steps, each one an operator on-air checkpoint:**
 
 | Step | Content | Operator check |

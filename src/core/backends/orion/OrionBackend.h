@@ -60,6 +60,10 @@ public:
     static constexpr int kFilterEchoGuardMs = 2000;
     static constexpr qint64 kLargeJumpHz = 100000;
     static constexpr int kLinkTickMs = 1000;
+    // The operator's split habit: B parks this far above A when TX moves to it.
+    static constexpr qint64 kSplitParkCwHz = 1000;
+    static constexpr qint64 kSplitParkVoiceHz = 5000;
+    static constexpr int kRoutingReadbackMs = 300;
     // Without an RSP2 (not installed, in use, or turned off) a flat trace at
     // the floor keeps the pan and waterfall alive: AetherSDR's connect
     // overlay only clears on the first spectrum frame.
@@ -73,6 +77,9 @@ public:
     static constexpr double kMinDeliveryRatio = 0.95;
     static constexpr int kSdrSilentWarningMs = 3000;
     static constexpr int kSdrDeliveryWindowMs = 5000;
+    // A receiver this far ahead of the other in the speaker mix (0.2 s of
+    // 24 kHz float stereo) plays alone rather than waiting.
+    static constexpr qsizetype kMixStarvationBytes = 24000 / 5 * 2 * 4;
 
     // ---- IRadioBackend ----
     RadioCapabilities capabilities() const override;
@@ -95,6 +102,8 @@ public:
     void setPanPreamp(const QString& panId, int step) override;
     void setPanAttenuator(const QString& panId, int step) override;
     void setActiveSlice(int sliceId) override;
+    void setTxSlice(int sliceId) override;
+    ReceiveDispatch requestSliceControl(int sliceId, const SliceControlRequest& request) override;
     void setSliceAudioMute(int sliceId, bool mute) override;
     void setSliceAudioGain(int sliceId, int gainPercent) override;
     void setSliceAudioPan(int sliceId, int panPercent) override;
@@ -145,13 +154,14 @@ private:
     void applyPbt(Rx rx, int hz);
     void publishPassband(Rx rx);
     void publishPan();
+    void publishTxVfo(char tx);
     void applyViewToSdr();
     void startSdr(const QVariantMap& params);
     void stopSdr();
     void retuneSdr();
     [[nodiscard]] bool sdrRunning() const;
     void pushRxTuning();
-    void onRxAudio(const QByteArray& stereoFloat);
+    void onRxAudio(int slice, const QByteArray& stereoFloat);
     void publishMeterDefs();
     void publishInitialState();
     void startupQueries();
@@ -174,6 +184,11 @@ private:
 
     std::array<Receiver, 2> m_rx;
     std::optional<char> m_txVfo;
+    std::optional<char> m_pendingTxVfo;
+    QElapsedTimer m_sinceRoutingEdit;
+    char m_kvMain = 'A';
+    char m_kvSub = 'B';
+    std::array<std::optional<bool>, 2> m_vfoLocked;
     spectrum::View m_view;
     bool m_viewKnown = false;
     int m_panPoints = 1024;
@@ -189,12 +204,14 @@ private:
     QTimer m_loRetuneTimer;
     QVariantMap m_connectParams;
     std::unique_ptr<Rsp2Receiver> m_sdr;
-    std::unique_ptr<OrionRxAudio> m_rxAudio;
-    // Slice A's monitor controls, applied in the speaker feed only (the
+    std::array<std::unique_ptr<OrionRxAudio>, 2> m_rxAudio;
+    // Per-slice monitor controls, applied in the speaker mix only (the
     // per-slice feed stays pre-mute, pre-gain, for TCI and decoders).
-    bool m_sliceMuted = false;
-    float m_sliceGain = 1.0f;
-    int m_slicePan = 50;
+    std::array<bool, 2> m_sliceMuted{false, false};
+    std::array<float, 2> m_sliceGain{1.0f, 1.0f};
+    std::array<int, 2> m_slicePan{50, 50};
+    std::array<QByteArray, 2> m_mixPending;
+    std::array<std::optional<bool>, 2> m_inCapture;
     int m_cwPitchHz = 600;
     std::array<int, 2> m_wdspAgcMode{3, 3};
     QByteArray m_mixBuffer;

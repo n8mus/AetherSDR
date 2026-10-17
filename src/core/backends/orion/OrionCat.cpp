@@ -363,6 +363,26 @@ QByteArray querySMeter() { return QByteArrayLiteral("?S"); }
 
 QByteArray queryVfoAssignment() { return QByteArrayLiteral("?KV"); }
 
+QByteArray setVfoAssignment(char mainRx, char subRx, char tx)
+{
+    if (!isVfoLetter(mainRx, false) || !isVfoLetter(subRx, true) || !isVfoLetter(tx, true)) {
+        return {};
+    }
+    QByteArray out("*KV");
+    out += mainRx;
+    out += subRx;
+    out += tx;
+    return out;
+}
+
+QByteArray queryVfoLock(Rx rx)
+{
+    QByteArray out("?");
+    out += vfoLetter(rx);
+    out += 'L';
+    return out;
+}
+
 std::optional<Reply> decodeReply(const QByteArray& line)
 {
     if (line.size() < 3 || line[0] != '@') {
@@ -375,6 +395,10 @@ std::optional<Reply> decodeReply(const QByteArray& line)
         // @AF<hz> / @BF<hz>
         if (line[2] == 'F' && parseLeadingInt(line.mid(3), v) && v >= kMinHz && v <= kMaxHz) {
             return FrequencyReply{line[1] == 'A' ? Rx::Main : Rx::Sub, v};
+        }
+        // @AL / @AU / @BL / @BU: exactly three characters
+        if (line.size() == 3 && (line[2] == 'L' || line[2] == 'U')) {
+            return VfoLockReply{line[1] == 'A' ? Rx::Main : Rx::Sub, line[2] == 'L'};
         }
         return std::nullopt;
     case 'S':

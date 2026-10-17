@@ -133,9 +133,15 @@ int main(int argc, char** argv)
     check(db(cwOn) - db(cwOff) > 60.0, "CW hears the carrier on the dial; 1.5 kHz off is >60 dB down");
 
     std::printf("-- the dial anywhere in the capture\n");
-    const double far = audioRms(OrionRxAudio::Mode::Usb, 0, 2400, dial, dial + 470'000, dial + 1000.0);
+    const double far = audioRms(OrionRxAudio::Mode::Usb, 0, 2400, dial, dial + 450'000, dial + 1000.0);
     check(db(far) - db(usbAbove) > -3.0 && db(far) - db(usbAbove) < 3.0,
-          "same level with the dial 470 kHz below the LO");
+          "same level with the dial 450 kHz below the LO");
+
+    std::printf("-- a receiver outside the capture is silent (step 4)\n");
+    const double outside = audioRms(OrionRxAudio::Mode::Usb, 0, 2400, dial, dial + 470'000,
+                                    dial + 1000.0);
+    check(db(outside) < db(usbAbove) - 80.0,
+          "470 kHz from the LO (beyond +-460 kHz) plays silence, not a folded signal");
 
     if (g_failures == 0) {
         std::printf("orion_rxaudio_test: all checks passed\n");
