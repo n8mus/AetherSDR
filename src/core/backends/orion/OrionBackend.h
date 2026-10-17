@@ -80,6 +80,10 @@ public:
     static constexpr int kTxAudioLeadMs = 300;     // key, then audio (reference program)
     static constexpr int kTxAudioTailMs = 250;     // SignaLink + radio audio path
     static constexpr int kTxHangMs = 1500;         // RX-form ?S replies inside a CW over
+    // TUNE: a carrier never outlives 15 s (reference program); mode and power
+    // readback is held this long after, while the restore lands.
+    static constexpr int kMaxTuneMs = 15'000;
+    static constexpr int kTuneSettleMs = 1500;
     static constexpr int kTxGuardHangMs = 1500;    // RSP2 stays guarded after unkey
     static constexpr int kDefaultRadioMic = 51;    // reference program's voice defaults
     static constexpr int kDefaultRadioProcessor = 2;
@@ -133,6 +137,9 @@ public:
                    const AetherSDR::TxCoordinator::Completion& completion = {}) override;
     ReceiveDispatch requestTransmitControl(const TransmitControlRequest& request,
                                            TunePowerContext context = TunePowerContext::Deferred) override;
+    void setTune(bool on, int tunePowerPercent, const AetherSDR::TxCoordinator::Operation& operation,
+                 const AetherSDR::TxCoordinator::Completion& completion = {}) override;
+    void setTunePower(int percent) override;
     void setTxPower(int percent) override;
     void setMicGain(int level) override;
     void submitTxAudio(const QByteArray& int16Stereo, int sampleRateHz, TxAudioSource source,
@@ -189,7 +196,11 @@ private:
     void publishTxVfo(char tx);
 
     enum class TxPath { RadioMic, Pc };
+    void keyRadio();
     void unkey();
+    void endTune(bool timedOut);
+    void restoreAfterTune();
+    [[nodiscard]] bool tuneHoldsReadback() const;
     void leaveRadioSafe();
     void updateTxAudioGate();
     void onTxFailsafe();
@@ -257,6 +268,14 @@ private:
     QString m_txAudioError;
     QTimer m_txFailsafeTimer;
     QTimer m_txGuardReleaseTimer;
+    // TUNE borrows the drive and the main receiver's mode (FM gives the steady
+    // carrier, as in the reference program); both go back after the unkey.
+    bool m_tuning = false;
+    int m_rfPowerPercent = -1;          // the operator's drive, from @TP
+    int m_preTuneRfPower = -1;
+    std::optional<Mode> m_preTuneMode;
+    qint64 m_tuneEndedMs = -1;
+    QTimer m_tuneTimer;
 
     std::unique_ptr<OrionWinKeyer> m_keyer;
     std::vector<TxCoordinator::Completion> m_cwCompletions;

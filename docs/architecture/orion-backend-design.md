@@ -506,7 +506,18 @@ real transmission is the operator's):**
 - Failsafes: a 3-minute key limit; disconnect, link loss and exit unkey
   first, then put the radio-mic profile back (stand-alone rule); a radio
   found left in the PC profile is given its mic back on connect.
-- Not yet: TUNE (`setTune` is a no-op), the Omni VII's keepalive PTT.
+- Not yet: the Omni VII's keepalive PTT.
+- TUNE (built 2026-10-17, bench-tested on the fake radio only): the
+  reference program's manual tune. The TUNE drive (*TP), the main
+  receiver to FM for a steady carrier at the dial (*RMM5), then *TK. It
+  stops itself after 15 s. Off: *TU FIRST, then the mode and the drive go
+  back (RF power moved mid-tune is what goes back). The slice keeps
+  showing the operator's mode and the RF power slider never shows the TUNE
+  drive (readback held while tuning and 1.5 s after). No PC audio while
+  the carrier is up. Disconnect or exit mid-tune unkeys and restores
+  (stand-alone rule). TUNE power changes apply live. Offered in CW too,
+  since the carrier is FM. With the internal tuner the reference program
+  ran *TTT instead; the Orion's ATU is not wired here.
 - On air (2026-10-17, operator at the radio, dummy load): MOX keys and
   unkeys the Orion by CAT, with the radio's TX/RX readback each time. The
   PC path works end to end: the Alesis mic (PCM2900) -> AetherSDR's TX

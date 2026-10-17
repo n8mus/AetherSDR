@@ -91,6 +91,10 @@ OrionBackend::OrionBackend(QObject* parent)
     m_txFailsafeTimer.setInterval(kMaxKeyMs);
     connect(&m_txFailsafeTimer, &QTimer::timeout, this, &OrionBackend::onTxFailsafe);
 
+    m_tuneTimer.setSingleShot(true);
+    m_tuneTimer.setInterval(kMaxTuneMs);
+    connect(&m_tuneTimer, &QTimer::timeout, this, [this] { endTune(/*timedOut=*/true); });
+
     m_txGuardReleaseTimer.setSingleShot(true);
     m_txGuardReleaseTimer.setInterval(kTxGuardHangMs);
     connect(&m_txGuardReleaseTimer, &QTimer::timeout, this, [this] {
@@ -113,6 +117,7 @@ OrionBackend::~OrionBackend()
     m_loRetuneTimer.stop();
     m_txFailsafeTimer.stop();
     m_txGuardReleaseTimer.stop();
+    m_tuneTimer.stop();
     // Never leave the radio keyed, and leave it usable stand-alone.
     leaveRadioSafe();
     stopPeripherals();
@@ -184,14 +189,15 @@ RadioCapabilities OrionBackend::capabilities() const
                                     QString::fromLatin1(kMicInputPc)});
     // *TP is read back from the radio, so the drive is confirmed state.
     c.transmitDriveControl = RadioCapabilities::TransmitDriveControl{
-        SliceFrequencyControl::Authority::Radio, /*tunePowerAppliesLive=*/false};
+        SliceFrequencyControl::Authority::Radio, /*tunePowerAppliesLive=*/true};
     c.speechProcessorControl = std::nullopt;
     c.voxControl = std::nullopt;
     c.txMonitorControl = std::nullopt;
     c.hasTxFilterControls = false;
     c.hasTuner = false;
     c.hasTunerMemories = false;
-    c.hasCwTune = false;
+    // TUNE switches the radio to FM for its carrier, so it works from CW too.
+    c.hasCwTune = true;
     // CW is the WinKeyer's job (operator decision), never the radio's keyer.
     // AetherSDR's CW text keyer is offered once the WinKeyer has answered.
     const bool keyer = m_keyer && m_keyer->isReady();
@@ -394,6 +400,7 @@ void OrionBackend::closeLink()
     leaveRadioSafe();
     m_txFailsafeTimer.stop();
     m_txGuardReleaseTimer.stop();
+    m_tuneTimer.stop();
     if (m_txAudio) {
         m_txAudio->close();
     }
@@ -508,7 +515,10 @@ void OrionBackend::onLine(const QByteArray& line)
             }
             applyFrequency(r.rx, r.hz);
         } else if constexpr (std::is_same_v<T, ModeReply>) {
-            applyMode(r.rx, r.mode);
+            // TUNE's borrowed FM is not the operator's mode.
+            if (!(r.rx == Rx::Main && tuneHoldsReadback())) {
+                applyMode(r.rx, r.mode);
+            }
         } else if constexpr (std::is_same_v<T, BandwidthReply>) {
             applyBandwidth(r.rx, r.hz);
         } else if constexpr (std::is_same_v<T, PbtReply>) {
@@ -558,7 +568,11 @@ void OrionBackend::onLine(const QByteArray& line)
             TransmitDelta d;
             switch (r.kind) {
             case TxLevelReply::Kind::Power:
-                d.rfPower = r.value;
+                // Nor is TUNE's borrowed drive the operator's RF power.
+                if (!tuneHoldsReadback()) {
+                    m_rfPowerPercent = r.value;
+                    d.rfPower = r.value;
+                }
                 break;
             case TxLevelReply::Kind::Mic:
                 m_lastMicReading = r.value;
@@ -1368,6 +1382,11 @@ void OrionBackend::setSliceMode(int sliceId, const QString& neutral)
     SliceDelta d;
     d.mode = neutralMode(*mode);
     emit sliceChanged(sliceId, d);
+    if (*rx == Rx::Main && m_tuning) {
+        m_preTuneMode = *mode;    // applied when the carrier ends
+        publishPassband(*rx);
+        return;
+    }
     const QByteArray command = orion::setMode(*rx, *mode);
     // The Orion drops commands while it is busy retuning: a mode change
     // trails a frequency write by 120 ms.
@@ -1595,27 +1614,133 @@ void OrionBackend::setKeying(bool key, const AetherSDR::TxCoordinator::Operation
         }
         qCInfo(lcOrion) << "Orion: KEY (*TK) on the"
                         << (m_txPath == TxPath::Pc ? "PC" : "MIC") << "path";
-        send(orion::setPtt(true));
-        m_keyIntent = true;
-        m_keyedAtMs = nowMs();
-        m_txFailsafeTimer.start();
-        applyTxGuard(true);
-        // Audio waits for the radio to report TX (or the lead-in fallback),
-        // so nothing reaches the SignaLink before the radio is transmitting.
-        const quint64 generation = m_generation;
-        QTimer::singleShot(kTxAudioLeadMs, this, [this, generation] {
-            if (generation == m_generation) {
-                updateTxAudioGate();
-            }
-        });
+        keyRadio();
     } else {
         unkey();
     }
     completion.finish();
 }
 
+void OrionBackend::keyRadio()
+{
+    send(orion::setPtt(true));
+    m_keyIntent = true;
+    m_keyedAtMs = nowMs();
+    m_txFailsafeTimer.start();
+    applyTxGuard(true);
+    // Audio waits for the radio to report TX (or the lead-in fallback),
+    // so nothing reaches the SignaLink before the radio is transmitting.
+    const quint64 generation = m_generation;
+    QTimer::singleShot(kTxAudioLeadMs, this, [this, generation] {
+        if (generation == m_generation) {
+            updateTxAudioGate();
+        }
+    });
+}
+
+void OrionBackend::setTune(bool on, int tunePowerPercent,
+                           const AetherSDR::TxCoordinator::Operation& operation,
+                           const AetherSDR::TxCoordinator::Completion& completion)
+{
+    // As setKeying: the carrier needs an admitted operation; stopping it is
+    // never refused.
+    if (!on) {
+        endTune(/*timedOut=*/false);
+        completion.finish();
+        return;
+    }
+    if (!TxCoordinator::Command{operation, true}.permitsDispatch(TxCoordinator::monotonicMs())
+        || !m_connected) {
+        completion.finish();
+        return;
+    }
+    const int power = std::clamp(tunePowerPercent, 0, 100);
+    if (m_tuning) {
+        send(orion::setTxPower(power));
+        completion.finish();
+        return;
+    }
+    // The reference program's manual tune: the TUNE drive, FM for a steady
+    // carrier at the dial, key by CAT; the carrier stops itself after 15 s.
+    m_tuning = true;
+    m_preTuneRfPower = m_rfPowerPercent;
+    m_preTuneMode = receiver(Rx::Main).mode;
+    qCInfo(lcOrion) << "Orion: TUNE carrier at" << power << "% (FM, *TK); was"
+                    << m_preTuneRfPower << "%";
+    send(orion::setTxPower(power));
+    if (m_preTuneMode != Mode::Fm) {
+        send(orion::setMode(Rx::Main, Mode::Fm));
+    }
+    keyRadio();
+    m_tuneTimer.start();
+    TransmitDelta d;
+    d.tune = true;
+    emit transmitChanged(d);
+    completion.finish();
+}
+
+void OrionBackend::setTunePower(int percent)
+{
+    if (m_tuning && m_connected) {
+        send(orion::setTxPower(std::clamp(percent, 0, 100)));
+    }
+}
+
+void OrionBackend::endTune(bool timedOut)
+{
+    if (!m_tuning) {
+        unkey();
+        return;
+    }
+    m_tuning = false;    // first: unkey() below must not come back here
+    m_tuneTimer.stop();
+    unkey();             // the carrier drops BEFORE mode and power go back
+    restoreAfterTune();
+    qCInfo(lcOrion) << "Orion: TUNE carrier off" << (timedOut ? "(15 s limit)" : "")
+                    << "- mode and power restored";
+    TransmitDelta d;
+    d.tune = false;
+    emit transmitChanged(d);
+    if (timedOut) {
+        emit configurationWarning(tr("TUNE stopped after %1 s.").arg(kMaxTuneMs / 1000));
+    }
+}
+
+void OrionBackend::restoreAfterTune()
+{
+    m_tuneEndedMs = nowMs();
+    if (m_preTuneMode && *m_preTuneMode != Mode::Fm) {
+        send(orion::setMode(Rx::Main, *m_preTuneMode));
+        // The mode change recalls the radio's per-mode filter.
+        const quint64 generation = m_generation;
+        QTimer::singleShot(kFilterRecallMs, this, [this, generation] {
+            if (generation == m_generation && m_port) {
+                send(queryBandwidth(Rx::Main));
+                send(queryPbt(Rx::Main));
+            }
+        });
+    }
+    if (m_preTuneRfPower >= 0) {
+        // The readback is held a moment, so this is the drive from now on.
+        m_rfPowerPercent = m_preTuneRfPower;
+        send(orion::setTxPower(m_preTuneRfPower));
+    }
+    send(queryTxPower());
+    m_preTuneMode.reset();
+    m_preTuneRfPower = -1;
+}
+
+bool OrionBackend::tuneHoldsReadback() const
+{
+    return m_tuning || (m_tuneEndedMs >= 0 && nowMs() - m_tuneEndedMs < kTuneSettleMs);
+}
+
 void OrionBackend::unkey()
 {
+    if (m_tuning) {
+        endTune(/*timedOut=*/false);    // it unkeys, then restores
+        return;
+    }
     // Gate first: no more audio into the SignaLink, which could key the
     // radio by itself.
     if (m_keyIntent) {
@@ -1642,6 +1767,12 @@ void OrionBackend::leaveRadioSafe()
             m_txAudio->setGate(false);
         }
         send(orion::setPtt(false));
+    }
+    // A carrier cut short by a disconnect still gives back mode and power.
+    if (m_tuning) {
+        m_tuning = false;
+        m_tuneTimer.stop();
+        restoreAfterTune();
     }
     // Stand-alone rule: the radio must work from its front panel with the PC
     // off, so the radio-mic profile goes back before we let go.
@@ -1684,6 +1815,8 @@ void OrionBackend::openTxAudio(const QVariantMap& params)
     // Tests shorten the failsafe; the operator's build keeps 3 minutes.
     const int maxKeyMs = params.value(QStringLiteral("orion.tx.maxKeyMs"), kMaxKeyMs).toInt();
     m_txFailsafeTimer.setInterval(std::clamp(maxKeyMs, 500, kMaxKeyMs));
+    const int maxTuneMs = params.value(QStringLiteral("orion.tx.maxTuneMs"), kMaxTuneMs).toInt();
+    m_tuneTimer.setInterval(std::clamp(maxTuneMs, 500, kMaxTuneMs));
     const QString device = params.value(QStringLiteral("orion.tx.audioDevice")).toString();
     if (!m_txAudio->open(device, &m_txAudioError)) {
         qCWarning(lcOrion) << "TX audio:" << m_txAudioError;
@@ -1699,7 +1832,9 @@ void OrionBackend::updateTxAudioGate()
         return;
     }
     const bool leadDone = m_keyIntent && nowMs() - m_keyedAtMs >= kTxAudioLeadMs;
-    m_txAudio->setGate(m_keyIntent && m_txPath == TxPath::Pc && (m_radioTx || leadDone));
+    // A TUNE carrier is clean: no audio into the SignaLink while it is up.
+    m_txAudio->setGate(m_keyIntent && !m_tuning && m_txPath == TxPath::Pc
+                       && (m_radioTx || leadDone));
 }
 
 void OrionBackend::onTxFailsafe()
@@ -1814,6 +1949,12 @@ void OrionBackend::setTxPower(int percent)
     if (!m_connected) {
         return;
     }
+    if (m_tuning) {
+        // TUNE has the drive: this is what goes back after the carrier.
+        m_preTuneRfPower = std::clamp(percent, 0, 100);
+        return;
+    }
+    m_rfPowerPercent = std::clamp(percent, 0, 100);
     send(orion::setTxPower(percent));
     send(queryTxPower());
 }

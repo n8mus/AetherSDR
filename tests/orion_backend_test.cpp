@@ -294,6 +294,7 @@ int main(int argc, char** argv)
     req.params.insert(QStringLiteral("orion.sdr"), false);
     req.params.insert(QStringLiteral("orion.tx.audioDevice"), QStringLiteral("none"));
     req.params.insert(QStringLiteral("orion.tx.maxKeyMs"), 1500);
+    req.params.insert(QStringLiteral("orion.tx.maxTuneMs"), 1500);
     // Nor the station's WinKeyer, rotor or service ports (orion_peripherals_test
     // covers those against fakes).
     req.params.insert(QStringLiteral("orion.winkeyer.device"), QStringLiteral("none"));
@@ -528,6 +529,88 @@ int main(int argc, char** argv)
     check(txAudioWritten() == micBefore, "MIC path: host audio is never played to the SignaLink");
     backend.setKeying(false, op, {});
     check(waitFor([&] { return !radio.keyed; }, 500), "unkeyed");
+
+    std::printf("-- TUNE: a low-power FM carrier, then mode and power back\n");
+    const auto sawTune = [&](bool on) {
+        for (const auto& args : txSpy) {
+            const auto d = args.at(0).value<TransmitDelta>();
+            if (d.tune && *d.tune == on) return true;
+        }
+        return false;
+    };
+    const auto sawRfPower = [&](int value) {
+        for (const auto& args : txSpy) {
+            const auto d = args.at(0).value<TransmitDelta>();
+            if (d.rfPower && *d.rfPower == value) return true;
+        }
+        return false;
+    };
+    check(backend.capabilities().hasCwTune, "TUNE offered in CW (the carrier is FM)");
+    txSpy.clear();
+    backend.setSliceMode(0, QStringLiteral("CW"));    // the operator's CW and 50% drive
+    backend.setTxPower(50);
+    check(waitFor([&] { return radio.mainMode == 2 && sawRfPower(50); }, 2000),
+          "the operator's CW mode and 50% drive set and read back first");
+    radio.sets.clear();
+    backend.setTune(true, 10, {}, {});
+    QElapsedTimer tuneGuard;
+    tuneGuard.start();
+    while (tuneGuard.elapsed() < 300) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        usleep(2000);
+    }
+    check(!radio.sets.contains("*TK") && !radio.sets.contains("*TP10"),
+          "no carrier without an operation from the TX coordinator");
+    backend.requestTransmitControl(pc);
+    radio.sets.clear();
+    txSpy.clear();
+    backend.setTune(true, 10, op, {});
+    check(waitFor([&] { return radio.keyed; }, 1000), "TUNE keys the (fake) radio");
+    check(radio.sets.indexOf("*TP10") >= 0 && radio.sets.indexOf("*RMM5") > radio.sets.indexOf("*TP10")
+              && radio.sets.indexOf("*TK") > radio.sets.indexOf("*RMM5"),
+          "TUNE drive, then FM, then *TK (the reference program's order)");
+    check(sawTune(true), "tune=true reported");
+    check(waitFor([&] { return sawMox(true); }, 3000), "the radio's readback says it transmits");
+    const quint64 tuneAudioBefore = txAudioWritten();
+    backend.submitTxAudio(block, 24000, TxAudioSource::Microphone, {});
+    check(txAudioWritten() == tuneAudioBefore, "no PC audio on a TUNE carrier");
+    backend.setTxPower(60);    // the operator moves RF power mid-tune
+    tuneGuard.restart();
+    while (tuneGuard.elapsed() < 800) {   // several polls of the FM mode and 10% drive
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        usleep(2000);
+    }
+    check(slices[0].mode == QStringLiteral("CW"), "the slice still shows CW, not TUNE's FM");
+    check(!sawRfPower(10), "the RF power slider never shows the TUNE drive");
+    check(!radio.sets.contains("*TP60"), "RF power moved mid-tune waits for the carrier to end");
+    radio.sets.clear();
+    backend.setTune(false, 10, op, {});
+    check(waitFor([&] { return !radio.keyed && radio.mainMode == 2 && radio.txPower == 60; }, 1000),
+          "TUNE off: unkeyed, CW and the drive (now 60%) back");
+    check(radio.sets.indexOf("*TU") == 0, "the carrier drops before anything else changes");
+    check(sawTune(false), "tune=false reported");
+
+    std::printf("-- TUNE stops itself\n");
+    radio.sets.clear();
+    txSpy.clear();
+    backend.setTune(true, 10, op, {});
+    check(waitFor([&] { return radio.keyed; }, 1000), "carrier up");
+    check(waitFor([&] { return !radio.keyed && radio.mainMode == 2 && radio.txPower == 60; }, 4000),
+          "the TUNE limit unkeys and restores mode and drive");
+    check(sawTune(false), "tune=false reported after the limit");
+
+    std::printf("-- disconnect during TUNE\n");
+    backend.setTune(true, 10, op, {});
+    check(waitFor([&] { return radio.keyed && radio.mainMode == 5; }, 1000), "carrier up in FM");
+    radio.sets.clear();
+    backend.disconnectRadio();
+    check(waitFor([&] { return !radio.keyed && radio.mainMode == 2 && radio.txPower == 60; }, 500),
+          "disconnect unkeys and gives back CW and the drive (stand-alone rule)");
+    check(radio.sets.indexOf("*TU") == 0, "unkey first");
+    disconnectedSpy.clear();
+    backend.connectRadio(req);
+    check(waitFor([&] { return backend.isConnected(); }, 2000), "reconnected");
+    backend.requestTransmitControl(mic);
 
     std::printf("-- failsafe\n");
     radio.sets.clear();
