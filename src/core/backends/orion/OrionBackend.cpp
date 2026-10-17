@@ -268,7 +268,6 @@ RadioCapabilities OrionBackend::capabilities() const
     c.hasPrivateIpConnectionPolicy = false;
     c.hasRadioDialLock = false;
     c.hasTransmitFrequencyCheck = false;
-    c.hasSelectableMicInputs = false;
     c.hasDownwardExpander = false;
     c.hasAmCarrierLevel = false;
     c.hasModeIndependentSquelch = false;

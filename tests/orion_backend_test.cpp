@@ -301,6 +301,11 @@ int main(int argc, char** argv)
     check(backend.capabilities().canTransmit, "the Orion can transmit (step 6)");
     check(!backend.capabilities().hostModulates && backend.capabilities().takesTxAudioOverSeam,
           "the radio modulates; PC audio crosses the seam");
+    check(backend.capabilities().hasSelectableMicInputs,
+          "TX inputs are selectable (on air: a leftover false collapsed the list to PC)");
+    check(backend.capabilities().extensions.value(QStringLiteral("micInputs")).toStringList()
+              == QStringList({QStringLiteral("MIC"), QStringLiteral("PC")}),
+          "the two inputs are MIC and PC");
     check(backend.capabilities().maxSlices == 2, "two receivers");
 
     check(waitFor([&] {

@@ -12,6 +12,7 @@ possible merge conflict when pulling from `upstream`.
 | `src/models/RadioModel.cpp` | In `publishCapabilities()`: a backend with no command plane that declares `hasSelectableMicInputs` gets its mic-source list from `capabilities().extensions["micInputs"]` | The Phone applet's MIC/PC choice; upstream fills that list only from the Flex `mic list` command. No family check |
 | `src/gui/ConnectionPanel.h` | `kFamilyOrion` constant | Same pattern as the other families |
 | `src/gui/ConnectionPanel.cpp` | Family normalisation (two places), the "Ten-Tec Orion (serial)" radio-type entry, the hint and placeholder text, and an `orion` branch at the top of `probeRadio()` that hands the device path to the session as `orion:<path>` | The manual-connect page is how the operator picks the radio; a serial radio has nothing to probe |
+| `src/gui/PhoneCwApplet.cpp` | `setSelectableMicInputs()` uses the model's mic-input list when it has one, instead of always FlexRadio's MIC/BAL/LINE/ACC/PC | Shows the Orion's MIC and PC; a Flex is unchanged (its list comes from `mic list`) |
 | `tests/tests.cmake` | `orion_cat_test`, `orion_spectrum_test`, `orion_rxaudio_test` and `orion_backend_test` appended at the end | Upstream requires every test target to be declared there |
 | `tests/backend_seam_affinity_test.cpp` | `orion` added to the constructed-families list | The seam contract test covers the new backend too |
 

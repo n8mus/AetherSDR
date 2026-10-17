@@ -155,8 +155,12 @@ void PhoneCwApplet::setSelectableMicInputs(bool selectable)
     // to its network port. PC is the only source we can actually feed.
     const QString wanted = selectable ? m_micSourceCombo->currentText()
                                       : QStringLiteral("PC");
+    // N8EM fork: a radio that names its own inputs (the model's list) gets
+    // those, not FlexRadio's connector list.
     const QStringList items = selectable
-        ? QStringList{"MIC", "BAL", "LINE", "ACC", "PC"}
+        ? (m_model && !m_model->micInputList().isEmpty()
+               ? m_model->micInputList()
+               : QStringList{"MIC", "BAL", "LINE", "ACC", "PC"})
         : QStringList{"PC"};
     QStringList existing;
     for (int i = 0; i < m_micSourceCombo->count(); ++i)
