@@ -435,7 +435,7 @@ works with slight lag. VFO B tuning was sluggish: the poller sped up only
 for dial A. Fixed by giving the active slice's dial the fast slots and
 lending the burst slots to whichever dial is moving.
 
-**Step 2 (built 2026-10-17, awaiting the operator's on-air check):** RSP2
+**Step 2 (built and on-air checked 2026-10-17):** RSP2
 spectrum through `Rsp2Receiver` (SDRplay API loaded with `dlopen`, never
 linked) and `OrionSpectrum` (offset-LO view rules, 16384-point
 Blackman-Harris FFT, peak-per-pixel crop). The LO is a function of the
@@ -444,6 +444,9 @@ the dial reproduces the 260 kHz offset exactly. Bench run against the real
 RSP2 with a fake CAT radio: LO followed tuning and pan drags, delivery
 98-104% per second and 100% over 5 s windows, no overloads, clean release
 and reopen. Levels are uncalibrated (`Rsp2Receiver::kLevelOffsetDb`).
+On air: stations show in the pan at the frequencies heard on the Orion,
+and tuning follows. Tune by double-click (AetherSDR's default; View ->
+Single-Click to Tune for one click). SPLIT is refused until step 4.
 
 **Later steps, each one an operator on-air checkpoint:**
 
