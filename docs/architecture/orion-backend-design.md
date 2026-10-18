@@ -639,7 +639,24 @@ extension event, onto the panadapter through the RBN spot path (violet,
 10 min). Radio Setup -> Orion: on/off (default off), pause outside CW
 (default on), Bayes, channels (24), port (7300); it also pauses while the
 radio transmits. Health shows status, channels decoding, the telnet feed
-and dropped IQ. Stage 2 (later): the band map and SKIM waterfall windows.
+and dropped IQ.
+
+**Skimmer stage 2 (2026-10-18, tested on synthetic IQ; the windows not yet
+seen on screen):** Tools -> Skimmer band map... and Skimmer waterfall...,
+the console's windows re-expressed in AetherSDR's widgets and colours.
+- Band map: the skimmer's finds sorted by frequency (call, WPM, age), calls
+  in their worked-before colour, channels still hunting as dim "?" rows;
+  click a row to tune the active slice there (the Log QSO window then picks
+  the call up from the spot at that frequency).
+- Waterfall: the console's SkimStft, ported on FFTW (4096-point FFT at
+  ~125 ksps, ~30 Hz bins, ~8 ms columns) over a slice of the capture
+  centred on the band's CW segment, frequency up the side, time flowing
+  left, keying visible; decoded calls and their live copy ride beside the
+  traces in worked-before colours; click to tune, wheel to zoom, drag to
+  pan, scroll speed x1/x2/x4. Colours: the operator's AetherSDR waterfall
+  scheme (read from the panadapter) and AetherSDR's theme, not the
+  console's ramp. Its STFT has its own IQ feed thread (every block, any LO)
+  that runs only while the window is open.
 
 **Step 9, logbook stage 1 (2026-10-18, tested without cqrlog only):** the
 Orion console's station log, ported (src/core/backends/orion/log/: LogDb on
