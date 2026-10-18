@@ -9573,6 +9573,12 @@ if(AETHER_BACKEND_ORION AND UNIX AND NOT APPLE)
     add_test(NAME orion_skimmer_test COMMAND orion_skimmer_test)
     set_tests_properties(orion_skimmer_test PROPERTIES TIMEOUT 180)
 
+    # Bench tool, not a test: AetherSDR's ggmorse CW reader against the
+    # Orion reader on the same generated or recorded CW.
+    add_executable(orion_cw_bench tests/orion_cw_bench.cpp)
+    target_include_directories(orion_cw_bench PRIVATE src tests third_party/ggmorse/include)
+    target_link_libraries(orion_cw_bench PRIVATE aethercore Qt6::Core)
+
     # Step 9: the station logbook (log, ADIF, cqrlog bridge), no cqrlog needed.
     if(AETHER_ORION_LOGBOOK)
         add_executable(orion_logbook_test tests/orion_logbook_test.cpp)
