@@ -539,7 +539,8 @@ real transmission is the operator's):**
   VOX stays unsupported: the reference program has no Orion VOX command.
   On air (operator): in CW there is no MON; what matters there is the
   sidetone.
-- CW sidetone (built 2026-10-17, bench-tested only): the CW tab's Sidetone
+- CW sidetone (built 2026-10-17; on air the same day, operator: the level
+  and the button change the Orion's sidetone): the CW tab's Sidetone
   button and level drive the radio's own sidetone volume (*CV, 0..100, as
   the reference program sets it); off sends *CV0, a level moved while off
   waits, and @CV is read back on connect and after each change. Pitch
