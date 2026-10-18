@@ -17,8 +17,10 @@
 #endif
 
 #include <QAction>
+#include <QCheckBox>
 #include <QDateTime>
 #include <QDialog>
+#include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
 #include <QMainWindow>
@@ -69,6 +71,24 @@ QColor callColour(const QString& call, qint64 hz)
     return QColor(205, 140, 255);
 }
 
+// The skimmer's on-switch, in the window itself (it is also on Radio Setup
+// -> Orion): decoding is off until the operator turns it on, as in the
+// console, and the waterfall runs either way.
+QCheckBox* decodeSwitch(RadioModel* model, QWidget* parent)
+{
+    auto* box = new QCheckBox(QObject::tr("Decode the CW segment"), parent);
+    box->setToolTip(QObject::tr("Run the skimmer's decoder channels (paused outside CW and "
+                                "while transmitting)"));
+    box->setChecked(AppSettings::instance().value(QStringLiteral("OrionSkimmerEnabled"), false).toBool());
+    QObject::connect(box, &QCheckBox::toggled, box, [model](bool on) {
+        if (!model || !model->backendDeclaresExtension(QStringLiteral("orion"))) return;
+        QVariantMap f;
+        f.insert(QStringLiteral("enabled"), on);
+        model->invokeBackendExtension(QStringLiteral("orion"), QStringLiteral("skimmer.set"), 0, f);
+    });
+    return box;
+}
+
 void tuneSlice(const std::function<SliceModel*()>& activeSlice, qint64 hz)
 {
     if (SliceModel* s = activeSlice ? activeSlice() : nullptr) {
@@ -88,6 +108,7 @@ public:
         setWindowTitle(tr("Skimmer band map"));
         resize(440, 500);
         auto* lay = new QVBoxLayout(this);
+        lay->addWidget(decodeSwitch(model, this));
         m_table = new QTableWidget(0, 4, this);
         m_table->setHorizontalHeaderLabels({tr("kHz"), tr("Call"), tr("WPM"), tr("Age")});
         m_table->horizontalHeader()->setStretchLastSection(true);
@@ -174,7 +195,11 @@ private:
         }
         QString text = tr("%1 station(s), %2 channel(s) hunting; click a row to tune")
                            .arg(int(rows.size()) - hunting).arg(hunting);
-        if (!sk->isActive()) text += tr(" (decoding is paused: outside CW, transmitting, or off)");
+        if (!sk->isActive()) {
+            text += AppSettings::instance().value(QStringLiteral("OrionSkimmerEnabled"), false).toBool()
+                ? tr(" (decoding is paused: outside CW or transmitting)")
+                : tr(" (decoding is off: tick \"Decode the CW segment\" above)");
+        }
         m_info->setText(text);
     }
 
@@ -679,6 +704,8 @@ private:
         if (!m_stft) {
             t = tr("The skimmer is not running: it needs the Orion's RSP2 panadapter "
                    "(switch it on in Settings -> Radio Setup -> Orion).");
+        } else if (!m_engine || !currentSkimmer(m_model) || !currentSkimmer(m_model)->isActive()) {
+            t = tr("decoding is off or paused (outside CW, transmitting): no calls are read");
         } else if (m_raw.empty()) {
             t = tr("waiting for IQ...");
         } else {
@@ -746,6 +773,11 @@ public:
         setMinimumSize(480, 320);
         auto* lay = new QVBoxLayout(this);
         lay->setContentsMargins(0, 0, 0, 0);
+        auto* top = new QHBoxLayout;
+        top->setContentsMargins(8, 4, 8, 0);
+        top->addWidget(decodeSwitch(model, this));
+        top->addStretch(1);
+        lay->addLayout(top);
         m_canvas = new SkimCanvas(model, mainWindow,
                                   [activeSlice](qint64 hz) { tuneSlice(activeSlice, hz); }, this);
         lay->addWidget(m_canvas, 1);
