@@ -7,6 +7,9 @@
 // Contributors are recognised in the Contributor Logbook, which the About
 // window links to.
 
+#ifdef AETHER_ORION_LOGBOOK
+#include "gui/orion/OrionLogbookUi.h"   // N8EM fork (FORK-NOTES.md)
+#endif
 #include "MainWindow.h"
 #include "models/CwDecodeSettings.h"
 #include "AetherBuildIdentity.h"   // generated at build time (#5804)
@@ -1086,6 +1089,11 @@ void MainWindow::buildMenuBar()
     // of the less frequently changed display options in View.
     auto* toolsMenu = menuBar()->addMenu("&Tools");
     toolsMenu->setToolTipsVisible(true);
+
+#ifdef AETHER_ORION_LOGBOOK
+    // N8EM fork: the station logbook's menu (FORK-NOTES.md).
+    installOrionLogbook(this, menuBar(), &m_radioModel, [this] { return activeSlice(); });
+#endif
 
     auto* viewMenu = menuBar()->addMenu("&View");
     viewMenu->setToolTipsVisible(true);  // see settingsMenu above (#5546)

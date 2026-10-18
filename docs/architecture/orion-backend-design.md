@@ -641,6 +641,26 @@ extension event, onto the panadapter through the RBN spot path (violet,
 radio transmits. Health shows status, channels decoding, the telnet feed
 and dropped IQ. Stage 2 (later): the band map and SKIM waterfall windows.
 
+**Step 9, logbook stage 1 (2026-10-18, tested without cqrlog only):** the
+Orion console's station log, ported (src/core/backends/orion/log/: LogDb on
+Qt SQL/SQLite with the console's schema, Adif, CqrlogSync), with AetherSDR's
+settings (OrionLog/*) and its cty.dat in place of the console's. AetherSDR
+keeps its OWN log file (~/.local/share/AetherSDR/logbook.sqlite), separate
+from the console's; cqrlog stays the shared award log. Both directions of
+the cqrlog bridge: each QSO is mirrored to the bridge (UDP localhost:2334,
+one headerless ADIF record), and while cqrlog runs its new QSOs are pulled
+in every 2 min through the mysql client on cqrlog's socket (the first pull
+brings in cqrlog's whole history; near-duplicates are skipped and imported
+QSOs are marked as already uploaded). GUI in AetherSDR's own widgets
+(src/gui/orion/OrionLogbookUi): a Logbook menu (Log QSO... Ctrl+Alt+L,
+Import/Export ADIF, the two cqrlog switches, the log file shown) and a Log
+QSO window: frequency/mode from the active slice, the call from a spot on
+that frequency, the UTC clock running until edited, country and zones from
+cty.dat, name/QTH/grid carried from the last QSO with the station, a
+near-duplicate question, the last 8 QSOs with the station. Later stages:
+the logbook browser, worked-before colouring of spots, uploads (LoTW, eQSL,
+QRZ, ClubLog, HRDLOG), WSJT-X auto-logging, the contest deck.
+
 **PAUSED 2026-10-17 (operator decision).** The fork runs the whole station
 on air (CAT, RSP2 pan and both receivers, split, TX on both paths, TUNE,
 ATU, WinKeyer CW, sidetone). Open when it resumes: the 2D panadapter (the

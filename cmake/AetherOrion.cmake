@@ -63,6 +63,30 @@ else()
         message(STATUS "Ten-Tec Orion ... CW skimmer without OpenMP (decoder bank runs serial)")
     endif()
 
+    # Station logbook (step 9), ported from the Orion console: its SQLite log,
+    # ADIF and the cqrlog bridge. Needs Qt6::Sql (the SQLite driver).
+    find_package(Qt6 QUIET COMPONENTS Sql)
+    if(TARGET Qt6::Sql)
+        set(AETHER_ORION_LOGBOOK ON)
+        target_compile_definitions(aethercore PUBLIC AETHER_ORION_LOGBOOK)
+        target_link_libraries(aethercore PUBLIC Qt6::Sql)
+        target_sources(aethercore PRIVATE
+            src/core/backends/orion/log/Adif.cpp
+            src/core/backends/orion/log/Adif.h
+            src/core/backends/orion/log/CqrlogSync.cpp
+            src/core/backends/orion/log/CqrlogSync.h
+            src/core/backends/orion/log/LogDb.cpp
+            src/core/backends/orion/log/LogDb.h
+            src/core/backends/orion/log/OrionLogbook.cpp
+            src/core/backends/orion/log/OrionLogbook.h)
+        target_sources(AetherSDR PRIVATE
+            src/gui/orion/OrionLogbookUi.cpp
+            src/gui/orion/OrionLogbookUi.h)
+        message(STATUS "Ten-Tec Orion ... logbook enabled (Qt6::Sql)")
+    else()
+        message(STATUS "Ten-Tec Orion ... logbook disabled — Qt6::Sql not found")
+    endif()
+
     # The fork's own GUI page (Radio Setup -> Orion Audio).
     target_sources(AetherSDR PRIVATE
         src/gui/orion/OrionSetupPage.cpp
