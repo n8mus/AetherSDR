@@ -77,6 +77,10 @@ else()
             src/core/backends/orion/log/CqrlogSync.h
             src/core/backends/orion/log/LogDb.cpp
             src/core/backends/orion/log/LogDb.h
+            src/core/backends/orion/log/LogbookIndex.cpp
+            src/core/backends/orion/log/LogbookIndex.h
+            src/core/backends/orion/log/WsjtxListener.cpp
+            src/core/backends/orion/log/WsjtxListener.h
             src/core/backends/orion/log/OrionLogbook.cpp
             src/core/backends/orion/log/OrionLogbook.h)
         target_sources(AetherSDR PRIVATE

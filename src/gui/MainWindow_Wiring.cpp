@@ -3,6 +3,9 @@
 // wireAetherDspWidget(), onSliceAdded()/onSliceRemoved(), and
 // panFollowVfo()/revealFrequencyIfNeeded().
 
+#ifdef AETHER_ORION_LOGBOOK
+#include "gui/orion/OrionLogbookUi.h"   // N8EM fork (FORK-NOTES.md)
+#endif
 #include "MainWindow.h"
 #include "StatusIndicator.h"
 #include "models/CwDecodeSettings.h"
@@ -4534,6 +4537,11 @@ void MainWindow::wirePanadapter(PanadapterApplet* applet)
             QColor dxccCol;
             if (m_dxccProvider.isEnabled() && spot.source != "Memory")
                 dxccCol = m_dxccProvider.colorForSpot(spot.callsign, spot.rxFreqMhz, spot.mode);
+#ifdef AETHER_ORION_LOGBOOK
+            // N8EM fork: worked-before colour from the station log (FORK-NOTES.md).
+            if (!dxccCol.isValid() && spot.source != "Memory")
+                dxccCol = orionWorkedSpotColour(spot.callsign, spot.rxFreqMhz);
+#endif
             markers.append({spot.index, spot.callsign, spot.rxFreqMhz, spot.color, spot.mode,
                             dxccCol, spot.source, spot.spotterCallsign, spot.comment, tsMs,
                             spot.backgroundColor});

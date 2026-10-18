@@ -7,6 +7,9 @@
 
 #include <functional>
 
+#include <QColor>
+#include <QString>
+
 class QMainWindow;
 class QMenuBar;
 
@@ -20,5 +23,11 @@ class SliceModel;
 // mode the QSO window fills in.
 void installOrionLogbook(QMainWindow* window, QMenuBar* bar, RadioModel* model,
                          std::function<SliceModel*()> activeSlice);
+
+// Worked-before colour for a spot, as the console colours them: never
+// worked red, worked on another band amber, worked this band green,
+// confirmed grey. Invalid when the logbook has no data, the call is
+// unknown, or the operator turned the colours off.
+QColor orionWorkedSpotColour(const QString& call, double freqMhz);
 
 }  // namespace AetherSDR

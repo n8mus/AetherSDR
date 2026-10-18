@@ -27,6 +27,8 @@ class CtyDatParser;
 namespace AetherSDR::orion::logbook {
 
 class CqrlogSync;
+class LogbookIndex;
+class WsjtxListener;
 
 class OrionLogbook : public QObject {
     Q_OBJECT
@@ -52,6 +54,16 @@ public:
 
     // Starts the cqrlog pull (only does anything while cqrlog runs).
     void startCqrlogSync();
+    // Starts listening for WSJT-X's "Logged ADIF" (and its DX call), as the
+    // console does: multicast 224.0.0.1:2237, sharing the port.
+    void startWsjtx();
+
+    // Worked-before, from this log and (while cqrlog runs) cqrlog itself:
+    // 'N' never worked, 'B' worked on another band, 'W' worked this band,
+    // 'C' confirmed this band, '?' no data yet.
+    LogbookIndex* index() { return m_index.get(); }
+    CqrlogSync* cqrlogSync() { return m_sync.get(); }
+    [[nodiscard]] QChar workedStatus(const QString& call, qint64 hz) const;
 
     // Logs one QSO and mirrors it to cqrlog. Returns the new id, -1 on error.
     qint64 logQso(Qso q);
@@ -68,6 +80,10 @@ public:
 signals:
     void qsoLogged(qint64 id, const QString& call);
     void pulledFromCqrlog(int added);
+    void wsjtxLogged(qint64 id, const QString& call);
+    // The DX WSJT-X is working changed (a decode was clicked).
+    void wsjtxDx(const QString& call, const QString& grid, const QString& mode);
+    void workedIndexUpdated();
 
 private:
     void mirror(const Qso& q);
@@ -75,6 +91,8 @@ private:
     LogDb m_db;
     std::unique_ptr<CtyDatParser> m_cty;
     std::unique_ptr<CqrlogSync> m_sync;
+    std::unique_ptr<LogbookIndex> m_index;
+    std::unique_ptr<WsjtxListener> m_wsjtx;
     QUdpSocket* m_udp = nullptr;
 };
 

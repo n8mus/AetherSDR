@@ -3,6 +3,8 @@
 #include "core/AppSettings.h"
 #include "core/CtyDatParser.h"
 #include "core/backends/orion/log/CqrlogSync.h"
+#include "core/backends/orion/log/LogbookIndex.h"
+#include "core/backends/orion/log/WsjtxListener.h"
 
 #include <QFile>
 #include <QHostAddress>
@@ -35,7 +37,31 @@ bool OrionLogbook::open(const QString& path, const QString& ctyPath, QString* er
     }
     m_sync = std::make_unique<CqrlogSync>(&m_db, m_cty.get());
     connect(m_sync.get(), &CqrlogSync::pulled, this, &OrionLogbook::pulledFromCqrlog);
+    m_index = std::make_unique<LogbookIndex>();
+    m_index->attachCty(m_cty.get());
+    m_index->attachDb(&m_db);   // rebuilt whenever the log changes
+    connect(m_index.get(), &LogbookIndex::updated, this, &OrionLogbook::workedIndexUpdated);
     return true;
+}
+
+void OrionLogbook::startWsjtx()
+{
+    if (!m_db.isOpen() || m_wsjtx) {
+        return;
+    }
+    m_wsjtx = std::make_unique<WsjtxListener>(&m_db, m_cty.get());
+    connect(m_wsjtx.get(), &WsjtxListener::qsoLogged, this,
+            [this](qint64 id, const QString& call, bool) { emit wsjtxLogged(id, call); });
+    connect(m_wsjtx.get(), &WsjtxListener::dxChanged, this, &OrionLogbook::wsjtxDx);
+    m_wsjtx->start();
+}
+
+QChar OrionLogbook::workedStatus(const QString& call, qint64 hz) const
+{
+    if (!m_index) {
+        return QChar('?');
+    }
+    return m_index->status(call, LogDb::bandForHz(hz));
 }
 
 bool OrionLogbook::isOpen() const
@@ -52,6 +78,10 @@ void OrionLogbook::startCqrlogSync()
 {
     if (m_sync) {
         m_sync->start();
+    }
+    // cqrlog's own worked/confirmed summary (cached between runs).
+    if (m_index) {
+        m_index->start();
     }
 }
 

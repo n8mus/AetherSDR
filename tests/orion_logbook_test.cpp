@@ -15,9 +15,13 @@
 #include "core/backends/orion/log/Adif.h"
 #include "core/backends/orion/log/CqrlogSync.h"
 #include "core/backends/orion/log/LogDb.h"
+#include "core/backends/orion/log/LogbookIndex.h"
 #include "core/backends/orion/log/OrionLogbook.h"
 
 #include <QBuffer>
+#include <QDataStream>
+#include <QSignalSpy>
+#include <QStandardPaths>
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QHostAddress>
@@ -26,6 +30,7 @@
 #include <QUdpSocket>
 
 #include <cstdio>
+#include <functional>
 
 using namespace AetherSDR;
 using namespace AetherSDR::orion::logbook;
@@ -187,6 +192,104 @@ void testOrionLogbook(const QString& dir, const QString& ctyPath)
     check(!bridge.hasPendingDatagrams(), "mirroring off: nothing is sent");
 }
 
+void testWorkedIndex(const QString& dir, const CtyDatParser& cty)
+{
+    std::printf("-- worked-before index (stage 2)\n");
+    LogDb db;
+    check(db.open(dir + "/worked.sqlite"), "log opens");
+    const auto add = [&](const char* call, qint64 hz, bool lotw) {
+        Qso q;
+        q.call = QString::fromLatin1(call);
+        q.tsUtc = QDateTime::currentDateTimeUtc().addDays(-3);
+        q.freqHz = hz;
+        q.band = LogDb::bandForHz(hz);
+        q.mode = QStringLiteral("CW");
+        if (lotw) q.lotwRcvd = QStringLiteral("Y");
+        db.addQso(q);
+    };
+    LogbookIndex idx;
+    check(idx.status(QStringLiteral("W1AW"), QStringLiteral("20M")) == QChar('?'),
+          "no data yet: '?' (spots keep their own colours)");
+    idx.attachCty(&cty);
+    idx.attachDb(&db);
+    add("W1AW", 14025000, false);
+    add("DL1ABC", 7025000, true);
+    check(idx.status(QStringLiteral("JA1XYZ"), QStringLiteral("20M")) == QChar('N'),
+          "never worked: N");
+    check(idx.status(QStringLiteral("W1AW"), QStringLiteral("40M")) == QChar('B'),
+          "worked on another band: B");
+    check(idx.status(QStringLiteral("W1AW"), QStringLiteral("20M")) == QChar('W'),
+          "worked on this band: W");
+    check(idx.status(QStringLiteral("DL1ABC"), QStringLiteral("40M")) == QChar('C'),
+          "confirmed on this band: C");
+    const LogbookIndex::Need nd = idx.need(QStringLiteral("DL9ZZ"), QStringLiteral("20M"),
+                                           QStringLiteral("CW"));
+    check(nd.country == QChar('C') && nd.band == QChar('N') && nd.mode == QChar('C'),
+          "country needs: Germany confirmed, 20 m needed, CW confirmed");
+}
+
+QByteArray wsjtxDatagram(quint32 type, const std::function<void(QDataStream&)>& body)
+{
+    QByteArray d;
+    QDataStream out(&d, QIODevice::WriteOnly);
+    out.setByteOrder(QDataStream::BigEndian);
+    out << quint32(0xadbccbda) << quint32(2) << type << QByteArray("WSJT-X");
+    body(out);
+    return d;
+}
+
+void testWsjtx(const QString& dir, const QString& ctyPath)
+{
+    std::printf("-- WSJT-X auto-logging (stage 2)\n");
+    // A free port for the listener; unicast to it stands in for the group.
+    quint16 port = 0;
+    {
+        QUdpSocket probe;
+        probe.bind(QHostAddress::LocalHost, 0);
+        port = probe.localPort();
+    }
+    AppSettings::instance().setValue(QStringLiteral("OrionLog/wsjtxAddr"), QStringLiteral("127.0.0.1"));
+    AppSettings::instance().setValue(QStringLiteral("OrionLog/wsjtxPort"), port);
+    AppSettings::instance().setValue(QStringLiteral("OrionLog/mirrorCqrlog"), false);
+
+    OrionLogbook book;
+    check(book.open(dir + "/wsjtx.sqlite", ctyPath), "the logbook opens");
+    QSignalSpy logged(&book, &OrionLogbook::wsjtxLogged);
+    QSignalSpy dx(&book, &OrionLogbook::wsjtxDx);
+    book.startWsjtx();
+
+    const QByteArray adif =
+        "<call:6>OA4ENG <gridsquare:4>FH17 <mode:3>FT8 <rst_sent:3>-11 <rst_rcvd:3>-06 "
+        "<qso_date:8>20261018 <time_on:6>143200 <band:3>40m <freq:8>7.075123 <eor>";
+    QUdpSocket tx;
+    const auto send = [&](const QByteArray& d) {
+        tx.writeDatagram(d, QHostAddress::LocalHost, port);
+    };
+    send(wsjtxDatagram(12, [&](QDataStream& o) { o << adif; }));
+    check(logged.wait(2000) && logged.first().at(1).toString() == "OA4ENG",
+          "a Logged ADIF message lands in the log");
+    const QList<Qso> prev = book.db()->prevQsos(QStringLiteral("OA4ENG"));
+    check(prev.size() == 1 && prev.first().mode == "FT8" && prev.first().band == "40M"
+              && prev.first().country == "Peru",
+          "with its mode, band and (from cty.dat) country");
+    send(wsjtxDatagram(12, [&](QDataStream& o) { o << adif; }));
+    QElapsedTimer t;
+    t.start();
+    while (t.elapsed() < 400) QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    check(book.db()->prevQsos(QStringLiteral("OA4ENG")).size() == 1, "a resend is not logged twice");
+
+    send(wsjtxDatagram(1, [&](QDataStream& o) {
+        o << quint64(7074000) << QByteArray("FT8") << QByteArray("ZL1ABC") << QByteArray("-10")
+          << QByteArray("FT8") << true << false << true << quint32(1500) << quint32(1500)
+          << QByteArray("N8EM") << QByteArray("EN81") << QByteArray("RF72");
+    }));
+    check(dx.wait(2000) && dx.first().at(0).toString() == "ZL1ABC"
+              && dx.first().at(1).toString() == "RF72" && dx.first().at(2).toString() == "FT8",
+          "the DX WSJT-X is working (call, grid, mode) is passed on");
+    check(book.workedStatus(QStringLiteral("OA4ENG"), 7075123) == QChar('W'),
+          "a WSJT-X QSO counts as worked at once");
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -194,6 +297,9 @@ int main(int argc, char** argv)
     // Never the operator's settings or log.
     QTemporaryDir settingsDir;
     qputenv("AETHER_SETTINGS_DIR", settingsDir.path().toUtf8());
+    // Nor the operator's cqrlog: its home points at an empty folder here.
+    qputenv("TTC_CQRLOG_HOME", settingsDir.path().toUtf8());
+    QStandardPaths::setTestModeEnabled(true);
     QCoreApplication app(argc, argv);
     QTemporaryDir dir;
     CtyDatParser cty;
@@ -204,6 +310,8 @@ int main(int argc, char** argv)
     testCqrlogMirror(dir.path());
     testLogDb(dir.path(), cty);
     testOrionLogbook(dir.path(), QStringLiteral(ORION_TEST_CTY_DAT));
+    testWorkedIndex(dir.path(), cty);
+    testWsjtx(dir.path(), QStringLiteral(ORION_TEST_CTY_DAT));
     if (g_failures == 0) {
         std::printf("orion_logbook_test: all checks passed\n");
         return 0;

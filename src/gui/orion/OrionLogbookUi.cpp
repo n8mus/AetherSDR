@@ -1,6 +1,7 @@
 #include "gui/orion/OrionLogbookUi.h"
 
 #include "core/AppSettings.h"
+#include "core/backends/orion/log/CqrlogSync.h"
 #include "core/backends/orion/log/OrionLogbook.h"
 #include "models/RadioModel.h"
 #include "models/SliceModel.h"
@@ -24,7 +25,11 @@
 #include <QMessageBox>
 #include <QPointer>
 #include <QPushButton>
+#include <QSortFilterProxyModel>
+#include <QSqlTableModel>
+#include <QStatusBar>
 #include <QStandardPaths>
+#include <QTableView>
 #include <QTableWidget>
 #include <QTimeZone>
 #include <QTimer>
@@ -34,10 +39,19 @@
 
 namespace AetherSDR {
 
+using orion::logbook::CqrlogSync;
 using orion::logbook::OrionLogbook;
 using orion::logbook::Qso;
 
 namespace {
+
+// The logbook the spot colouring reads (one per application).
+QPointer<OrionLogbook> g_book;
+
+bool workedColoursOn()
+{
+    return AppSettings::instance().value(QStringLiteral("OrionLog/workedColours"), true).toBool();
+}
 
 // AetherSDR's slice mode -> the ADIF mode the log and cqrlog use.
 QString adifMode(const QString& sliceMode)
@@ -194,6 +208,22 @@ public:
         }
     }
 
+    // WSJT-X is working a station (a decode was clicked): take its call,
+    // grid and mode while the form is still empty, as the console does.
+    void setFromWsjtx(const QString& call, const QString& grid, const QString& mode)
+    {
+        if (!m_call->text().trimmed().isEmpty()) {
+            return;
+        }
+        m_call->setText(call.toUpper());
+        if (m_grid->text().isEmpty()) m_grid->setText(grid.toUpper());
+        if (!mode.isEmpty() && !m_modeEdited) {
+            m_mode->setText(mode.toUpper());
+            m_modeEdited = true;   // WSJT-X's FT8 outranks the rig's USB
+        }
+        onCallChanged();
+    }
+
 private:
     void tick()
     {
@@ -313,16 +343,221 @@ private:
     bool m_modeEdited = false;
 };
 
+// The logbook browser: the console's Logbook window, re-expressed in
+// AetherSDR's widgets. The whole log as a table (search, edit in place,
+// delete), ADIF in and out, and the on-demand cqrlog comparison.
+class OrionLogbookWindow : public QDialog {
+public:
+    OrionLogbookWindow(OrionLogbook* book, QWidget* parent)
+        : QDialog(parent)
+        , m_book(book)
+    {
+        setWindowTitle(tr("Logbook"));
+        resize(1000, 560);
+        auto* vbox = new QVBoxLayout(this);
+
+        auto* top = new QHBoxLayout;
+        m_search = new QLineEdit;
+        m_search->setPlaceholderText(tr("Search callsign"));
+        m_search->setClearButtonEnabled(true);
+        top->addWidget(m_search, 1);
+        m_count = new QLabel;
+        top->addWidget(m_count);
+        vbox->addLayout(top);
+
+        m_model = new QSqlTableModel(this, book->db()->database());
+        m_model->setTable(QStringLiteral("qso"));
+        m_model->setEditStrategy(QSqlTableModel::OnFieldChange);
+        const QList<QPair<QString, QString>> headers = {
+            {QStringLiteral("ts_utc"), tr("Date/time (UTC)")}, {QStringLiteral("call"), tr("Call")},
+            {QStringLiteral("band"), tr("Band")}, {QStringLiteral("freq_hz"), tr("Freq (Hz)")},
+            {QStringLiteral("mode"), tr("Mode")}, {QStringLiteral("rst_s"), tr("Sent")},
+            {QStringLiteral("rst_r"), tr("Rcvd")}, {QStringLiteral("name"), tr("Name")},
+            {QStringLiteral("qth"), tr("QTH")}, {QStringLiteral("grid"), tr("Grid")},
+            {QStringLiteral("country"), tr("Country")}, {QStringLiteral("pota"), tr("POTA")},
+            {QStringLiteral("comment"), tr("Comment")}, {QStringLiteral("qsl_rcvd"), tr("QSL")},
+            {QStringLiteral("lotw_rcvd"), tr("LoTW")}, {QStringLiteral("eqsl_rcvd"), tr("eQSL")}};
+        m_model->setSort(m_model->fieldIndex(QStringLiteral("ts_utc")), Qt::DescendingOrder);
+        m_model->select();
+        for (const auto& h : headers) {
+            const int col = m_model->fieldIndex(h.first);
+            if (col >= 0) m_model->setHeaderData(col, Qt::Horizontal, h.second);
+        }
+        m_proxy = new QSortFilterProxyModel(this);
+        m_proxy->setSourceModel(m_model);
+        m_proxy->setFilterKeyColumn(m_model->fieldIndex(QStringLiteral("call")));
+        m_proxy->setFilterCaseSensitivity(Qt::CaseInsensitive);
+
+        m_table = new QTableView;
+        m_table->setModel(m_proxy);
+        m_table->setSortingEnabled(true);
+        m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
+        m_table->verticalHeader()->setVisible(false);
+        m_table->horizontalHeader()->setStretchLastSection(true);
+        // Bookkeeping columns stay out of sight.
+        for (const char* hidden : {"id", "cqz", "ituz", "up_lotw", "up_eqsl", "up_qrz",
+                                   "up_club", "up_hrdlog"}) {
+            const int col = m_model->fieldIndex(QLatin1String(hidden));
+            if (col >= 0) m_table->setColumnHidden(col, true);
+        }
+        vbox->addWidget(m_table, 1);
+
+        auto* row = new QHBoxLayout;
+        auto* delBtn = new QPushButton(tr("Delete selected"));
+        auto* importBtn = new QPushButton(tr("Import ADIF..."));
+        auto* exportBtn = new QPushButton(tr("Export ADIF..."));
+        auto* cqrBtn = new QPushButton(tr("Check against cqrlog"));
+        cqrBtn->setToolTip(tr("Find QSOs that are in this log but not in cqrlog, then offer "
+                              "to send them (cqrlog must be running)"));
+        auto* closeBtn = new QPushButton(tr("Close"));
+        row->addWidget(delBtn);
+        row->addWidget(importBtn);
+        row->addWidget(exportBtn);
+        row->addWidget(cqrBtn);
+        row->addStretch(1);
+        row->addWidget(closeBtn);
+        vbox->addLayout(row);
+        m_status = new QLabel;
+        m_status->setWordWrap(true);
+        vbox->addWidget(m_status);
+
+        connect(m_search, &QLineEdit::textChanged, this, [this](const QString& t) {
+            m_proxy->setFilterFixedString(t.trimmed());
+            updateCount();
+        });
+        connect(m_model, &QSqlTableModel::dataChanged, this,
+                [this] { m_book->db()->notifyExternalChange(); });
+        connect(book->db(), &orion::logbook::LogDb::changed, this, [this] { reload(); });
+        connect(delBtn, &QPushButton::clicked, this, [this] { deleteSelected(); });
+        connect(importBtn, &QPushButton::clicked, this, [this] {
+            const QString file = QFileDialog::getOpenFileName(
+                this, tr("Import ADIF"), QString(),
+                tr("ADIF files (*.adi *.adif *.ADI);;All files (*)"));
+            if (file.isEmpty()) return;
+            QString err;
+            const int added = m_book->importAdif(file, &err);
+            m_status->setText(added < 0 ? err
+                                        : tr("%1 QSO(s) imported (duplicates within 5 minutes "
+                                             "skipped).").arg(added));
+        });
+        connect(exportBtn, &QPushButton::clicked, this, [this] {
+            const QString file = QFileDialog::getSaveFileName(
+                this, tr("Export ADIF"),
+                QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+                    + QStringLiteral("/aethersdr-log.adi"),
+                tr("ADIF files (*.adi)"));
+            if (file.isEmpty()) return;
+            QString err;
+            m_status->setText(m_book->exportAdif(file, &err) ? tr("Exported to %1.").arg(file)
+                                                             : err);
+        });
+        connect(cqrBtn, &QPushButton::clicked, this, [this] {
+            m_status->setText(tr("Asking cqrlog..."));
+            m_book->cqrlogSync()->checkMissing();
+        });
+        // Nothing is sent to cqrlog without the operator's say-so (console).
+        connect(m_book->cqrlogSync(), &CqrlogSync::missingReady, this,
+                [this](const QList<qint64>& ids, const QString& error) {
+            if (!error.isEmpty()) {
+                m_status->setText(error);
+                return;
+            }
+            if (ids.isEmpty()) {
+                m_status->setText(tr("cqrlog has every QSO in this log."));
+                return;
+            }
+            if (QMessageBox::question(this, tr("Check against cqrlog"),
+                                      tr("%1 QSO(s) in this log are not in cqrlog. Send them "
+                                         "to cqrlog now?").arg(ids.size()))
+                == QMessageBox::Yes) {
+                m_book->cqrlogSync()->sendMissing(ids);
+                m_status->setText(tr("Sending %1 QSO(s) to cqrlog...").arg(ids.size()));
+            } else {
+                m_status->setText(tr("%1 QSO(s) not in cqrlog; nothing sent.").arg(ids.size()));
+            }
+        });
+        connect(m_book->cqrlogSync(), &CqrlogSync::pushedToCqrlog, this,
+                [this](int sent) { m_status->setText(tr("%1 QSO(s) sent to cqrlog.").arg(sent)); });
+        connect(closeBtn, &QPushButton::clicked, this, &QDialog::hide);
+        updateCount();
+    }
+
+    void reload()
+    {
+        if (m_editing) return;
+        m_model->select();
+        while (m_model->canFetchMore()) m_model->fetchMore();
+        updateCount();
+    }
+
+private:
+    void updateCount()
+    {
+        while (m_model->canFetchMore()) m_model->fetchMore();
+        m_count->setText(m_search->text().trimmed().isEmpty()
+                             ? tr("%1 QSOs").arg(m_book->db()->count())
+                             : tr("%1 of %2 QSOs").arg(m_proxy->rowCount())
+                                   .arg(m_book->db()->count()));
+    }
+
+    void deleteSelected()
+    {
+        const QModelIndexList rows = m_table->selectionModel()->selectedRows();
+        if (rows.isEmpty()) return;
+        if (QMessageBox::question(this, tr("Delete QSOs"),
+                                  tr("Delete %1 QSO(s) from this log? cqrlog is not changed.")
+                                      .arg(rows.size()))
+            != QMessageBox::Yes) {
+            return;
+        }
+        QList<qint64> ids;
+        const int idCol = m_model->fieldIndex(QStringLiteral("id"));
+        for (const QModelIndex& r : rows) {
+            ids << m_model->data(m_model->index(m_proxy->mapToSource(r).row(), idCol)).toLongLong();
+        }
+        m_editing = true;
+        for (qint64 id : ids) m_book->db()->deleteQso(id);
+        m_editing = false;
+        reload();
+        m_status->setText(tr("%1 QSO(s) deleted.").arg(ids.size()));
+    }
+
+    OrionLogbook* m_book;
+    QSqlTableModel* m_model = nullptr;
+    QSortFilterProxyModel* m_proxy = nullptr;
+    QTableView* m_table = nullptr;
+    QLineEdit* m_search = nullptr;
+    QLabel* m_count = nullptr;
+    QLabel* m_status = nullptr;
+    bool m_editing = false;
+};
+
 }  // namespace
+
+QColor orionWorkedSpotColour(const QString& call, double freqMhz)
+{
+    if (!g_book || !workedColoursOn() || call.trimmed().isEmpty()) {
+        return {};
+    }
+    switch (g_book->workedStatus(call, qint64(std::llround(freqMhz * 1e6))).toLatin1()) {
+    case 'N': return QColor(255, 92, 70);     // never worked: a new one
+    case 'B': return QColor(255, 190, 60);    // worked, not on this band
+    case 'W': return QColor(130, 222, 140);   // worked this band
+    case 'C': return QColor(150, 162, 178);   // confirmed this band
+    default: return {};                       // no log data yet
+    }
+}
 
 void installOrionLogbook(QMainWindow* window, QMenuBar* bar, RadioModel* model,
                          std::function<SliceModel*()> activeSlice)
 {
     auto* book = new OrionLogbook(window);
+    g_book = book;
     QString error;
     const bool open = book->open(QString(), QString(), &error);
     if (open) {
         book->startCqrlogSync();
+        book->startWsjtx();
     }
 
     auto* menu = bar->addMenu(QObject::tr("&Logbook"));
@@ -331,6 +566,10 @@ void installOrionLogbook(QMainWindow* window, QMenuBar* bar, RadioModel* model,
     logAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+L")));
     logAct->setToolTip(QObject::tr("Log a contact: frequency and mode come from the active "
                                    "slice, the call from a spot on that frequency"));
+    auto* browseAct = menu->addAction(QObject::tr("Logbook..."));
+    browseAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+B")));
+    browseAct->setToolTip(QObject::tr("The whole log: search, edit, delete, ADIF, and a check "
+                                      "against cqrlog"));
     menu->addSeparator();
     auto* importAct = menu->addAction(QObject::tr("Import ADIF..."));
     auto* exportAct = menu->addAction(QObject::tr("Export ADIF..."));
@@ -347,15 +586,68 @@ void installOrionLogbook(QMainWindow* window, QMenuBar* bar, RadioModel* model,
     pullAct->setToolTip(QObject::tr("While cqrlog is running, its new QSOs are copied into "
                                     "this log every couple of minutes (takes effect at the "
                                     "next start)"));
+    auto* wsjtxAct = menu->addAction(QObject::tr("Log WSJT-X QSOs"));
+    wsjtxAct->setCheckable(true);
+    wsjtxAct->setChecked(AppSettings::instance()
+                             .value(QStringLiteral("OrionLog/wsjtx"), true).toBool());
+    wsjtxAct->setToolTip(QObject::tr("Every QSO WSJT-X logs (its UDP broadcast on "
+                                     "224.0.0.1:2237) lands in this log (takes effect at the "
+                                     "next start)"));
+    auto* coloursAct = menu->addAction(QObject::tr("Colour spots by worked-before"));
+    coloursAct->setCheckable(true);
+    coloursAct->setChecked(workedColoursOn());
+    coloursAct->setToolTip(QObject::tr("Red: never worked. Amber: worked on another band. "
+                                       "Green: worked on this band. Grey: confirmed. "
+                                       "AetherSDR's DXCC colouring, when on, takes precedence."));
     menu->addSeparator();
     auto* info = menu->addAction(open ? QObject::tr("Log file: %1").arg(book->path())
                                       : QObject::tr("Log not available: %1").arg(error));
     info->setEnabled(false);
-    for (QAction* a : {logAct, importAct, exportAct}) {
+    for (QAction* a : {logAct, browseAct, importAct, exportAct}) {
         a->setEnabled(open);
     }
 
+    // Spot colours follow the log: redraw the markers when it changes.
+    const auto refreshSpots = [model] {
+        if (model) emit model->spotModel().spotsRefreshed();
+    };
+    QObject::connect(book, &OrionLogbook::workedIndexUpdated, window, refreshSpots);
+    QObject::connect(coloursAct, &QAction::toggled, window, [refreshSpots](bool on) {
+        AppSettings::instance().setValue(QStringLiteral("OrionLog/workedColours"), on);
+        AppSettings::instance().save();
+        refreshSpots();
+    });
+    QObject::connect(wsjtxAct, &QAction::toggled, window, [](bool on) {
+        AppSettings::instance().setValue(QStringLiteral("OrionLog/wsjtx"), on);
+        AppSettings::instance().save();
+    });
+
+    auto browser = std::make_shared<QPointer<OrionLogbookWindow>>();
+    QObject::connect(browseAct, &QAction::triggered, window, [=] {
+        if (!*browser) {
+            *browser = new OrionLogbookWindow(book, window);
+        }
+        (*browser)->reload();
+        (*browser)->show();
+        (*browser)->raise();
+        (*browser)->activateWindow();
+    });
+
     auto dialog = std::make_shared<QPointer<OrionQsoDialog>>();
+    // WSJT-X: its logged QSOs land here (console behaviour); the DX it is
+    // working fills an open Log QSO window.
+    QObject::connect(book, &OrionLogbook::wsjtxLogged, window,
+                     [window](qint64, const QString& call) {
+        if (window->statusBar()) {
+            window->statusBar()->showMessage(QObject::tr("Logged %1 (WSJT-X)").arg(call), 6000);
+        }
+    });
+    QObject::connect(book, &OrionLogbook::wsjtxDx, window,
+                     [dialog](const QString& call, const QString& grid, const QString& mode) {
+        if (*dialog && (*dialog)->isVisible()) {
+            (*dialog)->setFromWsjtx(call, grid, mode);
+        }
+    });
     QObject::connect(logAct, &QAction::triggered, window, [=] {
         if (!*dialog) {
             *dialog = new OrionQsoDialog(book, model, activeSlice, window);

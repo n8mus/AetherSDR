@@ -17,6 +17,7 @@ possible merge conflict when pulling from `upstream`.
 | `src/gui/ConnectionPanel.cpp` | Family normalisation (two places), the "Ten-Tec Orion (serial)" radio-type entry, the hint and placeholder text, and an `orion` branch at the top of `probeRadio()` that hands the device path to the session as `orion:<path>` and remembers it (`SerialDevice/<family>`); the serial-family table (`kSerialRadioFamilies`, Omni VII joins it at step 5) that fills the device box; `connectSerialRadio()` | The manual-connect page is how the operator picks the radio; a serial radio has nothing to probe |
 | `src/gui/MainWindow.cpp` | In the startup auto-connect block, under `AETHER_BACKEND_ORION`: a saved `<family>:/dev/...` serial connects directly via `connectSerialRadio()` | "Connect to last radio on start" waits for discovery or a routed IP, which a serial radio never gives |
 | `src/gui/MainWindow_Menus.cpp` | Under `AETHER_ORION_LOGBOOK`: the include of `gui/orion/OrionLogbookUi.h` and one call, `installOrionLogbook(...)`, right after the Tools menu is created | The station logbook's "Logbook" menu (Log QSO, ADIF, cqrlog switches) sits between Tools and View |
+| `src/gui/MainWindow_Wiring.cpp` | Under `AETHER_ORION_LOGBOOK`: the include of `gui/orion/OrionLogbookUi.h` and, in the spot-marker rebuild, `orionWorkedSpotColour()` when the DXCC colouring gave no colour | Spots coloured by worked-before status from the station log (red new, amber new band, green worked, grey confirmed) |
 | `src/gui/PhoneCwApplet.cpp` | `setSelectableMicInputs()` uses the model's mic-input list when it has one, instead of always FlexRadio's MIC/BAL/LINE/ACC/PC | Shows the Orion's MIC and PC; a Flex is unchanged (its list comes from `mic list`) |
 | `tests/tests.cmake` | `orion_cat_test`, `orion_spectrum_test`, `orion_rxaudio_test`, `orion_peripherals_test`, `orion_skimmer_test`, `orion_logbook_test` and `orion_backend_test` appended at the end | Upstream requires every test target to be declared there |
 | `tests/backend_seam_affinity_test.cpp` | `orion` added to the constructed-families list | The seam contract test covers the new backend too |
@@ -35,9 +36,10 @@ New files that upstream does not have (no merge risk):
   `FldigiCwEngine`, `BayesCwEngine`, `SkimServer`: ported from the Orion
   console, GPL-2.0-or-later, namespace and include paths only, plus the
   engine watching the LO instead of the dial; built with OpenMP when found)
-- `src/core/backends/orion/log/` (`LogDb`, `Adif`, `CqrlogSync`: ported
-  from the Orion console, GPL-2.0-or-later, with AetherSDR settings and
-  cty.dat; plus the glue `OrionLogbook`; needs Qt6::Sql)
+- `src/core/backends/orion/log/` (`LogDb`, `Adif`, `CqrlogSync`,
+  `LogbookIndex`, `WsjtxListener`: ported from the Orion console,
+  GPL-2.0-or-later, with AetherSDR settings and cty.dat; plus the glue
+  `OrionLogbook`; needs Qt6::Sql)
 - `src/gui/orion/OrionSetupPage.cpp/.h` (Radio Setup -> Orion) and
   `src/gui/orion/OrionLogbookUi.cpp/.h` (the Logbook menu and Log QSO
   window); both built into the AetherSDR target from `cmake/AetherOrion.cmake`

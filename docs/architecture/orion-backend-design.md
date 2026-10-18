@@ -657,9 +657,29 @@ Import/Export ADIF, the two cqrlog switches, the log file shown) and a Log
 QSO window: frequency/mode from the active slice, the call from a spot on
 that frequency, the UTC clock running until edited, country and zones from
 cty.dat, name/QTH/grid carried from the last QSO with the station, a
-near-duplicate question, the last 8 QSOs with the station. Later stages:
-the logbook browser, worked-before colouring of spots, uploads (LoTW, eQSL,
-QRZ, ClubLog, HRDLOG), WSJT-X auto-logging, the contest deck.
+near-duplicate question, the last 8 QSOs with the station.
+
+**Step 9, logbook stage 2 (2026-10-18, tested without cqrlog or WSJT-X
+running):**
+- Logbook browser (Logbook -> Logbook... Ctrl+Alt+B), the console's window
+  re-expressed in AetherSDR widgets: the whole log as a table (search by
+  call, sort, edit in place, delete with a question; bookkeeping columns
+  hidden), ADIF in/out, and the console's on-demand "check against cqrlog"
+  (lists QSOs cqrlog lacks; sends them only on the operator's yes).
+- Worked-before colouring: the console's LogbookIndex, ported, merges this
+  log with cqrlog's own worked/confirmed summary (mysql on its socket while
+  it runs, cached between runs, so confirmations made in cqrlog later
+  show). Spots take the console's colours (red never worked, amber other
+  band, green worked this band, grey confirmed) through AetherSDR's spot
+  marker colour, after DXCC colouring and below the operator's override;
+  markers redraw when the log changes. Menu toggle.
+- WSJT-X auto-logging: the console's WsjtxListener, ported (multicast
+  224.0.0.1:2237, port shared with AetherSDR's own WSJT-X client): every
+  "Logged ADIF" QSO lands in the log (country from cty.dat, resends
+  skipped), with a status-bar note; NOT mirrored to cqrlog (cqrlog takes
+  WSJT-X's QSOs itself, as with the console). The DX WSJT-X is working
+  fills an open, empty Log QSO window (call, grid, mode). Menu toggle.
+Later: uploads (LoTW, eQSL, QRZ, ClubLog, HRDLOG), the contest deck.
 
 **PAUSED 2026-10-17 (operator decision).** The fork runs the whole station
 on air (CAT, RSP2 pan and both receivers, split, TX on both paths, TUNE,
