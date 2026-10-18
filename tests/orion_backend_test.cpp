@@ -808,6 +808,33 @@ int main(int argc, char** argv)
     backend.connectRadio(req);
     check(waitFor([&] { return backend.isConnected(); }, 2000), "reconnected");
 
+    std::printf("-- Center Lock after Zero Beat: no echo loop (2026-10-18 crash)\n");
+    {
+        // Center Lock re-asks for its target from inside the echo whenever the
+        // echoed centre differs from it; Zero Beat leaves a fractional hertz.
+        const double target = 7'043'400.37;
+        int asks = 0;
+        double lastEchoMhz = 0.0;
+        const auto conn = QObject::connect(
+            &backend, &IRadioBackend::panCenterBandwidthChanged,
+            [&](const QString&, double centerMhz, double) {
+                lastEchoMhz = centerMhz;
+                if (centerMhz != target / 1e6 && ++asks < 50) {
+                    backend.setPanCenter(QStringLiteral("0x0"), target, IRadioBackend::PanCenterIntent::Range);
+                }
+            });
+        backend.setPanCenter(QStringLiteral("0x0"), target, IRadioBackend::PanCenterIntent::Range);
+        QObject::disconnect(conn);
+        check(asks == 0, "the echo is the exact centre asked for: Center Lock is satisfied");
+        check(lastEchoMhz == target / 1e6, "echoed centre equals the fractional target");
+        int echoes = 0;
+        const auto again = QObject::connect(&backend, &IRadioBackend::panCenterBandwidthChanged,
+                                            [&](const QString&, double, double) { ++echoes; });
+        backend.setPanCenter(QStringLiteral("0x0"), target, IRadioBackend::PanCenterIntent::Range);
+        QObject::disconnect(again);
+        check(echoes == 0, "asking again for the same centre echoes nothing");
+    }
+
     std::printf("-- disconnect\n");
     backend.disconnectRadio();
     check(disconnectedSpy.count() == 1, "disconnected() exactly once");

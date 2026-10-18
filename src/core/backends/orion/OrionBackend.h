@@ -309,6 +309,7 @@ private:
     QString m_patStatus;
     spectrum::View m_view;
     bool m_viewKnown = false;
+    double m_viewCentreEchoHz = 0.0;   // the centre exactly as last requested
     int m_panPoints = 1024;
     int m_activeSlice = 0;
 

@@ -1020,6 +1020,7 @@ void OrionBackend::publishPan()
     const qint64 half = m_view.spanHz / 2;
     if (!m_viewKnown || dial < m_view.centreHz - half || dial > m_view.centreHz + half) {
         m_view.centreHz = dial;
+        m_viewCentreEchoHz = static_cast<double>(m_view.centreHz);
         m_viewKnown = true;
     }
     emit panCenterBandwidthChanged(panId(), static_cast<double>(m_view.centreHz) / 1e6,
@@ -1075,6 +1076,7 @@ void OrionBackend::startSdr(const QVariantMap& params)
 
     if (!m_viewKnown) {
         m_view.centreHz = m_rx[0].hz.value_or(14'025'000);
+        m_viewCentreEchoHz = static_cast<double>(m_view.centreHz);
         m_viewKnown = true;
     }
     // Receive audio first: the RSP2's stream callback feeds both chains from
@@ -1543,9 +1545,19 @@ void OrionBackend::setPanCenter(const QString& panId, double hz, PanCenterIntent
     if (!m_connected || hz < static_cast<double>(kMinHz) || hz > static_cast<double>(kMaxHz)) {
         return;
     }
-    m_view.centreHz = std::llround(hz);
+    // Echo the centre EXACTLY as asked. The view is kept in whole hertz, and
+    // Center Lock compares the echo with its (fractional, after Zero Beat)
+    // target: a rounded echo never matched, so it asked again from inside this
+    // signal, forever, until the stack overflowed (2026-10-18 crash). And an
+    // unchanged view echoes nothing, so a re-ask cannot loop either.
+    const qint64 centreHz = std::llround(hz);
+    if (m_viewKnown && centreHz == m_view.centreHz && hz == m_viewCentreEchoHz) {
+        return;
+    }
+    m_view.centreHz = centreHz;
+    m_viewCentreEchoHz = hz;
     m_viewKnown = true;
-    emit panCenterBandwidthChanged(this->panId(), static_cast<double>(m_view.centreHz) / 1e6,
+    emit panCenterBandwidthChanged(this->panId(), hz / 1e6,
                                    static_cast<double>(m_view.spanHz) / 1e6);
     applyViewToSdr();
 }
