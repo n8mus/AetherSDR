@@ -684,7 +684,7 @@ int main(int argc, char** argv)
     txSpy.clear();
     QSignalSpy warnSpy(&backend, &IRadioBackend::configurationWarning);
     backend.setAtu(true, op, {});
-    check(waitFor([&] { return lastAtu() == QStringLiteral("TUNE_FAIL"); }, 5000),
+    check(waitFor([&] { return lastAtu() == QStringLiteral("TUNE_FAIL"); }, 8000),
           "no carrier from the radio: failed");
     check(!warnSpy.isEmpty(), "and the operator is told why");
     radio.tunerFitted = true;

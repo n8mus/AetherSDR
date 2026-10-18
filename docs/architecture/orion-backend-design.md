@@ -523,11 +523,14 @@ real transmission is the operator's):**
   *TTT; the radio keys its own carrier for the cycle and drops it when
   done. Status "in progress" until the radio is back in RX, then
   successful if the last TX meter SWR was 2.0 or less, failed if higher.
-  No carrier within 3 s = failed, with a notice (tuner not fitted or not
+  No carrier within 6 s = failed, with a notice (tuner not fitted or not
   enabled); a cycle past 30 s is stopped with *TU. Bypass = *TT0 (and
   stops a cycle). The tuner in/out state is read with ?TT on connect and in
   the slow poll wheel, so the front panel's change shows too. A cycle needs
   the TX coordinator's admission and never runs over our own key or TUNE.
+  On air 2026-10-17 (operator): the cycle works. The Orion started its
+  carrier 2.9 s after *TTT (so the start limit went from 3 s to 6 s), ran
+  about 3 s, and ended at SWR 1.0: reported successful.
 - On air (2026-10-17, operator at the radio, dummy load): MOX keys and
   unkeys the Orion by CAT, with the radio's TX/RX readback each time. The
   PC path works end to end: the Alesis mic (PCM2900) -> AetherSDR's TX

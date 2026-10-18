@@ -86,7 +86,8 @@ public:
     static constexpr int kTuneSettleMs = 1500;
     // ATU: the internal tuner's own cycle (*TTT). It must start transmitting
     // soon, and never runs longer than this (then *TU).
-    static constexpr int kAtuStartMs = 3000;
+    // On air the Orion took 2.9 s to start its carrier after *TTT.
+    static constexpr int kAtuStartMs = 6000;
     static constexpr int kMaxAtuMs = 30'000;
     static constexpr double kAtuMatchedSwr = 2.0;
     static constexpr int kTxGuardHangMs = 1500;    // RSP2 stays guarded after unkey
