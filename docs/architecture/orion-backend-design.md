@@ -605,6 +605,15 @@ now closed the way the RTL backend does it:
   back next session (FFT AVG had been sitting at 0).
 The console's own appearance is not brought over (fork rule 2).
 
+**PAUSED 2026-10-17 (operator decision).** The fork runs the whole station
+on air (CAT, RSP2 pan and both receivers, split, TX on both paths, TUNE,
+ATU, WinKeyer CW, sidetone). Open when it resumes: the 2D panadapter (the
+backend averaging in 3f529735 smears the waterfall, because AetherSDR builds
+waterfall rows from the same frames; the fix chosen in discussion is
+trace-only averaging in SpectrumWidget, or a staged port of the console's 2D
+behind a Display option with rule 2 amended), Omni VII (step 5), CW Delay,
+the rotor/Pat checks. Nothing pushed; the operator asks before any push.
+
 **Later steps, each one an operator on-air checkpoint:**
 
 | Step | Content | Operator check |
