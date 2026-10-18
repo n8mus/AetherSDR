@@ -7,7 +7,15 @@
 namespace AetherSDR::orion {
 
 OrionSkimmerFeed::OrionSkimmerFeed(skim::SkimmerEngine* engine)
-    : m_engine(engine)
+    : OrionSkimmerFeed([engine](const std::complex<float>* d, std::size_t n) {
+          engine->processIq(d, n);   // gated by its own enable
+      }, true)
+{
+}
+
+OrionSkimmerFeed::OrionSkimmerFeed(Consumer consumer, bool gateOnLayoutLo)
+    : m_consumer(std::move(consumer))
+    , m_gateOnLayoutLo(gateOnLayoutLo)
     , m_ring(kRingSamples)
 {
 }
@@ -46,7 +54,7 @@ void OrionSkimmerFeed::push(const std::complex<float>* d, std::size_t n, qint64 
     // Blocks the channels were not laid out for, or taken while paused, would
     // only decode as junk: they never enter the ring.
     if (m_paused.load(std::memory_order_relaxed)
-        || loHz != m_layoutLo.load(std::memory_order_relaxed)) {
+        || (m_gateOnLayoutLo && loHz != m_layoutLo.load(std::memory_order_relaxed))) {
         return;
     }
     {
@@ -86,7 +94,7 @@ void OrionSkimmerFeed::workerLoop()
             }
             m_fill -= kBlockSamples;
         }
-        m_engine->processIq(block.data(), block.size());   // gated by its own enable
+        m_consumer(block.data(), block.size());
         m_processed.fetch_add(kBlockSamples, std::memory_order_relaxed);
     }
 }

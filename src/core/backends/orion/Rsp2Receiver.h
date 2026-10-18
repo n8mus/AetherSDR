@@ -69,7 +69,11 @@ public:
     }
     // The CW skimmer's feed (step 8) gets every block too; same rules as the
     // audio sinks. It copies and returns: decoding runs on its own thread.
-    void setSkimmerSink(OrionSkimmerFeed* feed) { m_skimmerSink = feed; }
+    // A second feed takes the same blocks for the SKIM waterfall (stage 2).
+    void setSkimmerSink(OrionSkimmerFeed* feed, OrionSkimmerFeed* viewFeed = nullptr)
+    {
+        m_skimmerSinks = {feed, viewFeed};
+    }
     // The whole capture's spectrum (dB, DC-centred, bin n/2 = the LO) every
     // intervalMs for the skimmer's channel search; 0 = never. Any thread.
     void setFullSpectrumInterval(int intervalMs) { m_fullSpectrumMs.store(intervalMs); }
@@ -125,7 +129,7 @@ private:
     std::atomic<qint64> m_pendingLo{0};
     std::atomic<qint64> m_activeLo{0};
     std::array<OrionRxAudio*, 2> m_audioSinks{nullptr, nullptr};
-    OrionSkimmerFeed* m_skimmerSink = nullptr;
+    std::array<OrionSkimmerFeed*, 2> m_skimmerSinks{nullptr, nullptr};
     std::atomic<int> m_fullSpectrumMs{0};
     std::vector<std::complex<float>> m_scratch;   // stream-callback thread only
 

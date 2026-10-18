@@ -28,6 +28,7 @@ class OrionSkimmerFeed;
 namespace skim {
 class SkimmerEngine;
 class SkimServer;
+class SkimStft;
 }
 
 class OrionSkimmer : public QObject {
@@ -55,8 +56,17 @@ public:
     void setActive(bool active);
     [[nodiscard]] bool isActive() const;
 
-    // The RSP2 feed: hand this to Rsp2Receiver::setSkimmerSink.
+    // The RSP2 feeds: hand both to Rsp2Receiver::setSkimmerSink.
     [[nodiscard]] OrionSkimmerFeed* feed() const { return m_feed.get(); }
+    [[nodiscard]] OrionSkimmerFeed* viewFeed() const { return m_viewFeed.get(); }
+
+    // For the band map and SKIM waterfall windows (GUI thread).
+    [[nodiscard]] skim::SkimmerEngine* engine() const { return m_engine.get(); }
+    // The waterfall's fast STFT; null in a build without the RSP2.
+    [[nodiscard]] skim::SkimStft* stft() const { return m_stft; }
+    // The waterfall window open or closed: the STFT and its feed run only
+    // while it is open.
+    void setViewActive(bool active);
 
     // The whole capture's spectrum (dB, DC-centred) at loHz, with the dial
     // (VFO A), which picks the band's CW segment. Lays out the channels and
@@ -75,6 +85,10 @@ signals:
 private:
     std::unique_ptr<skim::SkimmerEngine> m_engine;
     std::unique_ptr<OrionSkimmerFeed> m_feed;
+    // A QObject child (built only with the RSP2): no unique_ptr, so a build
+    // without the SDRplay headers needs no SkimStft destructor.
+    skim::SkimStft* m_stft = nullptr;
+    std::unique_ptr<OrionSkimmerFeed> m_viewFeed;
     std::unique_ptr<skim::SkimServer> m_server;
     std::unique_ptr<CtyDatParser> m_cty;
     Settings m_settings;

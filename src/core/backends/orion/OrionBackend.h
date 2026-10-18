@@ -164,6 +164,11 @@ public:
                          quint64 requestId, const QVariant& arg = {}) override;
 
     HealthSnapshot healthSnapshot() const override;
+
+    // For the fork's skimmer windows (GUI thread): the skimmer while the
+    // RSP2 runs (else null), and the dial (VFO A) and RSP2 LO it works at.
+    [[nodiscard]] OrionSkimmer* skimmer() const { return m_skimmer.get(); }
+    void skimmerTuning(qint64& dialHz, qint64& loHz) const;
     LinkStats linkStats() const override;
 
 private:

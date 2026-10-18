@@ -10,6 +10,9 @@
 #ifdef AETHER_ORION_LOGBOOK
 #include "gui/orion/OrionLogbookUi.h"   // N8EM fork (FORK-NOTES.md)
 #endif
+#ifdef AETHER_BACKEND_ORION
+#include "gui/orion/OrionSkimmerUi.h"   // N8EM fork (FORK-NOTES.md)
+#endif
 #include "MainWindow.h"
 #include "models/CwDecodeSettings.h"
 #include "AetherBuildIdentity.h"   // generated at build time (#5804)
@@ -1093,6 +1096,10 @@ void MainWindow::buildMenuBar()
 #ifdef AETHER_ORION_LOGBOOK
     // N8EM fork: the station logbook's menu (FORK-NOTES.md).
     installOrionLogbook(this, menuBar(), &m_radioModel, [this] { return activeSlice(); });
+#endif
+#ifdef AETHER_BACKEND_ORION
+    // N8EM fork: the CW skimmer's band map and waterfall (FORK-NOTES.md).
+    installOrionSkimmerWindows(this, toolsMenu, &m_radioModel, [this] { return activeSlice(); });
 #endif
 
     auto* viewMenu = menuBar()->addMenu("&View");

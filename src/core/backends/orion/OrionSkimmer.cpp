@@ -4,6 +4,9 @@
 #include "core/backends/orion/OrionSkimmerFeed.h"
 #include "core/backends/orion/skimmer/SkimServer.h"
 #include "core/backends/orion/skimmer/SkimmerEngine.h"
+#ifdef AETHER_ORION_SDRPLAY
+#include "core/backends/orion/skimmer/SkimStft.h"
+#endif
 
 #include <QDir>
 #include <QFile>
@@ -77,12 +80,34 @@ OrionSkimmer::OrionSkimmer(double inputRate, const Settings& settings, QObject* 
 
     connect(m_engine.get(), &skim::SkimmerEngine::spotFound, this, &OrionSkimmer::spotFound);
     m_feed->start();
+#ifdef AETHER_ORION_SDRPLAY
+    // The SKIM waterfall's STFT, on its own feed thread (stage 2).
+    m_stft = new skim::SkimStft(inputRate, this);
+    skim::SkimStft* stft = m_stft;
+    m_viewFeed = std::make_unique<OrionSkimmerFeed>(
+        [stft](const std::complex<float>* d, std::size_t n) { stft->processIq(d, n); },
+        /*gateOnLayoutLo=*/false);
+    m_viewFeed->setPaused(true);
+    m_viewFeed->start();
+#endif
+}
+
+void OrionSkimmer::setViewActive(bool active)
+{
+    if (!m_stft || !m_viewFeed) {
+        return;
+    }
+    m_stft->setEnabled(active);
+    m_viewFeed->setPaused(!active);
 }
 
 OrionSkimmer::~OrionSkimmer()
 {
-    // The feed's worker calls into the engine: it stops first.
+    // The feeds' workers call into the engine and the STFT: they stop first.
     m_feed->stop();
+    if (m_viewFeed) {
+        m_viewFeed->stop();
+    }
     if (m_server) {
         m_server->stop();
     }

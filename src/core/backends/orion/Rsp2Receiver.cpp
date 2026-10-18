@@ -278,8 +278,10 @@ void Rsp2Receiver::onStream(const short* xi, const short* xq, unsigned int n, bo
             sink->push(m_scratch.data(), n, lo);
         }
     }
-    if (m_skimmerSink) {
-        m_skimmerSink->push(m_scratch.data(), n, lo);
+    for (OrionSkimmerFeed* feed : m_skimmerSinks) {
+        if (feed) {
+            feed->push(m_scratch.data(), n, lo);
+        }
     }
 }
 

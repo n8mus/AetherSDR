@@ -1131,7 +1131,7 @@ void OrionBackend::startSdr(const QVariantMap& params)
     // block (step 8).
     startSkimmer(params);
     if (m_skimmer) {
-        m_sdr->setSkimmerSink(m_skimmer->feed());
+        m_sdr->setSkimmerSink(m_skimmer->feed(), m_skimmer->viewFeed());
         connect(m_sdr.get(), &Rsp2Receiver::fullSpectrumReady, this,
                 [this](const std::vector<float>& db, qint64 lo) {
             if (m_skimmer) {
@@ -1477,6 +1477,17 @@ void OrionBackend::updateSkimmerGate()
         : m_radioTx ? tr("paused while transmitting")
         : !active ? tr("paused outside CW")
         : tr("decoding");
+}
+
+void OrionBackend::skimmerTuning(qint64& dialHz, qint64& loHz) const
+{
+    dialHz = m_rx[0].hz.value_or(0);
+    loHz = 0;
+#ifdef AETHER_ORION_SDRPLAY
+    if (m_sdr) {
+        loHz = m_sdr->lo();
+    }
+#endif
 }
 
 QVariantMap OrionBackend::skimmerState() const

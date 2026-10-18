@@ -16,6 +16,9 @@
 #include "core/backends/orion/OrionSkimmerFeed.h"
 #include "core/backends/orion/skimmer/SkimServer.h"
 #include "core/backends/orion/skimmer/SkimmerEngine.h"
+#ifdef AETHER_ORION_SDRPLAY
+#include "core/backends/orion/skimmer/SkimStft.h"
+#endif
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
@@ -331,6 +334,84 @@ void testGlue(const QString& ctyPath)
     check(sk.activeChannels() == 0, "off frees every channel");
 }
 
+#ifdef AETHER_ORION_SDRPLAY
+void testStft()
+{
+    std::printf("-- the SKIM waterfall's STFT (stage 2)\n");
+    constexpr double kRate = 1'000'000.0;
+    skim::SkimStft stft(kRate);
+    check(std::abs(stft.binHz() - 125000.0 / skim::SkimStft::kFft) < 1.0,
+          "~125 ksps after decimation, ~30 Hz bins");
+    // A steady carrier 3 kHz above the slice centre, the slice 40 kHz
+    // below the LO.
+    const double offset = -40000.0;
+    const double carrier = offset + 3000.0;
+    std::vector<std::complex<float>> iq(16384);
+    double ph = 0.0;
+    const auto fill = [&] {
+        for (auto& v : iq) {
+            v = {0.5f * float(std::cos(ph)), 0.5f * float(std::sin(ph))};
+            ph += 2.0 * M_PI * carrier / kRate;
+        }
+    };
+    fill();
+    stft.processIq(iq.data(), iq.size());
+    check(stft.takeColumns().empty(), "disabled: no columns");
+    stft.setEnabled(true);
+    const uint32_t gen = stft.setViewOffset(offset);
+    for (int i = 0; i < 20; ++i) {   // ~330 ms
+        fill();
+        stft.processIq(iq.data(), iq.size());
+    }
+    const auto cols = stft.takeColumns();
+    check(cols.size() > 20 && cols.size() < 60, "columns every ~8 ms");
+    bool onBin = !cols.empty();
+    for (const auto& c : cols) {
+        if (c.gen != gen) { onBin = false; break; }
+        const auto peak = std::max_element(c.db.begin(), c.db.end()) - c.db.begin();
+        const int want = skim::SkimStft::kFft / 2 + int(std::lround(3000.0 / stft.binHz()));
+        if (std::abs(int(peak) - want) > 1) { onBin = false; break; }
+    }
+    check(onBin, "the carrier sits 3 kHz above the slice centre, in every column");
+    const uint32_t gen2 = stft.setViewOffset(offset + 10000.0);
+    fill();
+    stft.processIq(iq.data(), iq.size());
+    bool fresh = true;
+    for (const auto& c : stft.takeColumns()) {
+        if (c.gen != gen2) fresh = false;
+    }
+    check(fresh && gen2 != gen, "a new view offset drops the old columns");
+}
+
+void testViewFeed(const QString& ctyPath)
+{
+    std::printf("-- the waterfall's own feed (stage 2)\n");
+    OrionSkimmer::Settings s;
+    s.channels = 4;
+    s.telnetPort = 0;
+    s.ctyPath = ctyPath;
+    OrionSkimmer sk(1'000'000.0, s);
+    check(sk.stft() != nullptr && sk.viewFeed() != nullptr, "the skimmer carries an STFT and its feed");
+    std::vector<std::complex<float>> iq(16384, {0.1f, 0.0f});
+    sk.viewFeed()->push(iq.data(), iq.size(), 7'080'000);
+    QElapsedTimer t;
+    t.start();
+    while (t.elapsed() < 200) QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+    check(sk.viewFeed()->processedSamples() == 0, "window closed: the feed is idle");
+    sk.setViewActive(true);
+    sk.stft()->setViewOffset(-40000.0);
+    for (int i = 0; i < 10; ++i) sk.viewFeed()->push(iq.data(), iq.size(), 7'080'000 + i * 1000);
+    t.restart();
+    while (t.elapsed() < 1500 && sk.viewFeed()->processedSamples() < 100'000) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+    }
+    check(sk.viewFeed()->processedSamples() >= 100'000,
+          "window open: every block reaches the STFT, whatever the LO");
+    check(!sk.stft()->takeColumns().empty(), "and columns come out");
+    sk.setViewActive(false);
+}
+#endif
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -339,6 +420,10 @@ int main(int argc, char** argv)
     testEngine();
     testServer();
     testGlue(QStringLiteral(ORION_TEST_CTY_DAT));
+#ifdef AETHER_ORION_SDRPLAY
+    testStft();
+    testViewFeed(QStringLiteral(ORION_TEST_CTY_DAT));
+#endif
     if (g_failures == 0) {
         std::printf("orion_skimmer_test: all checks passed\n");
         return 0;

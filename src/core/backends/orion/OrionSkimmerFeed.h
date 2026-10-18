@@ -16,6 +16,7 @@
 #include <complex>
 #include <condition_variable>
 #include <cstddef>
+#include <functional>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -26,6 +27,9 @@ namespace skim {
 class SkimmerEngine;
 }
 
+// Also drives the SKIM waterfall's STFT (stage 2): constructed with a
+// consumer instead of the engine, and without the LO gate (the STFT re-slices
+// on its own when the LO moves).
 class OrionSkimmerFeed {
 public:
     // ~1 s of 1 MS/s IQ; blocks of 10 ms reach the decoders.
@@ -33,6 +37,9 @@ public:
     static constexpr std::size_t kBlockSamples = 10'000;
 
     explicit OrionSkimmerFeed(skim::SkimmerEngine* engine);
+    using Consumer = std::function<void(const std::complex<float>*, std::size_t)>;
+    // gateOnLayoutLo false: every block passes (while not paused).
+    OrionSkimmerFeed(Consumer consumer, bool gateOnLayoutLo);
     ~OrionSkimmerFeed();
     OrionSkimmerFeed(const OrionSkimmerFeed&) = delete;
     OrionSkimmerFeed& operator=(const OrionSkimmerFeed&) = delete;
@@ -53,7 +60,8 @@ public:
 private:
     void workerLoop();
 
-    skim::SkimmerEngine* m_engine;
+    Consumer m_consumer;
+    bool m_gateOnLayoutLo = true;
     std::mutex m_lock;
     std::condition_variable m_wake;
     std::vector<std::complex<float>> m_ring;
