@@ -66,6 +66,12 @@ public:
     void setConnected(bool connected);
     void setStatusText(const QString& text);
     void probeRadio(const QString& ip, bool restoreSavedFamily = false);
+    // N8EM fork: connect a serial-CAT radio (startup auto-connect; a serial
+    // radio is never discovered or routed). `saved` is the radio's saved
+    // serial, "<family>:<device>", e.g. "orion:/dev/orion". Returns false when
+    // it is not a serial radio this build can drive.
+    bool connectSerialRadio(const QString& saved);
+    static bool isSerialRadioSerial(const QString& saved);
 
     // Radio families the "Connect by IP" page can dial. The manual page can no
     // longer guess: a FlexRadio answers TCP/4992 and a Hermes-Lite 2 answers

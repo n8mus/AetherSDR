@@ -63,6 +63,28 @@ constexpr const char* kRecentManualIpsKey = "RecentConnectByIpAddresses";
 // Last radio type chosen on the "Connect by IP" page. Defaults to flex so an
 // existing install keeps the behaviour it had before the selector existed.
 constexpr const char* kManualRadioFamilyKey = "ConnectByIpRadioFamily";
+// N8EM fork: serial-CAT radios. Each family remembers its own device from
+// its last connect ("SerialDevice/<family>"), defaulting to the station's
+// udev name. The Omni VII joins this table with its backend (step 5).
+struct SerialRadioFamily {
+    const char* family;
+    const char* defaultDevice;
+};
+constexpr SerialRadioFamily kSerialRadioFamilies[] = {
+    {"orion", "/dev/orion"},
+};
+const SerialRadioFamily* serialRadioFamily(const QString& family)
+{
+    for (const SerialRadioFamily& f : kSerialRadioFamilies) {
+        if (family == QLatin1String(f.family))
+            return &f;
+    }
+    return nullptr;
+}
+QString serialDeviceKey(const QString& family)
+{
+    return QStringLiteral("SerialDevice/%1").arg(family);
+}
 
 const char* kHintLabelStyle =
     "QLabel { color: {{color.canon.muted}}; font-size: 11px; background: transparent; border: none; }";
@@ -2628,6 +2650,18 @@ void ConnectionPanel::updateManualFamilyHints()
         }
     }
 
+    // N8EM fork: a serial radio's box holds a device, not an address. Fill
+    // it with the last one used (the station's udev name the first time),
+    // unless it already holds a device path the operator typed.
+    if (const SerialRadioFamily* serial = serialRadioFamily(family);
+        serial && m_manualIpEdit
+        && !m_manualIpEdit->text().trimmed().startsWith(QLatin1String("/dev/"))) {
+        m_manualIpEdit->setText(AppSettings::instance()
+                                    .value(serialDeviceKey(family),
+                                           QString::fromLatin1(serial->defaultDevice))
+                                    .toString());
+    }
+
     if (m_manualHintLabel) {
         const QString passwordStorageHint = IcomCredentials::persistentStoreAvailable()
             ? QStringLiteral(
@@ -2765,6 +2799,27 @@ void ConnectionPanel::onManualIpChanged(const QString& ip)
     updateActionState();
 }
 
+bool ConnectionPanel::isSerialRadioSerial(const QString& saved)
+{
+    const qsizetype colon = saved.indexOf(QLatin1Char(':'));
+    return colon > 0 && serialRadioFamily(saved.left(colon))
+        && saved.mid(colon + 1).startsWith(QLatin1String("/dev/"));
+}
+
+bool ConnectionPanel::connectSerialRadio(const QString& saved)
+{
+    if (!isSerialRadioSerial(saved))
+        return false;
+    if (m_connected)
+        return true;
+    const qsizetype colon = saved.indexOf(QLatin1Char(':'));
+    const QString device = saved.mid(colon + 1).trimmed();
+    setManualFamily(saved.left(colon));
+    m_manualIpEdit->setText(device);
+    probeRadio(device);
+    return true;
+}
+
 void ConnectionPanel::onManualConnectClicked()
 {
     const QString ip = m_manualIpEdit->text().trimmed();
@@ -2841,6 +2896,9 @@ void ConnectionPanel::probeRadio(const QString& ip, bool restoreSavedFamily)
         info.name     = QStringLiteral("Ten-Tec Orion");
         info.nickname = info.name;
         info.serial   = QStringLiteral("orion:%1").arg(trimmedIp);
+        auto& settings = AppSettings::instance();
+        settings.setValue(serialDeviceKey(info.family), trimmedIp);
+        settings.save();
         resetManualConnectButton();
         finishManualProbe(info);
         return;

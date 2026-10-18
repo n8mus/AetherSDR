@@ -2521,6 +2521,18 @@ MainWindow::MainWindow(QWidget* parent)
         showConnectionDialog();
     });
 
+#ifdef AETHER_BACKEND_ORION
+    // N8EM fork: the saved radio is on serial CAT ("orion:/dev/orion"). It is
+    // never discovered or routed, so connect it directly (FORK-NOTES.md).
+    if (ConnectionPanel::isSerialRadioSerial(startupLastSerial) && autoConnectToLastRadio
+        && !m_userDisconnected) {
+        QTimer::singleShot(500, this, [this, startupLastSerial] {
+            if (!m_userDisconnected && !m_radioModel.isConnected())
+                m_connPanel->connectSerialRadio(startupLastSerial);
+        });
+    }
+#endif
+
     // Probe saved routed radio on startup
     {
         auto& s = AppSettings::instance();
