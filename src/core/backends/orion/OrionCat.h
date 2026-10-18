@@ -118,6 +118,12 @@ inline constexpr double kS9Dbm = -73.0;
 // ?UM / ?US answer @UM<b>, @US<b>, @UB<b> (both) or @UM<b>S<b>.
 [[nodiscard]] QByteArray setAfVolume(Rx rx, int percent);
 [[nodiscard]] QByteArray queryAfVolume(Rx rx);
+// *UC<left><right><speaker>: which receiver each headphone side and the
+// speaker hear, each 'M' (main, VFO A), 'S' (sub, VFO B) or 'B' (both).
+// ?UC answers @UC<l><r><s>. As the reference program sets it.
+[[nodiscard]] QByteArray setAudioRouting(char left, char right, char speaker);
+[[nodiscard]] QByteArray queryAudioRouting();
+[[nodiscard]] bool isRoutingLetter(char c);
 
 // *CV: the radio's CW sidetone volume, 0..100 (0 = silent), as the
 // reference program sets it. ?CV answers @CV<n>.
@@ -166,11 +172,14 @@ struct TunerReply { bool in; };
 struct SidetoneReply { int volume; };
 // @UM / @US / @UB / @UM<m>S<s>: AF volume in percent, per receiver present.
 struct AfVolumeReply { std::optional<int> mainPercent; std::optional<int> subPercent; };
+// @UC<l><r><s>: audio routing, each 'M', 'S' or 'B'.
+struct AudioRoutingReply { char left; char right; char speaker; };
 
 using Reply = std::variant<FrequencyReply, ModeReply, BandwidthReply, PbtReply,
                            AgcReply, RfGainReply, AttenuatorReply, PreampReply,
                            SMeterReply, TxMeterReply, VfoAssignmentReply, VfoLockReply,
-                           TxLevelReply, TunerReply, SidetoneReply, AfVolumeReply>;
+                           TxLevelReply, TunerReply, SidetoneReply, AfVolumeReply,
+                           AudioRoutingReply>;
 
 // Decode one line (CR already stripped). nullopt for anything that is not a
 // well-formed, in-range reply this decoder knows; replies glued together on

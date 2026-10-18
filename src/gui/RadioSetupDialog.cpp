@@ -17,6 +17,9 @@
 #include "core/AutomationBridgeSettings.h"
 #include "core/backends/hl2/Hl2Discovery.h"   // HL2 custom-nickname settings key
 #include "core/backends/hl2/Hl2FreqCal.h"     // manual frequency calibration (Calibration page)
+#ifdef AETHER_BACKEND_ORION
+#include "gui/orion/OrionAudioPage.h"   // N8EM fork (FORK-NOTES.md)
+#endif
 #include "core/NetworkSettings.h"
 #include "core/backends/flex/PanadapterStream.h"
 #include "core/KiwiSdrManager.h"
@@ -1422,6 +1425,20 @@ RadioSetupDialog::RadioSetupDialog(RadioModel* model, AudioEngine* audio,
         if (m_hl2HardwareReseed)
             m_hl2HardwareReseed();
     });
+#ifdef AETHER_BACKEND_ORION
+    // N8EM fork: the Orion's own phones/speaker routing (FORK-NOTES.md).
+    // Shown while a backend answering the "orion" extension is connected.
+    QTreeWidgetItem* orionAudioItem = addPage(radioCategory, QStringLiteral("Orion Audio"),
+        QStringLiteral("orion ten-tec tentec headphones phones speaker left right routing "
+                       "main sub vfo audio"),
+        [this] { return buildOrionAudioPage(m_model); });
+    setNavigationItemHidden(orionAudioItem,
+                            !(m_model && m_model->backendDeclaresExtension(QStringLiteral("orion"))));
+    connect(m_model, &RadioModel::connectionStateChanged, this, [this, orionAudioItem] {
+        settleNavigationLayout(m_navigation, setNavigationItemHidden(orionAudioItem,
+            !(m_model && m_model->backendDeclaresExtension(QStringLiteral("orion")))));
+    });
+#endif
     // Droop Correction page — mirrors the Calibration page immediately above:
     // gated on the CAPABILITY (RadioCapabilities::hostDroopCalibration, the
     // ANAN-G2 today), with the ANAN namespace enforced at the request boundary.

@@ -614,8 +614,9 @@ program). Mute = 0 with the level kept; a level moved while muted waits.
 ?UM / ?US are read on connect, in the slow wheel and when PC Audio turns
 off, so the radio's own knobs show on the sliders; each mode keeps its own
 level. Disconnect gives a muted receiver its level back (stand-alone
-rule). Balance stays RSP2-only; the radio's phones/speaker routing (*UC)
-is not wired. PC Audio reaches the backend through the "orion" extension
+rule). Balance stays RSP2-only. The radio's phones/speaker routing (*UC:
+left, right, speaker each A, B or both) is on Radio Setup -> Orion Audio
+(the fork's own page, AetherSDR widgets), read with ?UC on connect. PC Audio reaches the backend through the "orion" extension
 namespace (audio.pc / audio.pc.state; hook in RadioModel, FORK-NOTES).
 Also 2026-10-18: Center Lock + Zero Beat crash fixed (pan centre echo
 loop); serial device remembered and startup auto-connect for serial

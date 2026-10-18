@@ -33,6 +33,10 @@ else()
         src/core/backends/orion/OrionCwDaemon.h
         src/core/backends/orion/OrionPatMonitor.cpp
         src/core/backends/orion/OrionPatMonitor.h)
+    # The fork's own GUI page (Radio Setup -> Orion Audio).
+    target_sources(AetherSDR PRIVATE
+        src/gui/orion/OrionAudioPage.cpp
+        src/gui/orion/OrionAudioPage.h)
 
     # RSP2 panadapter and receive audio (steps 2-3). Needs the SDRplay API HEADERS from the
     # operator's install and fftw3f. The library itself is dlopen()ed at run

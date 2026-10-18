@@ -593,6 +593,8 @@ void OrionBackend::onLine(const QByteArray& line)
             if (m_atuCycle) {
                 m_atuLastSwr = r.swr;
             }
+        } else if constexpr (std::is_same_v<T, AudioRoutingReply>) {
+            m_audioRouting = std::array<char, 3>{r.left, r.right, r.speaker};
         } else if constexpr (std::is_same_v<T, AfVolumeReply>) {
             for (Rx rx : {Rx::Main, Rx::Sub}) {
                 const std::optional<int> pct = rx == Rx::Main ? r.mainPercent : r.subPercent;
@@ -814,6 +816,7 @@ void OrionBackend::startupQueries()
     send(queryCwSidetoneVolume());
     send(queryAfVolume(Rx::Main));
     send(queryAfVolume(Rx::Sub));
+    send(queryAudioRouting());
     send(queryMicGain());
     send(querySpeechProcessor());
     send(queryAuxGain());
@@ -2485,6 +2488,46 @@ void OrionBackend::setCwSpeed(int wpm)
 void OrionBackend::invokeExtension(const QString& ns, const QString& verb,
                                    quint64 requestId, const QVariant& arg)
 {
+    // The radio's phones/speaker routing (*UC), for the Radio Setup page.
+    // Each of left/right/speaker is "M", "S" or "B".
+    if (ns == QLatin1String("orion") && verb == QLatin1String("audio.routing.get")) {
+        QVariantMap m;
+        if (m_audioRouting) {
+            m.insert(QStringLiteral("left"), QString(QLatin1Char((*m_audioRouting)[0])));
+            m.insert(QStringLiteral("right"), QString(QLatin1Char((*m_audioRouting)[1])));
+            m.insert(QStringLiteral("speaker"), QString(QLatin1Char((*m_audioRouting)[2])));
+        }
+        if (requestId != 0) {
+            emit extensionResult(requestId, m);
+        }
+        return;
+    }
+    if (ns == QLatin1String("orion") && verb == QLatin1String("audio.routing.set")) {
+        const QVariantMap m = arg.toMap();
+        const auto letter = [&](const char* key, int index) {
+            const QString v = m.value(QLatin1String(key)).toString();
+            if (v.size() == 1 && isRoutingLetter(v.at(0).toLatin1())) {
+                return v.at(0).toLatin1();
+            }
+            return m_audioRouting ? (*m_audioRouting)[static_cast<std::size_t>(index)] : 'B';
+        };
+        const QByteArray cmd = setAudioRouting(letter("left", 0), letter("right", 1),
+                                               letter("speaker", 2));
+        if (!m_connected || cmd.isEmpty()) {
+            if (requestId != 0) {
+                emit extensionError(requestId, tr("The Orion is not connected."));
+            }
+            return;
+        }
+        qCInfo(lcOrion) << "Orion: audio routing" << cmd;
+        m_audioRouting = std::array<char, 3>{cmd[3], cmd[4], cmd[5]};
+        send(cmd);
+        send(queryAudioRouting());
+        if (requestId != 0) {
+            emit extensionResult(requestId, true);
+        }
+        return;
+    }
     // PC Audio: the click (audio.pc) and the state at connect (audio.pc.state).
     if (ns == QLatin1String("orion")
         && (verb == QLatin1String("audio.pc") || verb == QLatin1String("audio.pc.state"))) {

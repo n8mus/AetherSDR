@@ -10,6 +10,7 @@ possible merge conflict when pulling from `upstream`.
 | `CMakeLists.txt` | One line, `include(cmake/AetherOrion.cmake)`, after the `Qt6SerialPort_FOUND` block | Every fork build rule lives in that one file |
 | `src/models/RadioModel.cpp` | `#include` of `OrionBackend.h` and one `orion` branch in `makeBackend()`, both under `AETHER_BACKEND_ORION` | The factory is the only place a family string picks a backend |
 | `src/models/RadioModel.cpp` | In `publishCapabilities()`: a backend with no command plane that declares `hasSelectableMicInputs` gets its mic-source list from `capabilities().extensions["micInputs"]` | The Phone applet's MIC/PC choice; upstream fills that list only from the Flex `mic list` command. No family check |
+| `src/gui/RadioSetupDialog.cpp` | Under `AETHER_BACKEND_ORION`: the include of `gui/orion/OrionAudioPage.h` and an "Orion Audio" page in the Radio category, shown while a backend declaring the `orion` namespace is connected | The Orion's phones/speaker routing (`*UC`) needs a place in AetherSDR's own settings; the page itself lives in the fork's file |
 | `src/models/RadioModel.cpp` | In `setPcAudioEnabled()` and `notePcAudioEnabled()`, under `AETHER_BACKEND_ORION`: a backend declaring the `orion` namespace gets `audio.pc` / `audio.pc.state` | PC Audio decides whether slice volume and mute drive the RSP2 audio or the Orion's own AF (`*UM`/`*US`); upstream passes it to the `icom` namespace only |
 | `src/gui/ConnectionPanel.h` | `kFamilyOrion` constant; `connectSerialRadio()` / `isSerialRadioSerial()` | Same pattern as the other families; startup auto-connect for serial radios |
 | `src/gui/ConnectionPanel.cpp` | Family normalisation (two places), the "Ten-Tec Orion (serial)" radio-type entry, the hint and placeholder text, and an `orion` branch at the top of `probeRadio()` that hands the device path to the session as `orion:<path>` and remembers it (`SerialDevice/<family>`); the serial-family table (`kSerialRadioFamilies`, Omni VII joins it at step 5) that fills the device box; `connectSerialRadio()` | The manual-connect page is how the operator picks the radio; a serial radio has nothing to probe |
@@ -27,6 +28,8 @@ New files that upstream does not have (no merge risk):
   `OrionTxAudio`, the station peripherals `OrionWinKeyer`, `OrionRotor`
   (with `OrionRotctld`), `OrionCwDaemon`, `OrionPatMonitor`, and for the
   RSP2 `Rsp2Receiver`, `OrionSpectrum`, `OrionRxAudio`, `SdrPlayApi`)
+- `src/gui/orion/OrionAudioPage.cpp/.h` (Radio Setup -> Orion Audio; built
+  into the AetherSDR target from `cmake/AetherOrion.cmake`)
 - `tests/orion_cat_test.cpp`, `tests/orion_backend_test.cpp`,
   `tests/orion_spectrum_test.cpp`, `tests/orion_rxaudio_test.cpp`,
   `tests/orion_peripherals_test.cpp`

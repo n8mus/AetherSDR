@@ -110,6 +110,7 @@ public:
     int monitor = 30;
     int sidetone = 40;
     int afMain = 102;   // bytes: 40 %
+    QByteArray routing = "MSB";   // phones L, phones R, speaker
     int afSub = 51;     // 20 %
     QByteArray txMeter = "@STF040R002S384";   // 40 W fwd, 2 W ref, SWR 1.5
     bool tunerFitted = true;
@@ -169,6 +170,8 @@ private:
             } else {
                 reply("@SRM" + QByteArray::number(sMain) + "S" + QByteArray::number(sSub));
             }
+        } else if (q == "UC") {
+            reply("@UC" + routing);
         } else if (q == "UM") {
             reply("@UM" + QByteArray::number(afMain));
         } else if (q == "US") {
@@ -241,6 +244,8 @@ private:
             mainAgc = cmd[4];
         } else if (cmd.startsWith("*KV") && cmd.size() == 6) {
             kv = cmd.mid(3);
+        } else if (cmd.startsWith("*UC") && cmd.size() == 6) {
+            routing = cmd.mid(3);
         } else if (cmd.startsWith("*UM")) {
             afMain = cmd.mid(3).toInt();
         } else if (cmd.startsWith("*US")) {
@@ -890,6 +895,42 @@ int main(int argc, char** argv)
         backend.connectRadio(req);
         check(waitFor([&] { return backend.isConnected(); }, 2000), "reconnected");
         backend.invokeExtension(QStringLiteral("orion"), QStringLiteral("audio.pc"), 0, true);
+    }
+
+    std::printf("-- phones/speaker routing (*UC)\n");
+    {
+        QVariantMap got;
+        bool replied = false;
+        const auto conn = QObject::connect(&backend, &IRadioBackend::extensionResult,
+                                           [&](quint64 id, const QVariant& r) {
+                                               if (id == 77) { got = r.toMap(); replied = true; }
+                                           });
+        check(waitFor([&] {
+                  replied = false;
+                  backend.invokeExtension(QStringLiteral("orion"),
+                                          QStringLiteral("audio.routing.get"), 77);
+                  return replied && got.value("left") == "M" && got.value("right") == "S"
+                      && got.value("speaker") == "B";
+              }, 3000),
+              "routing read from the radio: phones L = A, R = B, speaker = both");
+        radio.sets.clear();
+        QVariantMap set;
+        set.insert(QStringLiteral("speaker"), QStringLiteral("S"));
+        backend.invokeExtension(QStringLiteral("orion"), QStringLiteral("audio.routing.set"), 0, set);
+        check(waitFor([&] { return radio.routing == "MSS"; }, 1000),
+              "speaker to VFO B only: *UCMSS, the phones left as they were");
+        set.clear();
+        set.insert(QStringLiteral("left"), QStringLiteral("X"));
+        radio.sets.clear();
+        backend.invokeExtension(QStringLiteral("orion"), QStringLiteral("audio.routing.set"), 0, set);
+        QElapsedTimer g;
+        g.start();
+        while (g.elapsed() < 200) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+            usleep(2000);
+        }
+        check(radio.routing == "MSS", "an invalid choice changes nothing");
+        QObject::disconnect(conn);
     }
 
     std::printf("-- Center Lock after Zero Beat: no echo loop (2026-10-18 crash)\n");

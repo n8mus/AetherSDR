@@ -416,6 +416,19 @@ QByteArray setAfVolume(Rx rx, int percent)
     return QByteArray(rx == Rx::Main ? "*UM" : "*US")
         + QByteArray::number(std::clamp(percent, 0, 100) * 255 / 100);
 }
+bool isRoutingLetter(char c) { return c == 'M' || c == 'S' || c == 'B'; }
+QByteArray setAudioRouting(char left, char right, char speaker)
+{
+    if (!isRoutingLetter(left) || !isRoutingLetter(right) || !isRoutingLetter(speaker)) {
+        return {};
+    }
+    QByteArray out("*UC");
+    out += left;
+    out += right;
+    out += speaker;
+    return out;
+}
+QByteArray queryAudioRouting() { return QByteArrayLiteral("?UC"); }
 QByteArray queryAfVolume(Rx rx) { return rx == Rx::Main ? QByteArrayLiteral("?UM") : QByteArrayLiteral("?US"); }
 
 QByteArray queryVfoLock(Rx rx)
@@ -434,6 +447,14 @@ std::optional<Reply> decodeReply(const QByteArray& line)
     qint64 v = 0;
     switch (line[1]) {
     case 'U': {
+        // @UC<l><r><s>: audio routing
+        if (line[2] == 'C') {
+            if (line.size() >= 6 && isRoutingLetter(line[3]) && isRoutingLetter(line[4])
+                && isRoutingLetter(line[5])) {
+                return AudioRoutingReply{line[3], line[4], line[5]};
+            }
+            return std::nullopt;
+        }
         // @UM<b> / @US<b> / @UB<b> / @UM<b>S<b>: AF volume, a byte on the wire
         if (line.size() < 4 || !parseLeadingInt(line.mid(3), v) || v < 0 || v > 255) {
             return std::nullopt;

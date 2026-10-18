@@ -340,6 +340,8 @@ private:
     std::array<int, 2> m_radioVolume{-1, -1};      // percent; the unmuted level
     std::array<bool, 2> m_radioMuted{false, false};
     static constexpr int kRadioVolumeFallback = 40;   // ~ the radio's *U100
+    // *UC, the radio's own: phones left, phones right, speaker ('M'/'S'/'B').
+    std::optional<std::array<char, 3>> m_audioRouting;
     std::array<QByteArray, 2> m_mixPending;
     std::array<std::optional<bool>, 2> m_inCapture;
     int m_cwPitchHz = 600;

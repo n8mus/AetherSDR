@@ -112,6 +112,14 @@ static void testReplies()
     check(as<AfVolumeReply>(both) && as<AfVolumeReply>(both)->mainPercent == 40
               && as<AfVolumeReply>(both)->subPercent == 20, "@UM102S51 = main 40 %, sub 20 %");
     check(!decodeReply("@UM300"), "AF volume out of range");
+    check(setAudioRouting('M', 'S', 'B') == "*UCMSB" && setAudioRouting('M', 'X', 'B').isEmpty()
+              && queryAudioRouting() == "?UC",
+          "audio routing commands; an invalid letter sends nothing");
+    const auto uc = decodeReply("@UCSMB");
+    check(as<AudioRoutingReply>(uc) && as<AudioRoutingReply>(uc)->left == 'S'
+              && as<AudioRoutingReply>(uc)->right == 'M' && as<AudioRoutingReply>(uc)->speaker == 'B',
+          "@UCSMB = phones L sub, R main, speaker both");
+    check(!decodeReply("@UCMX"), "malformed routing ignored");
     check(setTuner(true) == "*TT1" && setTuner(false) == "*TT0" && startTunerCycle() == "*TTT"
               && queryTuner() == "?TT",
           "tuner commands as the reference program sends them");
