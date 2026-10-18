@@ -95,6 +95,16 @@ OrionBackend::OrionBackend(QObject* parent)
     m_tuneTimer.setInterval(kMaxTuneMs);
     connect(&m_tuneTimer, &QTimer::timeout, this, [this] { endTune(/*timedOut=*/true); });
 
+    m_atuTimer.setSingleShot(true);
+    m_atuTimer.setInterval(kMaxAtuMs);
+    connect(&m_atuTimer, &QTimer::timeout, this, [this] {
+        if (m_atuCycle) {
+            send(orion::setPtt(false));
+            finishAtuCycle("TUNE_ABORTED",
+                           tr("ATU tune cycle stopped after %1 s.").arg(kMaxAtuMs / 1000));
+        }
+    });
+
     m_txGuardReleaseTimer.setSingleShot(true);
     m_txGuardReleaseTimer.setInterval(kTxGuardHangMs);
     connect(&m_txGuardReleaseTimer, &QTimer::timeout, this, [this] {
@@ -118,6 +128,7 @@ OrionBackend::~OrionBackend()
     m_txFailsafeTimer.stop();
     m_txGuardReleaseTimer.stop();
     m_tuneTimer.stop();
+    m_atuTimer.stop();
     // Never leave the radio keyed, and leave it usable stand-alone.
     leaveRadioSafe();
     stopPeripherals();
@@ -194,7 +205,8 @@ RadioCapabilities OrionBackend::capabilities() const
     c.voxControl = std::nullopt;
     c.txMonitorControl = std::nullopt;
     c.hasTxFilterControls = false;
-    c.hasTuner = false;
+    // The internal tuner (*TT): in, bypass and the radio's own tune cycle.
+    c.hasTuner = true;
     c.hasTunerMemories = false;
     // TUNE switches the radio to FM for its carrier, so it works from CW too.
     c.hasCwTune = true;
@@ -401,6 +413,7 @@ void OrionBackend::closeLink()
     m_txFailsafeTimer.stop();
     m_txGuardReleaseTimer.stop();
     m_tuneTimer.stop();
+    m_atuTimer.stop();
     if (m_txAudio) {
         m_txAudio->close();
     }
@@ -564,6 +577,16 @@ void OrionBackend::onLine(const QByteArray& line)
             emit meterUpdate(QStringLiteral("TX:FWDPWR"), r.forwardWatts);
             emit meterUpdate(QStringLiteral("TX:REFPWR"), r.reflectedWatts);
             emit meterUpdate(QStringLiteral("TX:SWR"), r.swr);
+            if (m_atuCycle) {
+                m_atuLastSwr = r.swr;
+            }
+        } else if constexpr (std::is_same_v<T, TunerReply>) {
+            if (m_tunerIn != r.in) {
+                m_tunerIn = r.in;
+                TransmitDelta d;
+                d.atuEnabled = r.in;
+                emit transmitChanged(d);
+            }
         } else if constexpr (std::is_same_v<T, TxLevelReply>) {
             TransmitDelta d;
             switch (r.kind) {
@@ -743,6 +766,7 @@ void OrionBackend::startupQueries()
     send(queryVfoLock(Rx::Main));
     send(queryVfoLock(Rx::Sub));
     send(queryTxPower());
+    send(queryTuner());
     send(queryMicGain());
     send(querySpeechProcessor());
     send(queryAuxGain());
@@ -1735,6 +1759,79 @@ bool OrionBackend::tuneHoldsReadback() const
     return m_tuning || (m_tuneEndedMs >= 0 && nowMs() - m_tuneEndedMs < kTuneSettleMs);
 }
 
+void OrionBackend::setAtu(bool start, const AetherSDR::TxCoordinator::Operation& operation,
+                          const AetherSDR::TxCoordinator::Completion& completion)
+{
+    if (!start) {
+        // Bypass: never refused. A cycle in progress is stopped first.
+        if (m_atuCycle && m_port) {
+            send(orion::setPtt(false));
+            finishAtuCycle("TUNE_ABORTED");
+        }
+        if (m_connected) {
+            qCInfo(lcOrion) << "Orion: ATU bypassed (*TT0)";
+            send(orion::setTuner(false));
+            send(queryTuner());
+            m_tunerIn = false;    // the @TT readback confirms it
+            publishAtu("TUNE_BYPASS");
+        }
+        completion.finish();
+        return;
+    }
+    // The cycle keys the transmitter: it needs an admitted operation, and
+    // never runs on top of our own key or TUNE carrier.
+    if (!TxCoordinator::Command{operation, true}.permitsDispatch(TxCoordinator::monotonicMs())
+        || !m_connected || m_atuCycle || m_keyIntent || m_tuning) {
+        completion.finish();
+        return;
+    }
+    // The reference program's tune with the internal tuner: tuner in, then
+    // *TTT; the radio makes its own carrier and drops it when matched.
+    qCInfo(lcOrion) << "Orion: ATU tune cycle (*TT1, *TTT)";
+    m_atuCycle = true;
+    m_atuSawTx = false;
+    m_atuLastSwr = -1.0;
+    send(orion::setTuner(true));
+    send(orion::startTunerCycle());
+    m_tunerIn = true;
+    m_atuTimer.start();
+    publishAtu("TUNE_IN_PROGRESS");
+    const quint64 generation = m_generation;
+    QTimer::singleShot(kAtuStartMs, this, [this, generation] {
+        if (generation == m_generation && m_atuCycle && !m_atuSawTx) {
+            finishAtuCycle("TUNE_FAIL",
+                           tr("The Orion did not start a tune cycle. Is its internal tuner "
+                              "fitted and enabled?"));
+        }
+    });
+    completion.finish();
+}
+
+void OrionBackend::finishAtuCycle(const char* status, const QString& warning)
+{
+    if (!m_atuCycle) {
+        return;
+    }
+    m_atuCycle = false;
+    m_atuTimer.stop();
+    qCInfo(lcOrion) << "Orion: ATU tune cycle ended:" << status << "last SWR" << m_atuLastSwr;
+    publishAtu(status);
+    send(queryTuner());
+    if (!warning.isEmpty()) {
+        emit configurationWarning(warning);
+    }
+}
+
+void OrionBackend::publishAtu(const char* status)
+{
+    TransmitDelta d;
+    d.atuStatusRaw = QString::fromLatin1(status);
+    if (m_tunerIn) {
+        d.atuEnabled = *m_tunerIn;
+    }
+    emit transmitChanged(d);
+}
+
 void OrionBackend::unkey()
 {
     if (m_tuning) {
@@ -1768,6 +1865,11 @@ void OrionBackend::leaveRadioSafe()
         }
         send(orion::setPtt(false));
     }
+    // An ATU cycle keys the radio by itself: stop it before we let go.
+    if (m_atuCycle) {
+        m_atuCycle = false;
+        send(orion::setPtt(false));
+    }
     // A carrier cut short by a disconnect still gives back mode and power.
     if (m_tuning) {
         m_tuning = false;
@@ -1787,8 +1889,19 @@ void OrionBackend::leaveRadioSafe()
 void OrionBackend::setRadioTx(bool on)
 {
     qCInfo(lcOrion) << "Orion: radio reports" << (on ? "TRANSMIT" : "RECEIVE")
-                    << (on && !m_keyIntent ? "(keyed from the radio, not by AetherSDR)" : "");
+                    << (m_atuCycle ? "(its ATU tune cycle)"
+                        : on && !m_keyIntent ? "(keyed from the radio, not by AetherSDR)" : "");
     m_radioTx = on;
+    if (m_atuCycle) {
+        if (on) {
+            m_atuSawTx = true;
+        } else if (m_atuSawTx) {
+            // The radio dropped its own carrier: the cycle is over.
+            const bool matched = m_atuLastSwr > 0.0 && m_atuLastSwr <= kAtuMatchedSwr;
+            finishAtuCycle(m_atuLastSwr <= 0.0 ? "TUNE_OK"
+                           : matched ? "TUNE_SUCCESSFUL" : "TUNE_FAIL");
+        }
+    }
     TransmitDelta d;
     d.mox = on;
     emit transmitChanged(d);

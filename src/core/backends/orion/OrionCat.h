@@ -109,6 +109,13 @@ inline constexpr double kS9Dbm = -73.0;
 [[nodiscard]] QByteArray queryAuxGain();
 [[nodiscard]] QByteArray querySpeechProcessor();
 
+// The internal antenna tuner: *TT1 in, *TT0 out (bypass), *TTT runs a tune
+// cycle (the radio keys its own carrier and drops it when matched). ?TT
+// answers @TT1 / @TT0.
+[[nodiscard]] QByteArray setTuner(bool in);
+[[nodiscard]] QByteArray startTunerCycle();
+[[nodiscard]] QByteArray queryTuner();
+
 // ?AL / ?BL (undocumented, live-verified): front-panel lock state. The lock
 // only freezes the knob; CAT still tunes, so the backend enforces it.
 [[nodiscard]] QByteArray queryVfoLock(Rx rx);
@@ -138,10 +145,13 @@ struct TxLevelReply {
     int value;
 };
 
+// @TT1 / @TT0: the internal tuner in or bypassed.
+struct TunerReply { bool in; };
+
 using Reply = std::variant<FrequencyReply, ModeReply, BandwidthReply, PbtReply,
                            AgcReply, RfGainReply, AttenuatorReply, PreampReply,
                            SMeterReply, TxMeterReply, VfoAssignmentReply, VfoLockReply,
-                           TxLevelReply>;
+                           TxLevelReply, TunerReply>;
 
 // Decode one line (CR already stripped). nullopt for anything that is not a
 // well-formed, in-range reply this decoder knows; replies glued together on

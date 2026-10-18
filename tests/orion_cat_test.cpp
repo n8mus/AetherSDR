@@ -81,6 +81,15 @@ static void testReplies()
     check(!decodeReply("@RMM9"), "mode code out of range");
     check(!decodeReply("@RXM0"), "unknown receiver letter");
 
+    const auto tunerIn = decodeReply("@TT1");
+    check(as<TunerReply>(tunerIn) && as<TunerReply>(tunerIn)->in, "@TT1 = tuner in");
+    const auto tunerOut = decodeReply("@TT0");
+    check(as<TunerReply>(tunerOut) && !as<TunerReply>(tunerOut)->in, "@TT0 = tuner bypassed");
+    check(!decodeReply("@TT2"), "tuner state out of range");
+    check(setTuner(true) == "*TT1" && setTuner(false) == "*TT0" && startTunerCycle() == "*TTT"
+              && queryTuner() == "?TT",
+          "tuner commands as the reference program sends them");
+
     const auto w = decodeReply("@RSF9000");
     check(as<BandwidthReply>(w) && as<BandwidthReply>(w)->hz == 9000
               && as<BandwidthReply>(w)->rx == Rx::Sub,

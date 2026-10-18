@@ -63,7 +63,7 @@ QList<QByteArray> OrionPollScheduler::next(qint64 nowMs)
         return frequency(mainMoving ? Rx::Main : Rx::Sub, nowMs);
     }
     if (tick % kSlowWheelEveryTicks == 3) {
-        const int item = m_slowWheel++ % 6;
+        const int item = m_slowWheel++ % 7;
         switch (item) {
         case 0:
             return {queryVfoAssignment()};
@@ -75,8 +75,11 @@ QList<QByteArray> OrionPollScheduler::next(qint64 nowMs)
             return {queryRfGain(Rx::Main)};
         case 4:
             return {queryAttenuator(Rx::Main)};
-        default:
+        case 5:
             return {queryPreamp(Rx::Main)};
+        default:
+            // The front panel can switch the tuner in or out.
+            return {queryTuner()};
         }
     }
     return {querySMeter()};

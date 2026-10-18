@@ -398,6 +398,9 @@ QByteArray setSpeechProcessor(int level)
 }
 
 QByteArray queryTxPower() { return QByteArrayLiteral("?TP"); }
+QByteArray setTuner(bool in) { return in ? QByteArrayLiteral("*TT1") : QByteArrayLiteral("*TT0"); }
+QByteArray startTunerCycle() { return QByteArrayLiteral("*TTT"); }
+QByteArray queryTuner() { return QByteArrayLiteral("?TT"); }
 QByteArray queryMicGain() { return QByteArrayLiteral("?TM"); }
 QByteArray queryAuxGain() { return QByteArrayLiteral("?TI"); }
 QByteArray querySpeechProcessor() { return QByteArrayLiteral("?TS"); }
@@ -470,6 +473,10 @@ std::optional<Reply> decodeReply(const QByteArray& line)
         }
         return std::nullopt;
     case 'T': {
+        // @TT1 / @TT0: the internal tuner
+        if (line.size() == 4 && line[2] == 'T' && (line[3] == '0' || line[3] == '1')) {
+            return TunerReply{line[3] == '1'};
+        }
         // @TP / @TM / @TI <0..100>, @TS <0..9>
         if (line.size() < 4 || !parseLeadingInt(line.mid(3), v)) {
             return std::nullopt;

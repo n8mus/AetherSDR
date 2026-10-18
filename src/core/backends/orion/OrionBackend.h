@@ -84,6 +84,11 @@ public:
     // readback is held this long after, while the restore lands.
     static constexpr int kMaxTuneMs = 15'000;
     static constexpr int kTuneSettleMs = 1500;
+    // ATU: the internal tuner's own cycle (*TTT). It must start transmitting
+    // soon, and never runs longer than this (then *TU).
+    static constexpr int kAtuStartMs = 3000;
+    static constexpr int kMaxAtuMs = 30'000;
+    static constexpr double kAtuMatchedSwr = 2.0;
     static constexpr int kTxGuardHangMs = 1500;    // RSP2 stays guarded after unkey
     static constexpr int kDefaultRadioMic = 51;    // reference program's voice defaults
     static constexpr int kDefaultRadioProcessor = 2;
@@ -140,6 +145,8 @@ public:
     void setTune(bool on, int tunePowerPercent, const AetherSDR::TxCoordinator::Operation& operation,
                  const AetherSDR::TxCoordinator::Completion& completion = {}) override;
     void setTunePower(int percent) override;
+    void setAtu(bool start, const AetherSDR::TxCoordinator::Operation& operation,
+                const AetherSDR::TxCoordinator::Completion& completion = {}) override;
     void setTxPower(int percent) override;
     void setMicGain(int level) override;
     void submitTxAudio(const QByteArray& int16Stereo, int sampleRateHz, TxAudioSource source,
@@ -201,6 +208,8 @@ private:
     void endTune(bool timedOut);
     void restoreAfterTune();
     [[nodiscard]] bool tuneHoldsReadback() const;
+    void finishAtuCycle(const char* status, const QString& warning = {});
+    void publishAtu(const char* status);
     void leaveRadioSafe();
     void updateTxAudioGate();
     void onTxFailsafe();
@@ -276,6 +285,12 @@ private:
     std::optional<Mode> m_preTuneMode;
     qint64 m_tuneEndedMs = -1;
     QTimer m_tuneTimer;
+    // ATU: the radio keys itself for its tune cycle; we watch its readback.
+    bool m_atuCycle = false;
+    bool m_atuSawTx = false;
+    double m_atuLastSwr = -1.0;
+    std::optional<bool> m_tunerIn;      // @TT, the radio's own state
+    QTimer m_atuTimer;
 
     std::unique_ptr<OrionWinKeyer> m_keyer;
     std::vector<TxCoordinator::Completion> m_cwCompletions;

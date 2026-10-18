@@ -516,8 +516,18 @@ real transmission is the operator's):**
   drive (readback held while tuning and 1.5 s after). No PC audio while
   the carrier is up. Disconnect or exit mid-tune unkeys and restores
   (stand-alone rule). TUNE power changes apply live. Offered in CW too,
-  since the carrier is FM. With the internal tuner the reference program
-  ran *TTT instead; the Orion's ATU is not wired here.
+  since the carrier is FM. On air 2026-10-17 (operator): the TUNE carrier
+  keys, and the log shows mode and drive (7%) restored after each one.
+- ATU (built 2026-10-17, bench-tested on the fake radio only): the
+  internal tuner, as the reference program drives it. ATU = *TT1 then
+  *TTT; the radio keys its own carrier for the cycle and drops it when
+  done. Status "in progress" until the radio is back in RX, then
+  successful if the last TX meter SWR was 2.0 or less, failed if higher.
+  No carrier within 3 s = failed, with a notice (tuner not fitted or not
+  enabled); a cycle past 30 s is stopped with *TU. Bypass = *TT0 (and
+  stops a cycle). The tuner in/out state is read with ?TT on connect and in
+  the slow poll wheel, so the front panel's change shows too. A cycle needs
+  the TX coordinator's admission and never runs over our own key or TUNE.
 - On air (2026-10-17, operator at the radio, dummy load): MOX keys and
   unkeys the Orion by CAT, with the radio's TX/RX readback each time. The
   PC path works end to end: the Alesis mic (PCM2900) -> AetherSDR's TX

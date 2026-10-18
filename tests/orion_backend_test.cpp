@@ -12,6 +12,7 @@
 #include <QElapsedTimer>
 #include <QSignalSpy>
 #include <QSocketNotifier>
+#include <QTimer>
 
 #include <cmath>
 #include <cstdio>
@@ -105,6 +106,10 @@ public:
     bool aLocked = false;
     bool bLocked = false;
     bool keyed = false;
+    bool tunerIn = false;
+    QByteArray txMeter = "@STF040R002S384";   // 40 W fwd, 2 W ref, SWR 1.5
+    bool tunerFitted = true;
+    int tunerCycles = 0;
     int txPower = 50;
     int micGain = 51;
     int procLevel = 2;
@@ -156,10 +161,12 @@ private:
         } else if (q == "S") {
             // Keyed, the Orion answers with its TX meter (the PTT readback).
             if (keyed) {
-                reply("@STF040R002S384");   // 40 W fwd, 2 W ref, SWR 1.5
+                reply(txMeter);
             } else {
                 reply("@SRM" + QByteArray::number(sMain) + "S" + QByteArray::number(sSub));
             }
+        } else if (q == "TT") {
+            reply(tunerIn ? "@TT1" : "@TT0");
         } else if (q == "TP") {
             reply("@TP" + QByteArray::number(txPower));
         } else if (q == "TM") {
@@ -222,6 +229,20 @@ private:
             mainAgc = cmd[4];
         } else if (cmd.startsWith("*KV") && cmd.size() == 6) {
             kv = cmd.mid(3);
+        } else if (cmd == "*TT1") {
+            tunerIn = tunerFitted;
+        } else if (cmd == "*TT0") {
+            tunerIn = false;
+        } else if (cmd == "*TTT") {
+            // The tuner's own cycle: the radio keys itself, then drops it.
+            if (tunerFitted) {
+                ++tunerCycles;
+                keyed = true;
+                const int cycle = tunerCycles;
+                QTimer::singleShot(800, [this, cycle] {
+                    if (tunerCycles == cycle) keyed = false;
+                });
+            }
         } else if (cmd == "*TK") {
             keyed = true;    // nothing radiates: this is a pty
         } else if (cmd == "*TU") {
@@ -611,6 +632,72 @@ int main(int argc, char** argv)
     backend.connectRadio(req);
     check(waitFor([&] { return backend.isConnected(); }, 2000), "reconnected");
     backend.requestTransmitControl(mic);
+
+    std::printf("-- ATU: the internal tuner's own cycle\n");
+    check(backend.capabilities().hasTuner, "the Orion offers its internal tuner");
+    const auto lastAtu = [&]() -> QString {
+        for (int i = txSpy.size() - 1; i >= 0; --i) {
+            const auto d = txSpy.at(i).at(0).value<TransmitDelta>();
+            if (d.atuStatusRaw) return *d.atuStatusRaw;
+        }
+        return {};
+    };
+    const auto lastAtuEnabled = [&]() -> std::optional<bool> {
+        for (int i = txSpy.size() - 1; i >= 0; --i) {
+            const auto d = txSpy.at(i).at(0).value<TransmitDelta>();
+            if (d.atuEnabled) return d.atuEnabled;
+        }
+        return std::nullopt;
+    };
+    radio.sets.clear();
+    txSpy.clear();
+    backend.setAtu(true, {}, {});
+    QElapsedTimer atuGuard;
+    atuGuard.start();
+    while (atuGuard.elapsed() < 300) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        usleep(2000);
+    }
+    check(!radio.sets.contains("*TTT"), "no tune cycle without an operation from the TX coordinator");
+    backend.setAtu(true, op, {});
+    check(waitFor([&] { return radio.sets.contains("*TTT"); }, 500), "ATU runs the radio's tune cycle");
+    check(radio.sets.indexOf("*TT1") >= 0 && radio.sets.indexOf("*TT1") < radio.sets.indexOf("*TTT"),
+          "tuner in, then *TTT (the reference program's order)");
+    check(lastAtu() == QStringLiteral("TUNE_IN_PROGRESS") && lastAtuEnabled() == true,
+          "status: in progress, tuner in");
+    check(!radio.sets.contains("*TK"), "the radio keys itself: no *TK from us");
+    check(waitFor([&] { return lastAtu() == QStringLiteral("TUNE_SUCCESSFUL"); }, 4000),
+          "the radio drops its carrier at SWR 1.5: successful");
+    check(radio.tunerIn, "the tuner is left in");
+
+    std::printf("-- ATU: no match\n");
+    radio.txMeter = "@STF040R020S768";   // SWR 3.0
+    txSpy.clear();
+    backend.setAtu(true, op, {});
+    check(waitFor([&] { return lastAtu() == QStringLiteral("TUNE_FAIL"); }, 4000),
+          "the cycle ends at SWR 3.0: failed");
+    radio.txMeter = "@STF040R002S384";
+
+    std::printf("-- ATU: no internal tuner\n");
+    radio.tunerFitted = false;
+    radio.tunerIn = false;
+    txSpy.clear();
+    QSignalSpy warnSpy(&backend, &IRadioBackend::configurationWarning);
+    backend.setAtu(true, op, {});
+    check(waitFor([&] { return lastAtu() == QStringLiteral("TUNE_FAIL"); }, 5000),
+          "no carrier from the radio: failed");
+    check(!warnSpy.isEmpty(), "and the operator is told why");
+    radio.tunerFitted = true;
+
+    std::printf("-- ATU bypass\n");
+    radio.tunerIn = true;
+    radio.sets.clear();
+    txSpy.clear();
+    backend.setAtu(false, op, {});
+    check(waitFor([&] { return !radio.tunerIn && radio.sets.contains("*TT0"); }, 500),
+          "bypass switches the tuner out (*TT0)");
+    check(lastAtu() == QStringLiteral("TUNE_BYPASS") && lastAtuEnabled() == false,
+          "status: bypassed, tuner out");
 
     std::printf("-- failsafe\n");
     radio.sets.clear();
