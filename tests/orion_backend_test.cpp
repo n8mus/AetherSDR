@@ -337,6 +337,10 @@ int main(int argc, char** argv)
           "connected() after the first CAT reply");
     check(backend.capabilities().family == QLatin1String("orion"), "family is orion");
     check(backend.capabilities().canTransmit, "the Orion can transmit (step 6)");
+    check(backend.capabilities().backendPanAveraging
+              && backend.capabilities().backendPanAveraging->clientPersistsAveraging
+              && backend.capabilities().backendPanAveraging->msPerAverageStep == 10,
+          "FFT AVG is 10 ms per step and the client keeps it between sessions");
     check(!backend.capabilities().hostModulates && backend.capabilities().takesTxAudioOverSeam,
           "the radio modulates; PC audio crosses the seam");
     check(backend.capabilities().hasSelectableMicInputs,

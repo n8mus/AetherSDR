@@ -50,10 +50,10 @@ static void testViewRules()
 static void testWindowAndPeak()
 {
     SpectrumProcessor p;
-    p.setAverage(0.0);
+    p.setAverage(0);
     // A full-scale complex tone 100 kHz below the LO.
     const auto iq = tone(-100'000.0, 1.0, p.size());
-    const std::vector<float>& db = p.process(iq.data());
+    const std::vector<float>& db = p.process(iq.data(), 0.04, 14'285'000);
     int peakBin = 0;
     for (int k = 1; k < p.size(); ++k) {
         if (db[static_cast<std::size_t>(k)] > db[static_cast<std::size_t>(peakBin)]) {
@@ -83,17 +83,75 @@ static void testWindowAndPeak()
 
 static void testAveraging()
 {
-    SpectrumProcessor p;
-    p.setAverage(0.9);
-    const auto loud = tone(-50'000.0, 1.0, p.size());
-    const auto quiet = tone(-50'000.0, 0.01, p.size());
-    const int bin = p.size() / 2 + static_cast<int>(std::lround(-50'000.0 / kBinHz));
-    (void)p.process(loud.data());
-    const float afterQuiet = p.process(quiet.data())[static_cast<std::size_t>(bin)];
-    check(afterQuiet > -5.0f, "heavy averaging holds the previous level");
-    p.resetAverage();
-    const float reset = p.process(quiet.data())[static_cast<std::size_t>(bin)];
-    check(std::fabs(reset - (-40.0f)) < 1.0f, "after a retune reset the new level shows at once");
+    const qint64 lo = 14'285'000;
+    const auto loud = tone(-50'000.0, 1.0, kFftSize);
+    const auto quiet = tone(-50'000.0, 0.01, kFftSize);   // 40 dB down
+    const auto bin = static_cast<std::size_t>(kFftSize / 2 + std::lround(-50'000.0 / kBinHz));
+
+    {
+        SpectrumProcessor p;
+        p.setAverage(0);
+        (void)p.process(loud.data(), 0.04, lo);
+        const float off = p.process(quiet.data(), 0.04, lo)[bin];
+        check(std::fabs(off - (-40.0f)) < 1.0f, "FFT AVG 0: no averaging, the new level at once");
+    }
+    {
+        SpectrumProcessor p;
+        p.setAverage(100);   // one second
+        (void)p.process(loud.data(), 0.04, lo);
+        const float held = p.process(quiet.data(), 0.04, lo)[bin];
+        check(held > -5.0f, "FFT AVG 100: 40 ms into a 1 s average the old level still holds");
+        p.resetAverage();
+        const float reset = p.process(quiet.data(), 0.04, lo)[bin];
+        check(std::fabs(reset - (-40.0f)) < 1.0f, "after a reset the new level shows at once");
+    }
+
+    // The average is a TIME constant: 0.5 s of quiet at 20 fps and at 4 fps
+    // land on the same level.
+    const auto afterHalfSecond = [&](double frameSeconds) {
+        SpectrumProcessor p;
+        p.setAverage(50);   // 0.5 s
+        (void)p.process(loud.data(), frameSeconds, lo);
+        float v = 0.0f;
+        const int frames = static_cast<int>(std::lround(0.5 / frameSeconds));
+        for (int i = 0; i < frames; ++i) {
+            v = p.process(quiet.data(), frameSeconds, lo)[bin];
+        }
+        return v;
+    };
+    const float fast = afterHalfSecond(0.05);
+    const float slow = afterHalfSecond(0.25);
+    check(std::fabs(fast - slow) < 0.5f, "the same decay at 20 fps and at 4 fps");
+    // One time constant of power averaging: loud * e^-1 dominates, about -4.3 dB.
+    check(fast < -2.0f && fast > -7.0f, "one time constant later the power has fallen by ~1/e");
+
+    // Wt Avg averages dB, so after one time constant it sits near the
+    // midpoint in dB (about -25 dB), well below the power average.
+    {
+        SpectrumProcessor p;
+        p.setAverage(50);
+        p.setWeightedAverage(true);
+        (void)p.process(loud.data(), 0.04, lo);
+        float v = 0.0f;
+        for (int i = 0; i < 13; ++i) {
+            v = p.process(quiet.data(), 0.04, lo)[bin];
+        }
+        check(v < fast - 10.0f, "Wt Avg averages dB: a fading signal reads lower than in power");
+    }
+
+    // A retune slides the history on the RF grid: a carrier at a fixed RF
+    // frequency keeps its averaged level when the LO moves 10 kHz.
+    {
+        SpectrumProcessor p;
+        p.setAverage(100);
+        (void)p.process(loud.data(), 0.04, lo);
+        const double shiftHz = 10.0 * kBinHz * 16;   // a whole number of bins
+        const auto moved = tone(-50'000.0 - shiftHz, 0.01, kFftSize);   // same RF, now quiet
+        const auto movedBin = static_cast<std::size_t>(
+            kFftSize / 2 + std::lround((-50'000.0 - shiftHz) / kBinHz));
+        const float v = p.process(moved.data(), 0.04, lo + static_cast<qint64>(shiftHz))[movedBin];
+        check(v > -5.0f, "after a retune the same RF bin keeps its history");
+    }
 }
 
 int main()

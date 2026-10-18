@@ -591,6 +591,20 @@ cwdaemon (not used here), Pat's warning, and a rotor control in AetherSDR
 Not ported (still optional): PowerMaster, skimmer and DX-cluster server,
 cqrlog ADIF sync, Not1MM log reader.
 
+**Panadapter display (2026-10-17, bench-tested only):** the operator found
+the pan weaker than the console's. Nothing of AetherSDR's Display panel was
+missing (schemes incl. Purple, waterfall gain/black level, FFT controls);
+it was mostly set poorly (FFT AVG 0, waterfall gain 29). Three real gaps,
+now closed the way the RTL backend does it:
+- FFT AVG is AetherSDR's shared time-based averager
+  (`SpectrumTemporalAverage`): 10 ms per step, 0 off, 100 = 1 s, the same
+  at any FPS; history slides on the RF grid across a retune (a gain/LO
+  change reported by the RSP2 still restarts it).
+- Wt Avg reaches it (off: average power; on: average dB).
+- `backendPanAveraging` with client persistence, so both settings come
+  back next session (FFT AVG had been sitting at 0).
+The console's own appearance is not brought over (fork rule 2).
+
 **Later steps, each one an operator on-air checkpoint:**
 
 | Step | Content | Operator check |

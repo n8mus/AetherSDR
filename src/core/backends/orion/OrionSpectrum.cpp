@@ -65,8 +65,8 @@ SpectrumProcessor::SpectrumProcessor(int fftSize)
     : m_size(fftSize)
     , m_window(blackmanHarris(fftSize))
     , m_fft(std::make_unique<Fft>())
-    , m_avg(static_cast<std::size_t>(fftSize), 0.0)
     , m_db(static_cast<std::size_t>(fftSize), -200.0f)
+    , m_temporal(static_cast<std::size_t>(fftSize))
 {
     double sum = 0.0;
     for (float w : m_window) {
@@ -89,7 +89,8 @@ SpectrumProcessor::~SpectrumProcessor()
     fftwf_free(m_fft->out);
 }
 
-const std::vector<float>& SpectrumProcessor::process(const std::complex<float>* iq)
+const std::vector<float>& SpectrumProcessor::process(const std::complex<float>* iq,
+                                                     double elapsedSeconds, qint64 loHz)
 {
     for (int i = 0; i < m_size; ++i) {
         const float w = m_window[static_cast<std::size_t>(i)];
@@ -100,8 +101,10 @@ const std::vector<float>& SpectrumProcessor::process(const std::complex<float>* 
 
     // A full-scale complex tone gives |X| = windowGain: that is 0 dBFS.
     const double norm = 1.0 / (m_windowGain * m_windowGain);
-    const double keep = std::clamp(m_average, 0.0, 0.98);
     const int half = m_size / 2;
+    // Power in, when power is what gets averaged; dB otherwise (no average,
+    // or Wt Avg). The estimator turns power into dB on the way out.
+    const bool power = m_average > 0 && !m_weighted;
     for (int k = 0; k < m_size; ++k) {
         // fftshift: output bin k holds FFT bin (k + n/2) mod n, so the LO
         // lands on k = n/2.
@@ -109,11 +112,14 @@ const std::vector<float>& SpectrumProcessor::process(const std::complex<float>* 
         const double re = m_fft->out[src][0];
         const double im = m_fft->out[src][1];
         const double p = (re * re + im * im) * norm;
-        double& a = m_avg[static_cast<std::size_t>(k)];
-        a = m_haveAverage ? keep * a + (1.0 - keep) * p : p;
-        m_db[static_cast<std::size_t>(k)] = static_cast<float>(10.0 * std::log10(std::max(a, 1e-20)));
+        m_db[static_cast<std::size_t>(k)] =
+            power ? static_cast<float>(p)
+                  : static_cast<float>(10.0 * std::log10(std::max(p, 1e-20)));
     }
-    m_haveAverage = true;
+    const double stepHz = static_cast<double>(kCaptureHz) / m_size;
+    const double originHz = static_cast<double>(loHz) - static_cast<double>(kCaptureHz) / 2.0;
+    (void)m_temporal.processFrame(m_db, m_average, m_weighted, elapsedSeconds, originHz, stepHz,
+                                  0, m_db.size());
     return m_db;
 }
 

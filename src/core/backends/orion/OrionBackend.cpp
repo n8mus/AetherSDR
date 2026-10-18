@@ -17,6 +17,7 @@ class OrionRxAudio {};
 #include "core/backends/orion/OrionRotor.h"
 #include "core/backends/orion/OrionTxAudio.h"
 #include "core/backends/orion/OrionWinKeyer.h"
+#include "core/dsp/SpectrumTemporalAverage.h"
 
 #include <QLoggingCategory>
 #include <QSerialPort>
@@ -167,6 +168,15 @@ RadioCapabilities OrionBackend::capabilities() const
     c.family = familyName();
     c.manufacturer = QStringLiteral("Ten-Tec");
     c.model = QStringLiteral("Orion 565/566");
+    // The RSP2 spectrum is computed here, with AetherSDR's shared time-based
+    // averager (as the RTL backend): FFT AVG and Wt Avg reach it, and the
+    // client keeps both between sessions. Wording as the RTL backend's.
+    c.backendPanAveraging = BackendPanAveraging{SpectrumTemporalAverage::kMsPerStep, true,
+        tr("Spectrum averaging time: 10 ms per step; 0 is off and 100 is one second. Higher "
+           "values smooth changes but blur short signals. The decay time stays the same when "
+           "FPS changes."),
+        tr("Off averages signal power. On averages dB levels for a smoother trace, but varying "
+           "signals and noise read lower. Both modes use the FFT AVG time setting.")};
 
     // Two fixed receivers; slices are neither created nor removed.
     c.canCreateSlices = false;
@@ -1574,6 +1584,18 @@ void OrionBackend::setPanAverage(const QString& panId, int average)
     }
 #else
     Q_UNUSED(average);
+#endif
+}
+
+void OrionBackend::setPanWeightedAverage(const QString& panId, bool on)
+{
+    Q_UNUSED(panId);
+#ifdef AETHER_ORION_SDRPLAY
+    if (m_sdr) {
+        m_sdr->setWeightedAverage(on);
+    }
+#else
+    Q_UNUSED(on);
 #endif
 }
 

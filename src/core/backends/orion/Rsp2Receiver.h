@@ -77,6 +77,7 @@ public:
     void setView(const spectrum::View& view, int points);
     void setFrameRate(int fps);
     void setAverage(int percent);
+    void setWeightedAverage(bool on);
 
     // Counters for health and the delivery-rate check (any thread).
     [[nodiscard]] quint64 samplesReceived() const { return m_samples.load(); }
@@ -122,7 +123,8 @@ private:
     spectrum::View m_view;
     int m_points = 1024;
     int m_frameIntervalMs = 40;
-    double m_average = 0.5;
+    int m_average = 0;
+    bool m_weightedAverage = false;
 
     std::thread m_worker;
     std::atomic<bool> m_stopWorker{false};

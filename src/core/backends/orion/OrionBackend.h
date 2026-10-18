@@ -126,6 +126,7 @@ public:
     void setPanBandwidth(const QString& panId, double hz) override;
     void setPanFrameRate(const QString& panId, int fps) override;
     void setPanAverage(const QString& panId, int average) override;
+    void setPanWeightedAverage(const QString& panId, bool on) override;
     void setPanPixelWidth(const QString& panId, int pixels) override;
     void setPanRfGain(const QString& panId, int gainDb) override;
     void setPanPreamp(const QString& panId, int step) override;

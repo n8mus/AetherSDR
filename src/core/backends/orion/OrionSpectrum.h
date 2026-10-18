@@ -15,8 +15,11 @@
 //
 // Frequencies here are absolute RF in Hz.
 
+#include "core/dsp/SpectrumTemporalAverage.h"
+
 #include <QtGlobal>
 
+#include <algorithm>
 #include <complex>
 #include <memory>
 #include <vector>
@@ -68,7 +71,10 @@ struct View {
                                             const View& view, int points);
 
 // IQ -> averaged power spectrum in dB relative to full scale. Owns the FFT
-// plan; not thread-safe (one per worker).
+// plan; not thread-safe (one per worker). Averaging is AetherSDR's shared
+// time-based estimator (as the RTL backend uses it): FFT AVG is a time
+// constant of 10 ms per step, so it is the same at any frame rate, and a
+// retune slides the history by whole bins on the RF grid.
 class SpectrumProcessor {
 public:
     explicit SpectrumProcessor(int fftSize = kFftSize);
@@ -76,13 +82,17 @@ public:
     SpectrumProcessor(const SpectrumProcessor&) = delete;
     SpectrumProcessor& operator=(const SpectrumProcessor&) = delete;
 
-    // average: 0 = none, approaching 1 = heavy (exponential, linear power).
-    void setAverage(double average) { m_average = average; }
-    void resetAverage() { m_haveAverage = false; }
+    // The Display panel's FFT AVG (0 = off, 100 = one second) and Wt Avg
+    // (off: average power; on: average dB, a smoother trace).
+    void setAverage(int steps) { m_average = std::clamp(steps, 0, 100); }
+    void setWeightedAverage(bool on) { m_weighted = on; }
+    void resetAverage() { m_temporal.reset(); }
     [[nodiscard]] int size() const { return m_size; }
 
-    // iq must hold size() samples. Returns size() values, DC-centred.
-    const std::vector<float>& process(const std::complex<float>* iq);
+    // iq must hold size() samples taken at loHz, elapsedSeconds after the
+    // previous frame. Returns size() values in dB, DC-centred.
+    const std::vector<float>& process(const std::complex<float>* iq, double elapsedSeconds,
+                                      qint64 loHz);
 
 private:
     struct Fft;
@@ -90,10 +100,10 @@ private:
     std::vector<float> m_window;
     double m_windowGain = 1.0;
     std::unique_ptr<Fft> m_fft;
-    std::vector<double> m_avg;
     std::vector<float> m_db;
-    double m_average = 0.5;
-    bool m_haveAverage = false;
+    int m_average = 0;
+    bool m_weighted = false;
+    AetherSDR::SpectrumTemporalAverage m_temporal;
 };
 
 }  // namespace AetherSDR::orion::spectrum

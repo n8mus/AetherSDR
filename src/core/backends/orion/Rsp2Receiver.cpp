@@ -222,7 +222,13 @@ void Rsp2Receiver::setFrameRate(int fps)
 void Rsp2Receiver::setAverage(int percent)
 {
     std::lock_guard lock(m_viewLock);
-    m_average = std::clamp(percent, 0, 100) / 100.0 * 0.95;
+    m_average = std::clamp(percent, 0, 100);
+}
+
+void Rsp2Receiver::setWeightedAverage(bool on)
+{
+    std::lock_guard lock(m_viewLock);
+    m_weightedAverage = on;
 }
 
 void Rsp2Receiver::streamCallback(short* xi, short* xq, sdrplay_api_StreamCbParamsT* params,
@@ -302,18 +308,22 @@ void Rsp2Receiver::workerLoop()
     std::vector<std::complex<float>> block(static_cast<std::size_t>(processor.size()));
     const quint64 generation = m_generation;
     quint64 lastSamples = 0;
+    // The average is a time constant, so it needs the time between frames.
+    auto lastFrame = std::chrono::steady_clock::now();
 
     while (!m_stopWorker) {
         int intervalMs = 40;
         spectrum::View view;
         int points = 1024;
-        double average = 0.5;
+        int average = 0;
+        bool weighted = false;
         {
             std::lock_guard lock(m_viewLock);
             intervalMs = m_frameIntervalMs;
             view = m_view;
             points = m_points;
             average = m_average;
+            weighted = m_weightedAverage;
         }
         qint64 lo = 0;
         bool haveBlock = false;
@@ -345,10 +355,14 @@ void Rsp2Receiver::workerLoop()
             continue;
         }
         processor.setAverage(average);
+        processor.setWeightedAverage(weighted);
         if (resetAverage) {
             processor.resetAverage();
         }
-        const std::vector<float>& db = processor.process(block.data());
+        const auto now = std::chrono::steady_clock::now();
+        const double elapsed = std::chrono::duration<double>(now - lastFrame).count();
+        lastFrame = now;
+        const std::vector<float>& db = processor.process(block.data(), elapsed, lo);
         std::vector<float> frame = spectrum::cropToView(db, lo, view, points);
         const float offset = static_cast<float>(levelOffsetDb());
         for (float& v : frame) {
