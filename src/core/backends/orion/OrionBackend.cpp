@@ -581,6 +581,16 @@ void OrionBackend::onLine(const QByteArray& line)
             if (m_atuCycle) {
                 m_atuLastSwr = r.swr;
             }
+        } else if constexpr (std::is_same_v<T, SidetoneReply>) {
+            // One knob on the radio: 0 is sidetone off, and the level is kept.
+            TransmitDelta d;
+            m_cwSidetoneOn = r.volume > 0;
+            d.cwSidetone = m_cwSidetoneOn;
+            if (r.volume > 0) {
+                m_cwSidetoneLevel = r.volume;
+                d.monGainCw = r.volume;
+            }
+            emit transmitChanged(d);
         } else if constexpr (std::is_same_v<T, TunerReply>) {
             if (m_tunerIn != r.in) {
                 m_tunerIn = r.in;
@@ -776,6 +786,7 @@ void OrionBackend::startupQueries()
     send(queryTxPower());
     send(queryTuner());
     send(queryMonitor());
+    send(queryCwSidetoneVolume());
     send(queryMicGain());
     send(querySpeechProcessor());
     send(queryAuxGain());
@@ -2056,6 +2067,22 @@ ReceiveDispatch OrionBackend::requestTransmitControl(const TransmitControlReques
         TransmitDelta d;
         d.cwSpeed = m_keyer->speed();
         emit transmitChanged(d);
+        return ReceiveDispatch::Dispatched;
+    }
+    // The CW tab's Sidetone button and level: the radio's own sidetone (*CV),
+    // which is what the operator hears from the Orion while the WinKeyer keys.
+    case Field::CwSidetone: {
+        m_cwSidetoneOn = std::get<bool>(request.value);
+        send(orion::setCwSidetoneVolume(m_cwSidetoneOn ? m_cwSidetoneLevel : 0));
+        send(orion::queryCwSidetoneVolume());
+        return ReceiveDispatch::Dispatched;
+    }
+    case Field::CwMonitorGain: {
+        m_cwSidetoneLevel = std::clamp(std::get<int>(request.value), 0, 100);
+        if (m_cwSidetoneOn) {
+            send(orion::setCwSidetoneVolume(m_cwSidetoneLevel));
+            send(orion::queryCwSidetoneVolume());
+        }
         return ReceiveDispatch::Dispatched;
     }
     case Field::MonitorEnabled: case Field::MonitorLevel: {

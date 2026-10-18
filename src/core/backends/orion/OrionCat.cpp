@@ -406,6 +406,11 @@ QByteArray queryAuxGain() { return QByteArrayLiteral("?TI"); }
 QByteArray querySpeechProcessor() { return QByteArrayLiteral("?TS"); }
 QByteArray setMonitor(int percent) { return "*TO" + QByteArray::number(std::clamp(percent, 0, 100)); }
 QByteArray queryMonitor() { return QByteArrayLiteral("?TO"); }
+QByteArray setCwSidetoneVolume(int percent)
+{
+    return "*CV" + QByteArray::number(std::clamp(percent, 0, 100));
+}
+QByteArray queryCwSidetoneVolume() { return QByteArrayLiteral("?CV"); }
 
 QByteArray queryVfoLock(Rx rx)
 {
@@ -422,6 +427,13 @@ std::optional<Reply> decodeReply(const QByteArray& line)
     }
     qint64 v = 0;
     switch (line[1]) {
+    case 'C':
+        // @CV<0..100>: CW sidetone volume
+        if (line[2] == 'V' && line.size() >= 4 && parseLeadingInt(line.mid(3), v) && v >= 0
+            && v <= 100) {
+            return SidetoneReply{static_cast<int>(v)};
+        }
+        return std::nullopt;
     case 'A':
     case 'B':
         // @AF<hz> / @BF<hz>

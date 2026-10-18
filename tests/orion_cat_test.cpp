@@ -91,6 +91,11 @@ static void testReplies()
               && as<TxLevelReply>(mon)->value == 45,
           "@TO45 = TX monitor 45");
     check(setMonitor(130) == "*TO100", "monitor level clamped to 100");
+    const auto st = decodeReply("@CV40");
+    check(as<SidetoneReply>(st) && as<SidetoneReply>(st)->volume == 40, "@CV40 = sidetone 40");
+    check(!decodeReply("@CV101"), "sidetone out of range");
+    check(setCwSidetoneVolume(55) == "*CV55" && queryCwSidetoneVolume() == "?CV",
+          "sidetone commands as the reference program sends them");
     check(setTuner(true) == "*TT1" && setTuner(false) == "*TT0" && startTunerCycle() == "*TTT"
               && queryTuner() == "?TT",
           "tuner commands as the reference program sends them");

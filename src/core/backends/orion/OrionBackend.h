@@ -291,6 +291,9 @@ private:
     bool m_atuSawTx = false;
     double m_atuLastSwr = -1.0;
     std::optional<bool> m_tunerIn;      // @TT, the radio's own state
+    // CW sidetone (*CV): the level the slider asks for, and the button.
+    int m_cwSidetoneLevel = 50;
+    bool m_cwSidetoneOn = true;
     QTimer m_atuTimer;
 
     std::unique_ptr<OrionWinKeyer> m_keyer;

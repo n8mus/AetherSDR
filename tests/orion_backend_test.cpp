@@ -108,6 +108,7 @@ public:
     bool keyed = false;
     bool tunerIn = false;
     int monitor = 30;
+    int sidetone = 40;
     QByteArray txMeter = "@STF040R002S384";   // 40 W fwd, 2 W ref, SWR 1.5
     bool tunerFitted = true;
     int tunerCycles = 0;
@@ -166,6 +167,8 @@ private:
             } else {
                 reply("@SRM" + QByteArray::number(sMain) + "S" + QByteArray::number(sSub));
             }
+        } else if (q == "CV") {
+            reply("@CV" + QByteArray::number(sidetone));
         } else if (q == "TO") {
             reply("@TO" + QByteArray::number(monitor));
         } else if (q == "TT") {
@@ -232,6 +235,8 @@ private:
             mainAgc = cmd[4];
         } else if (cmd.startsWith("*KV") && cmd.size() == 6) {
             kv = cmd.mid(3);
+        } else if (cmd.startsWith("*CV")) {
+            sidetone = cmd.mid(3).toInt();
         } else if (cmd.startsWith("*TO")) {
             monitor = cmd.mid(3).toInt();
         } else if (cmd == "*TT1") {
@@ -732,6 +737,49 @@ int main(int argc, char** argv)
     check(waitFor([&] { return radio.monitor == 0 && lastMon().first == false; }, 1000),
           "MON off: *TO0, read back as off");
     check(!lastMon().second.has_value(), "off keeps the level slider where it was");
+
+    std::printf("-- CW sidetone: the radio's own (*CV)\n");
+    const auto lastSidetone = [&]() -> std::pair<std::optional<bool>, std::optional<int>> {
+        std::optional<bool> on;
+        std::optional<int> level;
+        for (const auto& args : txSpy) {
+            const auto d = args.at(0).value<TransmitDelta>();
+            if (d.cwSidetone) on = d.cwSidetone;
+            if (d.monGainCw) level = d.monGainCw;
+        }
+        return {on, level};
+    };
+    txSpy.clear();
+    TransmitControlRequest stLevel;
+    stLevel.field = TransmitControlRequest::Field::CwMonitorGain;
+    stLevel.value = 65;
+    check(backend.requestTransmitControl(stLevel) == ReceiveDispatch::Dispatched,
+          "sidetone level accepted");
+    check(waitFor([&] { return radio.sidetone == 65 && lastSidetone().second == 65; }, 1000),
+          "sidetone level 65: *CV65, read back");
+    txSpy.clear();
+    TransmitControlRequest stOff;
+    stOff.field = TransmitControlRequest::Field::CwSidetone;
+    stOff.value = false;
+    backend.requestTransmitControl(stOff);
+    check(waitFor([&] { return radio.sidetone == 0 && lastSidetone().first == false; }, 1000),
+          "sidetone off: *CV0, read back as off");
+    radio.sets.clear();
+    stLevel.value = 30;
+    backend.requestTransmitControl(stLevel);
+    QElapsedTimer stGuard;
+    stGuard.start();
+    while (stGuard.elapsed() < 200) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+        usleep(2000);
+    }
+    check(radio.sidetone == 0, "the level moved while off does not unmute it");
+    TransmitControlRequest stOn;
+    stOn.field = TransmitControlRequest::Field::CwSidetone;
+    stOn.value = true;
+    backend.requestTransmitControl(stOn);
+    check(waitFor([&] { return radio.sidetone == 30 && lastSidetone().first == true; }, 1000),
+          "sidetone on: back at the slider's level (30)");
 
     std::printf("-- failsafe\n");
     radio.sets.clear();

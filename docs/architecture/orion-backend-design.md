@@ -537,6 +537,17 @@ real transmission is the operator's):**
   @TO readback shows on/off and the level (0 = off, the level slider kept).
   Until now MON was refused ("Backend refused operation monitor level").
   VOX stays unsupported: the reference program has no Orion VOX command.
+  On air (operator): in CW there is no MON; what matters there is the
+  sidetone.
+- CW sidetone (built 2026-10-17, bench-tested only): the CW tab's Sidetone
+  button and level drive the radio's own sidetone volume (*CV, 0..100, as
+  the reference program sets it); off sends *CV0, a level moved while off
+  waits, and @CV is read back on connect and after each change. Pitch
+  already works on air (receive tone and the Zero Beat target together;
+  the operator matches it to the Orion). Not wired: the CW tab's Delay.
+  The reference program's Orion QSK delay is *CQ on a 0..100 scale with no
+  stated unit, while AetherSDR's Delay is milliseconds; it needs an on-air
+  measurement before any mapping.
 - On air (2026-10-17, operator at the radio, dummy load): MOX keys and
   unkeys the Orion by CAT, with the radio's TX/RX readback each time. The
   PC path works end to end: the Alesis mic (PCM2900) -> AetherSDR's TX

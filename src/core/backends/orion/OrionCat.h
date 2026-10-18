@@ -112,6 +112,10 @@ inline constexpr double kS9Dbm = -73.0;
 // program sets it. ?TO answers @TO<n>.
 [[nodiscard]] QByteArray setMonitor(int percent);
 [[nodiscard]] QByteArray queryMonitor();
+// *CV: the radio's CW sidetone volume, 0..100 (0 = silent), as the
+// reference program sets it. ?CV answers @CV<n>.
+[[nodiscard]] QByteArray setCwSidetoneVolume(int percent);
+[[nodiscard]] QByteArray queryCwSidetoneVolume();
 
 // The internal antenna tuner: *TT1 in, *TT0 out (bypass), *TTT runs a tune
 // cycle (the radio keys its own carrier and drops it when matched). ?TT
@@ -151,11 +155,13 @@ struct TxLevelReply {
 
 // @TT1 / @TT0: the internal tuner in or bypassed.
 struct TunerReply { bool in; };
+// @CV<0..100>: CW sidetone volume.
+struct SidetoneReply { int volume; };
 
 using Reply = std::variant<FrequencyReply, ModeReply, BandwidthReply, PbtReply,
                            AgcReply, RfGainReply, AttenuatorReply, PreampReply,
                            SMeterReply, TxMeterReply, VfoAssignmentReply, VfoLockReply,
-                           TxLevelReply, TunerReply>;
+                           TxLevelReply, TunerReply, SidetoneReply>;
 
 // Decode one line (CR already stripped). nullopt for anything that is not a
 // well-formed, in-range reply this decoder knows; replies glued together on
