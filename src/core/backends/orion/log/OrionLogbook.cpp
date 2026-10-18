@@ -4,6 +4,8 @@
 #include "core/CtyDatParser.h"
 #include "core/backends/orion/log/CqrlogSync.h"
 #include "core/backends/orion/log/LogbookIndex.h"
+#include "core/backends/orion/log/OrionUploadSecrets.h"
+#include "core/backends/orion/log/QslUploader.h"
 #include "core/backends/orion/log/WsjtxListener.h"
 
 #include <QFile>
@@ -12,9 +14,10 @@
 
 namespace AetherSDR::orion::logbook {
 
-OrionLogbook::OrionLogbook(QObject* parent)
+OrionLogbook::OrionLogbook(QObject* parent, bool memoryOnlySecrets)
     : QObject(parent)
     , m_cty(std::make_unique<CtyDatParser>())
+    , m_secrets(std::make_unique<OrionUploadSecrets>(memoryOnlySecrets))
 {
     m_udp = new QUdpSocket(this);
 }
@@ -41,6 +44,11 @@ bool OrionLogbook::open(const QString& path, const QString& ctyPath, QString* er
     m_index->attachCty(m_cty.get());
     m_index->attachDb(&m_db);   // rebuilt whenever the log changes
     connect(m_index.get(), &LogbookIndex::updated, this, &OrionLogbook::workedIndexUpdated);
+    // Online logs: secrets from the keychain, then the uploader (one
+    // catch-up sweep and one LoTW QSL download shortly after startup, as in
+    // the console; no background retry loop).
+    m_secrets->load();
+    m_uploader = std::make_unique<QslUploader>(&m_db, m_secrets.get());
     return true;
 }
 
@@ -51,7 +59,14 @@ void OrionLogbook::startWsjtx()
     }
     m_wsjtx = std::make_unique<WsjtxListener>(&m_db, m_cty.get());
     connect(m_wsjtx.get(), &WsjtxListener::qsoLogged, this,
-            [this](qint64 id, const QString& call, bool) { emit wsjtxLogged(id, call); });
+            [this](qint64 id, const QString& call, bool pushWanted) {
+        // As the console: WSJT-X QSOs go to the online logs too, unless the
+        // operator handed that job to GridTracker (OrionLog/wsjtxPush).
+        if (pushWanted && m_uploader) {
+            m_uploader->pushQso(id);
+        }
+        emit wsjtxLogged(id, call);
+    });
     connect(m_wsjtx.get(), &WsjtxListener::dxChanged, this, &OrionLogbook::wsjtxDx);
     m_wsjtx->start();
 }
@@ -103,6 +118,9 @@ qint64 OrionLogbook::logQso(Qso q)
         return id;
     }
     mirror(m_db.qso(id));
+    if (m_uploader) {
+        m_uploader->pushQso(id);
+    }
     emit qsoLogged(id, q.call.trimmed().toUpper());
     return id;
 }

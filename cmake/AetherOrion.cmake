@@ -82,7 +82,11 @@ else()
             src/core/backends/orion/log/WsjtxListener.cpp
             src/core/backends/orion/log/WsjtxListener.h
             src/core/backends/orion/log/OrionLogbook.cpp
-            src/core/backends/orion/log/OrionLogbook.h)
+            src/core/backends/orion/log/OrionLogbook.h
+            src/core/backends/orion/log/OrionUploadSecrets.cpp
+            src/core/backends/orion/log/OrionUploadSecrets.h
+            src/core/backends/orion/log/QslUploader.cpp
+            src/core/backends/orion/log/QslUploader.h)
         target_sources(AetherSDR PRIVATE
             src/gui/orion/OrionLogbookUi.cpp
             src/gui/orion/OrionLogbookUi.h)

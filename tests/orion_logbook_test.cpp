@@ -150,7 +150,7 @@ void testOrionLogbook(const QString& dir, const QString& ctyPath)
     AppSettings::instance().setValue(QStringLiteral("OrionLog/port"), bridge.localPort());
     AppSettings::instance().setValue(QStringLiteral("OrionLog/mirrorCqrlog"), true);
 
-    OrionLogbook book;
+    OrionLogbook book(nullptr, /*memoryOnlySecrets=*/true);
     QString err;
     check(book.open(dir + "/station.sqlite", ctyPath, &err), "the logbook opens");
     check(book.country(QStringLiteral("JA1XYZ")).known
@@ -252,7 +252,7 @@ void testWsjtx(const QString& dir, const QString& ctyPath)
     AppSettings::instance().setValue(QStringLiteral("OrionLog/wsjtxPort"), port);
     AppSettings::instance().setValue(QStringLiteral("OrionLog/mirrorCqrlog"), false);
 
-    OrionLogbook book;
+    OrionLogbook book(nullptr, /*memoryOnlySecrets=*/true);
     check(book.open(dir + "/wsjtx.sqlite", ctyPath), "the logbook opens");
     QSignalSpy logged(&book, &OrionLogbook::wsjtxLogged);
     QSignalSpy dx(&book, &OrionLogbook::wsjtxDx);

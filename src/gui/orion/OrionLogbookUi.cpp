@@ -3,11 +3,19 @@
 #include "core/AppSettings.h"
 #include "core/backends/orion/log/CqrlogSync.h"
 #include "core/backends/orion/log/OrionLogbook.h"
+#include "core/backends/orion/log/OrionUploadSecrets.h"
+#include "core/backends/orion/log/QslUploader.h"
 #include "models/RadioModel.h"
 #include "models/SliceModel.h"
 #include "models/SpotModel.h"
 
 #include <QAction>
+#include <QHash>
+#include <QCheckBox>
+#include <QGroupBox>
+#include <QListWidget>
+#include <QScrollArea>
+#include <QSpinBox>
 #include <QDateTimeEdit>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -36,10 +44,13 @@
 #include <QVBoxLayout>
 
 #include <cmath>
+#include <tuple>
 
 namespace AetherSDR {
 
 using orion::logbook::CqrlogSync;
+using orion::logbook::OrionUploadSecrets;
+using orion::logbook::QslUploader;
 using orion::logbook::OrionLogbook;
 using orion::logbook::Qso;
 
@@ -532,6 +543,229 @@ private:
     bool m_editing = false;
 };
 
+// Online logs: the console's Online Logs / setup window, re-expressed in
+// AetherSDR's widgets. Ordinary fields are settings (OrionUp/...); secrets
+// go to the system keychain through OrionUploadSecrets.
+class OrionOnlineLogsDialog : public QDialog {
+public:
+    OrionOnlineLogsDialog(OrionLogbook* book, QWidget* parent)
+        : QDialog(parent)
+        , m_book(book)
+    {
+        setWindowTitle(tr("Online logs"));
+        resize(720, 780);
+        auto* outer = new QVBoxLayout(this);
+        auto* intro = new QLabel(tr(
+            "Each QSO you log is sent at once to every service switched on here, and every "
+            "result is listed below. Passwords, keys and codes are kept in the system "
+            "keychain, never in AetherSDR's settings file. QSOs brought in from cqrlog or an "
+            "ADIF file count as already uploaded and are never sent."));
+        intro->setWordWrap(true);
+        outer->addWidget(intro);
+        if (!book->uploadSecrets()->persistent()) {
+            auto* warn = new QLabel(tr("No system keychain is available: secrets typed here "
+                                       "last only until AetherSDR closes."));
+            warn->setWordWrap(true);
+            outer->addWidget(warn);
+        }
+
+        auto* scroll = new QScrollArea;
+        scroll->setWidgetResizable(true);
+        auto* content = new QWidget;
+        auto* col = new QVBoxLayout(content);
+        scroll->setWidget(content);
+        outer->addWidget(scroll, 2);
+
+        QslUploader* up = book->uploader();
+
+        // LoTW
+        {
+            auto* box = section(col, QStringLiteral("lotw"), tr("LoTW (ARRL)"));
+            auto* form = qobject_cast<QFormLayout*>(box->layout());
+            form->addRow(tr("TQSL station location:"), field(QStringLiteral("lotw/station")));
+            form->addRow(tr("tqsl program:"), field(QStringLiteral("lotw/tqslPath"), QStringLiteral("tqsl")));
+            form->addRow(tr("Certificate key password:"), secret(QStringLiteral("lotw/tqslPassword"),
+                                                                 tr("blank if the key has none")));
+            form->addRow(tr("LoTW website login:"), field(QStringLiteral("lotw/login")));
+            form->addRow(tr("LoTW website password:"), secret(QStringLiteral("lotw/password")));
+            auto* row = new QHBoxLayout;
+            auto* t1 = new QPushButton(tr("Test tqsl"));
+            auto* t2 = new QPushButton(tr("Test login"));
+            auto* sync = new QPushButton(tr("Sync LoTW QSLs now"));
+            row->addWidget(t1);
+            row->addWidget(t2);
+            row->addWidget(sync);
+            row->addStretch(1);
+            form->addRow(row);
+            form->addRow(resultLabel(QStringLiteral("lotw-tqsl")));
+            form->addRow(resultLabel(QStringLiteral("lotw-dl")));
+            form->addRow(resultLabel(QStringLiteral("lotw")));
+            connect(t1, &QPushButton::clicked, this, [up] { up->testTqsl(); });
+            connect(t2, &QPushButton::clicked, this, [up] { up->testLotwDownload(); });
+            connect(sync, &QPushButton::clicked, this, [up] { up->syncLotwQsls(); });
+        }
+        // eQSL
+        {
+            auto* box = section(col, QStringLiteral("eqsl"), tr("eQSL"));
+            auto* form = qobject_cast<QFormLayout*>(box->layout());
+            form->addRow(tr("User name:"), field(QStringLiteral("eqsl/user")));
+            form->addRow(tr("Password:"), secret(QStringLiteral("eqsl/password")));
+            form->addRow(tr("QTH nickname:"), field(QStringLiteral("eqsl/nickname"), tr("optional")));
+            addTest(form, QStringLiteral("eqsl"), [up] { up->testEqsl(); });
+        }
+        // QRZ
+        {
+            auto* box = section(col, QStringLiteral("qrz"), tr("QRZ logbook"));
+            auto* form = qobject_cast<QFormLayout*>(box->layout());
+            form->addRow(tr("Logbook API key:"), secret(QStringLiteral("qrz/key")));
+            addTest(form, QStringLiteral("qrz"), [up] { up->testQrz(); });
+        }
+        // ClubLog
+        {
+            auto* box = section(col, QStringLiteral("club"), tr("ClubLog"));
+            auto* form = qobject_cast<QFormLayout*>(box->layout());
+            form->addRow(tr("E-mail:"), field(QStringLiteral("club/email")));
+            form->addRow(tr("Password:"), secret(QStringLiteral("club/password")));
+            form->addRow(tr("Callsign:"), field(QStringLiteral("club/call")));
+            form->addRow(tr("Application API key:"), secret(QStringLiteral("club/apikey"),
+                                                          tr("ClubLog issues these per program")));
+            form->addRow(resultLabel(QStringLiteral("club")));
+        }
+        // HRDLOG
+        {
+            auto* box = section(col, QStringLiteral("hrdlog"), tr("HRDLOG.net"));
+            auto* form = qobject_cast<QFormLayout*>(box->layout());
+            form->addRow(tr("Callsign:"), field(QStringLiteral("hrdlog/call")));
+            form->addRow(tr("Upload code:"), secret(QStringLiteral("hrdlog/code")));
+            addTest(form, QStringLiteral("hrdlog"), [up] { up->testHrdlogNet(); });
+        }
+        // Logger mirrors
+        for (const auto& [svc, title, port] :
+             {std::tuple{QStringLiteral("hrd"), tr("HRD Logbook (mirror)"), 7826},
+              std::tuple{QStringLiteral("n1mm"), tr("N1MM+ (mirror)"), 2333}}) {
+            auto* box = section(col, svc, title);
+            auto* form = qobject_cast<QFormLayout*>(box->layout());
+            form->addRow(tr("Address:"), field(svc + QStringLiteral("/ip"), QStringLiteral("127.0.0.1")));
+            auto* portBox = new QSpinBox;
+            portBox->setRange(1, 65535);
+            portBox->setValue(AppSettings::instance()
+                                  .value(QStringLiteral("OrionUp/") + svc + QStringLiteral("/port"), port).toInt());
+            const QString key = QStringLiteral("OrionUp/") + svc + QStringLiteral("/port");
+            connect(portBox, &QSpinBox::valueChanged, this, [key](int v) {
+                AppSettings::instance().setValue(key, v);
+                AppSettings::instance().save();
+            });
+            form->addRow(tr("Port:"), portBox);
+            const QString s = svc;
+            addTest(form, svc, [up, s] { up->testLoggerPush(s); });
+        }
+        auto* wsjtx = new QCheckBox(tr("Upload WSJT-X QSOs too (off: leave that to GridTracker)"));
+        wsjtx->setChecked(AppSettings::instance().value(QStringLiteral("OrionLog/wsjtxPush"), true).toBool());
+        connect(wsjtx, &QCheckBox::toggled, this, [](bool on) {
+            AppSettings::instance().setValue(QStringLiteral("OrionLog/wsjtxPush"), on);
+            AppSettings::instance().save();
+        });
+        col->addWidget(wsjtx);
+        col->addStretch(1);
+
+        outer->addWidget(new QLabel(tr("Upload traffic:")));
+        m_traffic = new QListWidget;
+        m_traffic->addItems(up->recentTraffic());
+        m_traffic->scrollToBottom();
+        outer->addWidget(m_traffic, 1);
+        auto* buttons = new QHBoxLayout;
+        auto* retry = new QPushButton(tr("Retry failed now"));
+        auto* close = new QPushButton(tr("Close"));
+        buttons->addWidget(retry);
+        buttons->addStretch(1);
+        buttons->addWidget(close);
+        outer->addLayout(buttons);
+        connect(retry, &QPushButton::clicked, this, [up] { up->retryFailedNow(); });
+        connect(close, &QPushButton::clicked, this, &QDialog::hide);
+        connect(up, &QslUploader::trafficLine, this, [this](const QString& line) {
+            m_traffic->addItem(line);
+            while (m_traffic->count() > 100) delete m_traffic->takeItem(0);
+            m_traffic->scrollToBottom();
+        });
+        connect(up, &QslUploader::serviceResult, this,
+                [this](const QString& svc, bool ok, const QString& detail) {
+            if (QLabel* l = m_results.value(svc)) {
+                l->setText((ok ? tr("OK: %1") : tr("Failed: %1")).arg(detail));
+            }
+        });
+        connect(book->uploadSecrets(), &OrionUploadSecrets::saveFailed, this,
+                [this](const QString& key, const QString& reason) {
+            m_traffic->addItem(tr("keychain: could not save %1 (%2)").arg(key, reason));
+        });
+    }
+
+private:
+    QGroupBox* section(QVBoxLayout* col, const QString& svc, const QString& title)
+    {
+        auto* box = new QGroupBox(title);
+        box->setCheckable(true);
+        const QString key = QStringLiteral("OrionUp/") + svc + QStringLiteral("/enabled");
+        box->setChecked(AppSettings::instance().value(key, false).toBool());
+        connect(box, &QGroupBox::toggled, this, [key](bool on) {
+            AppSettings::instance().setValue(key, on);
+            AppSettings::instance().save();
+        });
+        box->setLayout(new QFormLayout);
+        col->addWidget(box);
+        return box;
+    }
+
+    QLineEdit* field(const QString& key, const QString& placeholder = QString())
+    {
+        auto* e = new QLineEdit(AppSettings::instance().value(QStringLiteral("OrionUp/") + key).toString());
+        e->setPlaceholderText(placeholder);
+        const QString k = QStringLiteral("OrionUp/") + key;
+        connect(e, &QLineEdit::editingFinished, this, [e, k] {
+            AppSettings::instance().setValue(k, e->text().trimmed());
+            AppSettings::instance().save();
+        });
+        return e;
+    }
+
+    QLineEdit* secret(const QString& key, const QString& placeholder = QString())
+    {
+        auto* e = new QLineEdit(m_book->uploadSecrets()->value(key));
+        e->setEchoMode(QLineEdit::Password);
+        e->setPlaceholderText(placeholder);
+        OrionUploadSecrets* secrets = m_book->uploadSecrets();
+        connect(e, &QLineEdit::editingFinished, this, [e, key, secrets] {
+            if (e->text().trimmed() != secrets->value(key)) secrets->setValue(key, e->text());
+        });
+        // Secrets may still be loading from the keychain when the window opens.
+        connect(secrets, &OrionUploadSecrets::loaded, e, [e, key, secrets] {
+            if (e->text().isEmpty()) e->setText(secrets->value(key));
+        });
+        return e;
+    }
+
+    QLabel* resultLabel(const QString& svc)
+    {
+        auto* l = new QLabel;
+        l->setWordWrap(true);
+        m_results.insert(svc, l);
+        return l;
+    }
+
+    void addTest(QFormLayout* form, const QString& svc, std::function<void()> run)
+    {
+        auto* b = new QPushButton(tr("Test"));
+        connect(b, &QPushButton::clicked, this, [run] { run(); });
+        auto* row = new QHBoxLayout;
+        row->addWidget(b);
+        row->addWidget(resultLabel(svc), 1);
+        form->addRow(row);
+    }
+
+    OrionLogbook* m_book;
+    QListWidget* m_traffic = nullptr;
+    QHash<QString, QLabel*> m_results;
+};
+
 }  // namespace
 
 QColor orionWorkedSpotColour(const QString& call, double freqMhz)
@@ -570,6 +804,9 @@ void installOrionLogbook(QMainWindow* window, QMenuBar* bar, RadioModel* model,
     browseAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+B")));
     browseAct->setToolTip(QObject::tr("The whole log: search, edit, delete, ADIF, and a check "
                                       "against cqrlog"));
+    auto* onlineAct = menu->addAction(QObject::tr("Online logs..."));
+    onlineAct->setToolTip(QObject::tr("LoTW, eQSL, QRZ logbook, ClubLog and HRDLOG uploads, and "
+                                      "the HRD / N1MM+ mirrors"));
     menu->addSeparator();
     auto* importAct = menu->addAction(QObject::tr("Import ADIF..."));
     auto* exportAct = menu->addAction(QObject::tr("Export ADIF..."));
@@ -603,7 +840,7 @@ void installOrionLogbook(QMainWindow* window, QMenuBar* bar, RadioModel* model,
     auto* info = menu->addAction(open ? QObject::tr("Log file: %1").arg(book->path())
                                       : QObject::tr("Log not available: %1").arg(error));
     info->setEnabled(false);
-    for (QAction* a : {logAct, browseAct, importAct, exportAct}) {
+    for (QAction* a : {logAct, browseAct, onlineAct, importAct, exportAct}) {
         a->setEnabled(open);
     }
 
@@ -621,6 +858,23 @@ void installOrionLogbook(QMainWindow* window, QMenuBar* bar, RadioModel* model,
         AppSettings::instance().setValue(QStringLiteral("OrionLog/wsjtx"), on);
         AppSettings::instance().save();
     });
+
+    auto online = std::make_shared<QPointer<OrionOnlineLogsDialog>>();
+    QObject::connect(onlineAct, &QAction::triggered, window, [=] {
+        if (!*online) *online = new OrionOnlineLogsDialog(book, window);
+        (*online)->show();
+        (*online)->raise();
+        (*online)->activateWindow();
+    });
+    // Upload failures surface in the status bar too.
+    if (book->uploader()) {
+        QObject::connect(book->uploader(), &QslUploader::serviceResult, window,
+                         [window](const QString& svc, bool ok, const QString& detail) {
+            if (!ok && window->statusBar()) {
+                window->statusBar()->showMessage(QObject::tr("%1 upload failed: %2").arg(svc, detail), 8000);
+            }
+        });
+    }
 
     auto browser = std::make_shared<QPointer<OrionLogbookWindow>>();
     QObject::connect(browseAct, &QAction::triggered, window, [=] {

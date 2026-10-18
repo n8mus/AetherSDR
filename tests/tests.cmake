@@ -9582,6 +9582,13 @@ if(AETHER_BACKEND_ORION AND UNIX AND NOT APPLE)
         target_link_libraries(orion_logbook_test PRIVATE aethercore Qt6::Core Qt6::Network Qt6::Sql Qt6::Test)
         add_test(NAME orion_logbook_test COMMAND orion_logbook_test)
         set_tests_properties(orion_logbook_test PROPERTIES TIMEOUT 60)
+
+        # Online-log uploads against a local stand-in server and a fake tqsl.
+        add_executable(orion_upload_test tests/orion_upload_test.cpp)
+        target_include_directories(orion_upload_test PRIVATE src tests)
+        target_link_libraries(orion_upload_test PRIVATE aethercore Qt6::Core Qt6::Network Qt6::Sql Qt6::Test)
+        add_test(NAME orion_upload_test COMMAND orion_upload_test)
+        set_tests_properties(orion_upload_test PROPERTIES TIMEOUT 60)
     endif()
 
     add_executable(orion_backend_test tests/orion_backend_test.cpp)

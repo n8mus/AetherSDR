@@ -28,6 +28,8 @@ namespace AetherSDR::orion::logbook {
 
 class CqrlogSync;
 class LogbookIndex;
+class OrionUploadSecrets;
+class QslUploader;
 class WsjtxListener;
 
 class OrionLogbook : public QObject {
@@ -41,7 +43,8 @@ public:
         bool known = false;
     };
 
-    explicit OrionLogbook(QObject* parent = nullptr);
+    // memoryOnlySecrets: the upload secrets never touch the keychain (tests).
+    explicit OrionLogbook(QObject* parent = nullptr, bool memoryOnlySecrets = false);
     ~OrionLogbook() override;
 
     // Opens the log (empty path: the setting, else the default) and loads
@@ -63,6 +66,9 @@ public:
     // 'C' confirmed this band, '?' no data yet.
     LogbookIndex* index() { return m_index.get(); }
     CqrlogSync* cqrlogSync() { return m_sync.get(); }
+    // Online logs (LoTW, eQSL, QRZ, ClubLog, HRDLOG; HRD and N1MM mirrors).
+    QslUploader* uploader() { return m_uploader.get(); }
+    OrionUploadSecrets* uploadSecrets() { return m_secrets.get(); }
     [[nodiscard]] QChar workedStatus(const QString& call, qint64 hz) const;
 
     // Logs one QSO and mirrors it to cqrlog. Returns the new id, -1 on error.
@@ -93,6 +99,8 @@ private:
     std::unique_ptr<CqrlogSync> m_sync;
     std::unique_ptr<LogbookIndex> m_index;
     std::unique_ptr<WsjtxListener> m_wsjtx;
+    std::unique_ptr<OrionUploadSecrets> m_secrets;
+    std::unique_ptr<QslUploader> m_uploader;
     QUdpSocket* m_udp = nullptr;
 };
 

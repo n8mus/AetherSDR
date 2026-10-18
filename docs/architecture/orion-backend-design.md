@@ -696,7 +696,25 @@ running):**
   skipped), with a status-bar note; NOT mirrored to cqrlog (cqrlog takes
   WSJT-X's QSOs itself, as with the console). The DX WSJT-X is working
   fills an open, empty Log QSO window (call, grid, mode). Menu toggle.
-Later: uploads (LoTW, eQSL, QRZ, ClubLog, HRDLOG), the contest deck.
+Later: the contest deck.
+
+**Step 9, online logs (2026-10-18, tested against local stand-ins only;
+nothing has been sent to a real service):** the console's QslUploader,
+ported: each logged QSO (and WSJT-X's, unless OrionLog/wsjtxPush is off)
+goes at once to every enabled service, every outcome announced (accepted,
+duplicate = delivered, failed = 'E'), per-QSO state in the log's up_*
+columns; one catch-up sweep and one LoTW QSL download shortly after
+startup, otherwise Retry (no background retry loop, the operator's call).
+LoTW by the tqsl CLI (batched, -l station, -p only with a key password),
+eQSL GET, QRZ logbook POST (POTA/SIG stripped), ClubLog realtime POST
+(needs an application API key), HRDLOG POST; HRD Logbook (TCP) and N1MM+
+(UDP) mirrors; LoTW QSL report -> confirmations. Imported history is
+stamped uploaded and never sent. Differences from the console: secrets
+(passwords, API keys, upload codes) live in the system keychain
+(AetherSDR's only credential store), not settings; program id AetherSDR;
+each service's address is a setting (default the real one) so tests use
+a stand-in. Logbook -> Online logs... holds the switches, fields, Test
+buttons, traffic list, Retry and LoTW QSL sync.
 
 **PAUSED 2026-10-17 (operator decision).** The fork runs the whole station
 on air (CAT, RSP2 pan and both receivers, split, TX on both paths, TUNE,

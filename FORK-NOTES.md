@@ -19,7 +19,7 @@ possible merge conflict when pulling from `upstream`.
 | `src/gui/MainWindow_Menus.cpp` | Under `AETHER_ORION_LOGBOOK`: the include of `gui/orion/OrionLogbookUi.h` and one call, `installOrionLogbook(...)`, right after the Tools menu is created; under `AETHER_BACKEND_ORION`: the include of `gui/orion/OrionSkimmerUi.h` and one call, `installOrionSkimmerWindows(...)`, adding two Tools items | The station logbook's "Logbook" menu sits between Tools and View; the skimmer's band map and waterfall open from Tools |
 | `src/gui/MainWindow_Wiring.cpp` | Under `AETHER_ORION_LOGBOOK`: the include of `gui/orion/OrionLogbookUi.h` and, in the spot-marker rebuild, `orionWorkedSpotColour()` when the DXCC colouring gave no colour | Spots coloured by worked-before status from the station log (red new, amber new band, green worked, grey confirmed) |
 | `src/gui/PhoneCwApplet.cpp` | `setSelectableMicInputs()` uses the model's mic-input list when it has one, instead of always FlexRadio's MIC/BAL/LINE/ACC/PC | Shows the Orion's MIC and PC; a Flex is unchanged (its list comes from `mic list`) |
-| `tests/tests.cmake` | `orion_cat_test`, `orion_spectrum_test`, `orion_rxaudio_test`, `orion_peripherals_test`, `orion_skimmer_test`, `orion_logbook_test` and `orion_backend_test` appended at the end | Upstream requires every test target to be declared there |
+| `tests/tests.cmake` | `orion_cat_test`, `orion_spectrum_test`, `orion_rxaudio_test`, `orion_peripherals_test`, `orion_skimmer_test`, `orion_logbook_test`, `orion_upload_test` and `orion_backend_test` appended at the end | Upstream requires every test target to be declared there |
 | `tests/backend_seam_affinity_test.cpp` | `orion` added to the constructed-families list | The seam contract test covers the new backend too |
 
 New files that upstream does not have (no merge risk):
@@ -38,9 +38,10 @@ New files that upstream does not have (no merge risk):
   plus the engine watching the LO instead of the dial and `SkimStft` on
   FFTW; built with OpenMP when found)
 - `src/core/backends/orion/log/` (`LogDb`, `Adif`, `CqrlogSync`,
-  `LogbookIndex`, `WsjtxListener`: ported from the Orion console,
+  `LogbookIndex`, `WsjtxListener`, `QslUploader`: ported from the Orion console,
   GPL-2.0-or-later, with AetherSDR settings and cty.dat; plus the glue
-  `OrionLogbook`; needs Qt6::Sql)
+  `OrionLogbook`, and `OrionUploadSecrets` (upload secrets in the system
+  keychain); needs Qt6::Sql)
 - `src/gui/orion/OrionSetupPage.cpp/.h` (Radio Setup -> Orion),
   `src/gui/orion/OrionLogbookUi.cpp/.h` (the Logbook menu, Log QSO window
   and logbook browser) and `src/gui/orion/OrionSkimmerUi.cpp/.h` (the
@@ -49,7 +50,7 @@ New files that upstream does not have (no merge risk):
 - `tests/orion_cat_test.cpp`, `tests/orion_backend_test.cpp`,
   `tests/orion_spectrum_test.cpp`, `tests/orion_rxaudio_test.cpp`,
   `tests/orion_peripherals_test.cpp`, `tests/orion_skimmer_test.cpp`,
-  `tests/orion_logbook_test.cpp`
+  `tests/orion_logbook_test.cpp`, `tests/orion_upload_test.cpp`
 - `tests/orion/fake_orion.py`
 
 ## Running against the fake radio
