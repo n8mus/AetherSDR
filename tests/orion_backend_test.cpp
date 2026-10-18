@@ -107,6 +107,7 @@ public:
     bool bLocked = false;
     bool keyed = false;
     bool tunerIn = false;
+    int monitor = 30;
     QByteArray txMeter = "@STF040R002S384";   // 40 W fwd, 2 W ref, SWR 1.5
     bool tunerFitted = true;
     int tunerCycles = 0;
@@ -165,6 +166,8 @@ private:
             } else {
                 reply("@SRM" + QByteArray::number(sMain) + "S" + QByteArray::number(sSub));
             }
+        } else if (q == "TO") {
+            reply("@TO" + QByteArray::number(monitor));
         } else if (q == "TT") {
             reply(tunerIn ? "@TT1" : "@TT0");
         } else if (q == "TP") {
@@ -229,6 +232,8 @@ private:
             mainAgc = cmd[4];
         } else if (cmd.startsWith("*KV") && cmd.size() == 6) {
             kv = cmd.mid(3);
+        } else if (cmd.startsWith("*TO")) {
+            monitor = cmd.mid(3).toInt();
         } else if (cmd == "*TT1") {
             tunerIn = tunerFitted;
         } else if (cmd == "*TT0") {
@@ -698,6 +703,35 @@ int main(int argc, char** argv)
           "bypass switches the tuner out (*TT0)");
     check(lastAtu() == QStringLiteral("TUNE_BYPASS") && lastAtuEnabled() == false,
           "status: bypassed, tuner out");
+
+    std::printf("-- MON: the radio's TX monitor\n");
+    check(backend.capabilities().txMonitorControl.has_value(), "MON is offered");
+    const auto lastMon = [&]() -> std::pair<std::optional<bool>, std::optional<int>> {
+        std::optional<bool> on;
+        std::optional<int> level;
+        for (const auto& args : txSpy) {
+            const auto d = args.at(0).value<TransmitDelta>();
+            if (d.sbMonitor) on = d.sbMonitor;
+            if (d.monGainSb) level = d.monGainSb;
+        }
+        return {on, level};
+    };
+    txSpy.clear();
+    TransmitControlRequest monOn;
+    monOn.field = TransmitControlRequest::Field::MonitorLevel;
+    monOn.value = MonitorSetting{true, 45};
+    check(backend.requestTransmitControl(monOn) == ReceiveDispatch::Dispatched, "MON level accepted");
+    check(waitFor([&] { return radio.monitor == 45 && lastMon().first == true
+                               && lastMon().second == 45; }, 1000),
+          "MON 45: *TO45, read back as on at 45");
+    txSpy.clear();
+    TransmitControlRequest monOff;
+    monOff.field = TransmitControlRequest::Field::MonitorEnabled;
+    monOff.value = MonitorSetting{false, 45};
+    backend.requestTransmitControl(monOff);
+    check(waitFor([&] { return radio.monitor == 0 && lastMon().first == false; }, 1000),
+          "MON off: *TO0, read back as off");
+    check(!lastMon().second.has_value(), "off keeps the level slider where it was");
 
     std::printf("-- failsafe\n");
     radio.sets.clear();

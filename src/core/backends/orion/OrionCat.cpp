@@ -404,6 +404,8 @@ QByteArray queryTuner() { return QByteArrayLiteral("?TT"); }
 QByteArray queryMicGain() { return QByteArrayLiteral("?TM"); }
 QByteArray queryAuxGain() { return QByteArrayLiteral("?TI"); }
 QByteArray querySpeechProcessor() { return QByteArrayLiteral("?TS"); }
+QByteArray setMonitor(int percent) { return "*TO" + QByteArray::number(std::clamp(percent, 0, 100)); }
+QByteArray queryMonitor() { return QByteArrayLiteral("?TO"); }
 
 QByteArray queryVfoLock(Rx rx)
 {
@@ -500,6 +502,11 @@ std::optional<Reply> decodeReply(const QByteArray& line)
         case 'S':
             if (v >= 0 && v <= 9) {
                 return TxLevelReply{TxLevelReply::Kind::Processor, static_cast<int>(v)};
+            }
+            break;
+        case 'O':
+            if (v >= 0 && v <= 100) {
+                return TxLevelReply{TxLevelReply::Kind::Monitor, static_cast<int>(v)};
             }
             break;
         default:

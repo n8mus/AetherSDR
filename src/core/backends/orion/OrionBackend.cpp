@@ -203,7 +203,8 @@ RadioCapabilities OrionBackend::capabilities() const
         SliceFrequencyControl::Authority::Radio, /*tunePowerAppliesLive=*/true};
     c.speechProcessorControl = std::nullopt;
     c.voxControl = std::nullopt;
-    c.txMonitorControl = std::nullopt;
+    // MON is the radio's own TX monitor (*TO); level 0 is off.
+    c.txMonitorControl = RadioCapabilities::TxMonitorControl{};
     c.hasTxFilterControls = false;
     // The internal tuner (*TT): in, bypass and the radio's own tune cycle.
     c.hasTuner = true;
@@ -612,6 +613,13 @@ void OrionBackend::onLine(const QByteArray& line)
             case TxLevelReply::Kind::Aux:
                 m_lastAuxReading = r.value;
                 break;
+            case TxLevelReply::Kind::Monitor:
+                // The radio has one knob: 0 is MON off, and the level is kept.
+                d.sbMonitor = r.value > 0;
+                if (r.value > 0) {
+                    d.monGainSb = r.value;
+                }
+                break;
             }
             // A radio left in the PC profile (mic 0, aux up) by an earlier
             // session that did not exit cleanly: give it its mic back.
@@ -767,6 +775,7 @@ void OrionBackend::startupQueries()
     send(queryVfoLock(Rx::Sub));
     send(queryTxPower());
     send(queryTuner());
+    send(queryMonitor());
     send(queryMicGain());
     send(querySpeechProcessor());
     send(queryAuxGain());
@@ -2047,6 +2056,12 @@ ReceiveDispatch OrionBackend::requestTransmitControl(const TransmitControlReques
         TransmitDelta d;
         d.cwSpeed = m_keyer->speed();
         emit transmitChanged(d);
+        return ReceiveDispatch::Dispatched;
+    }
+    case Field::MonitorEnabled: case Field::MonitorLevel: {
+        const MonitorSetting setting = std::get<MonitorSetting>(request.value);
+        send(orion::setMonitor(setting.enabled ? setting.level : 0));
+        send(orion::queryMonitor());
         return ReceiveDispatch::Dispatched;
     }
     // AetherSDR's own TX chain shapes PC audio: these stay on the host.

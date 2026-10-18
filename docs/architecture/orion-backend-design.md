@@ -531,6 +531,12 @@ real transmission is the operator's):**
   On air 2026-10-17 (operator): the cycle works. The Orion started its
   carrier 2.9 s after *TTT (so the start limit went from 3 s to 6 s), ran
   about 3 s, and ended at SWR 1.0: reported successful.
+- MON (built 2026-10-17, bench-tested on the fake radio only): the Phone
+  applet's MON button and level drive the radio's own TX monitor (*TO,
+  0..100, as the reference program sets it); MON off sends *TO0, and the
+  @TO readback shows on/off and the level (0 = off, the level slider kept).
+  Until now MON was refused ("Backend refused operation monitor level").
+  VOX stays unsupported: the reference program has no Orion VOX command.
 - On air (2026-10-17, operator at the radio, dummy load): MOX keys and
   unkeys the Orion by CAT, with the radio's TX/RX readback each time. The
   PC path works end to end: the Alesis mic (PCM2900) -> AetherSDR's TX

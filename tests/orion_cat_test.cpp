@@ -86,6 +86,11 @@ static void testReplies()
     const auto tunerOut = decodeReply("@TT0");
     check(as<TunerReply>(tunerOut) && !as<TunerReply>(tunerOut)->in, "@TT0 = tuner bypassed");
     check(!decodeReply("@TT2"), "tuner state out of range");
+    const auto mon = decodeReply("@TO45");
+    check(as<TxLevelReply>(mon) && as<TxLevelReply>(mon)->kind == TxLevelReply::Kind::Monitor
+              && as<TxLevelReply>(mon)->value == 45,
+          "@TO45 = TX monitor 45");
+    check(setMonitor(130) == "*TO100", "monitor level clamped to 100");
     check(setTuner(true) == "*TT1" && setTuner(false) == "*TT0" && startTunerCycle() == "*TTT"
               && queryTuner() == "?TT",
           "tuner commands as the reference program sends them");

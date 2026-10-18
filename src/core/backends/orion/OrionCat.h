@@ -108,6 +108,10 @@ inline constexpr double kS9Dbm = -73.0;
 [[nodiscard]] QByteArray queryMicGain();
 [[nodiscard]] QByteArray queryAuxGain();
 [[nodiscard]] QByteArray querySpeechProcessor();
+// *TO: the radio's TX monitor level, 0..100 (0 = off), as the reference
+// program sets it. ?TO answers @TO<n>.
+[[nodiscard]] QByteArray setMonitor(int percent);
+[[nodiscard]] QByteArray queryMonitor();
 
 // The internal antenna tuner: *TT1 in, *TT0 out (bypass), *TTT runs a tune
 // cycle (the radio keys its own carrier and drops it when matched). ?TT
@@ -138,9 +142,9 @@ struct TxMeterReply { double forwardWatts; double reflectedWatts; double swr; };
 struct VfoAssignmentReply { char mainRx; char subRx; char tx; };
 // @AL / @AU / @BL / @BU
 struct VfoLockReply { Rx rx; bool locked; };
-// @TP / @TM / @TI <0..100>, @TS <0..9>
+// @TP / @TM / @TI / @TO <0..100>, @TS <0..9>
 struct TxLevelReply {
-    enum class Kind { Power, Mic, Aux, Processor };
+    enum class Kind { Power, Mic, Aux, Processor, Monitor };
     Kind kind;
     int value;
 };
