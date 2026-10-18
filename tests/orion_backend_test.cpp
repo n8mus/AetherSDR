@@ -109,6 +109,8 @@ public:
     bool tunerIn = false;
     int monitor = 30;
     int sidetone = 40;
+    int afMain = 102;   // bytes: 40 %
+    int afSub = 51;     // 20 %
     QByteArray txMeter = "@STF040R002S384";   // 40 W fwd, 2 W ref, SWR 1.5
     bool tunerFitted = true;
     int tunerCycles = 0;
@@ -167,6 +169,10 @@ private:
             } else {
                 reply("@SRM" + QByteArray::number(sMain) + "S" + QByteArray::number(sSub));
             }
+        } else if (q == "UM") {
+            reply("@UM" + QByteArray::number(afMain));
+        } else if (q == "US") {
+            reply("@US" + QByteArray::number(afSub));
         } else if (q == "CV") {
             reply("@CV" + QByteArray::number(sidetone));
         } else if (q == "TO") {
@@ -235,6 +241,10 @@ private:
             mainAgc = cmd[4];
         } else if (cmd.startsWith("*KV") && cmd.size() == 6) {
             kv = cmd.mid(3);
+        } else if (cmd.startsWith("*UM")) {
+            afMain = cmd.mid(3).toInt();
+        } else if (cmd.startsWith("*US")) {
+            afSub = cmd.mid(3).toInt();
         } else if (cmd.startsWith("*CV")) {
             sidetone = cmd.mid(3).toInt();
         } else if (cmd.startsWith("*TO")) {
@@ -807,6 +817,80 @@ int main(int argc, char** argv)
     disconnectedSpy.clear();
     backend.connectRadio(req);
     check(waitFor([&] { return backend.isConnected(); }, 2000), "reconnected");
+
+    std::printf("-- slice volume: RSP2 with PC Audio on, the radio's own AF with it off\n");
+    {
+        check(backend.capabilities().extensionNamespaces.contains(QStringLiteral("orion")),
+              "the backend answers the orion namespace (PC Audio state)");
+        const auto audioReq = [](SliceAudioRequest::Field f, int v) {
+            SliceAudioRequest r;
+            r.field = f;
+            r.value = v;
+            return r;
+        };
+        // Last audio deltas published per slice.
+        std::map<int, std::optional<double>> gainSeen;
+        std::map<int, std::optional<bool>> muteSeen;
+        const auto conn = QObject::connect(&backend, &IRadioBackend::sliceChanged,
+                                           [&](int id, const SliceDelta& d) {
+                                               if (d.audioGain) gainSeen[id] = d.audioGain;
+                                               if (d.audioMute) muteSeen[id] = d.audioMute;
+                                           });
+        backend.invokeExtension(QStringLiteral("orion"), QStringLiteral("audio.pc.state"), 0, true);
+        radio.sets.clear();
+        backend.requestSliceAudio(0, audioReq(SliceAudioRequest::Field::Gain, 30));
+        QElapsedTimer g;
+        g.start();
+        while (g.elapsed() < 200) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+            usleep(2000);
+        }
+        check(!radio.sets.contains("*UM76"), "PC Audio on: volume stays on the RSP2, not the radio");
+
+        backend.invokeExtension(QStringLiteral("orion"), QStringLiteral("audio.pc"), 0, false);
+        check(waitFor([&] { return gainSeen[0] == 40.0 && gainSeen[1] == 20.0; }, 2000),
+              "PC Audio off: the sliders show the radio's own A/B volume (40 %, 20 %)");
+        radio.sets.clear();
+        backend.requestSliceAudio(0, audioReq(SliceAudioRequest::Field::Gain, 60));
+        backend.requestSliceAudio(1, audioReq(SliceAudioRequest::Field::Gain, 100));
+        check(waitFor([&] { return radio.afMain == 153 && radio.afSub == 255; }, 1000),
+              "slice A 60 % -> *UM153, slice B 100 % -> *US255 (byte scale)");
+        backend.requestSliceAudio(0, audioReq(SliceAudioRequest::Field::Mute, 1));
+        check(waitFor([&] { return radio.afMain == 0; }, 1000), "mute A -> *UM0");
+        radio.sets.clear();
+        backend.requestSliceAudio(0, audioReq(SliceAudioRequest::Field::Gain, 70));
+        g.restart();
+        while (g.elapsed() < 200) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+            usleep(2000);
+        }
+        check(radio.afMain == 0, "volume moved while muted keeps it muted");
+        backend.requestSliceAudio(0, audioReq(SliceAudioRequest::Field::Mute, 0));
+        check(waitFor([&] { return radio.afMain == 178; }, 1000), "unmute A -> the new level, *UM178");
+
+        // The radio's own knob, read back while PC Audio is off.
+        radio.afSub = 204;   // 80 %
+        backend.invokeExtension(QStringLiteral("orion"), QStringLiteral("audio.pc"), 0, true);
+        backend.invokeExtension(QStringLiteral("orion"), QStringLiteral("audio.pc"), 0, false);
+        check(waitFor([&] { return gainSeen[1] == 80.0; }, 2000),
+              "the radio's own volume knob shows on slice B's slider");
+
+        backend.invokeExtension(QStringLiteral("orion"), QStringLiteral("audio.pc"), 0, true);
+        check(gainSeen[0] == 30.0, "PC Audio on again: slice A's slider is back at its RSP2 level");
+
+        // Muted on the radio, then the session ends: the radio gets its level back.
+        backend.invokeExtension(QStringLiteral("orion"), QStringLiteral("audio.pc"), 0, false);
+        backend.requestSliceAudio(1, audioReq(SliceAudioRequest::Field::Mute, 1));
+        check(waitFor([&] { return radio.afSub == 0; }, 1000), "mute B -> *US0");
+        QObject::disconnect(conn);
+        backend.disconnectRadio();
+        check(waitFor([&] { return radio.afSub == 204; }, 1000),
+              "disconnect gives the muted receiver its volume back (stand-alone rule)");
+        disconnectedSpy.clear();
+        backend.connectRadio(req);
+        check(waitFor([&] { return backend.isConnected(); }, 2000), "reconnected");
+        backend.invokeExtension(QStringLiteral("orion"), QStringLiteral("audio.pc"), 0, true);
+    }
 
     std::printf("-- Center Lock after Zero Beat: no echo loop (2026-10-18 crash)\n");
     {

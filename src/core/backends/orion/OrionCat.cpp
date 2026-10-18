@@ -411,6 +411,12 @@ QByteArray setCwSidetoneVolume(int percent)
     return "*CV" + QByteArray::number(std::clamp(percent, 0, 100));
 }
 QByteArray queryCwSidetoneVolume() { return QByteArrayLiteral("?CV"); }
+QByteArray setAfVolume(Rx rx, int percent)
+{
+    return QByteArray(rx == Rx::Main ? "*UM" : "*US")
+        + QByteArray::number(std::clamp(percent, 0, 100) * 255 / 100);
+}
+QByteArray queryAfVolume(Rx rx) { return rx == Rx::Main ? QByteArrayLiteral("?UM") : QByteArrayLiteral("?US"); }
 
 QByteArray queryVfoLock(Rx rx)
 {
@@ -427,6 +433,34 @@ std::optional<Reply> decodeReply(const QByteArray& line)
     }
     qint64 v = 0;
     switch (line[1]) {
+    case 'U': {
+        // @UM<b> / @US<b> / @UB<b> / @UM<b>S<b>: AF volume, a byte on the wire
+        if (line.size() < 4 || !parseLeadingInt(line.mid(3), v) || v < 0 || v > 255) {
+            return std::nullopt;
+        }
+        const int pct = static_cast<int>(v * 100 / 255);
+        AfVolumeReply r;
+        switch (line[2]) {
+        case 'M': {
+            r.mainPercent = pct;
+            const qsizetype s = line.indexOf('S', 3);
+            qint64 v2 = 0;
+            if (s > 0 && parseLeadingInt(line.mid(s + 1), v2) && v2 >= 0 && v2 <= 255) {
+                r.subPercent = static_cast<int>(v2 * 100 / 255);
+            }
+            return r;
+        }
+        case 'S':
+            r.subPercent = pct;
+            return r;
+        case 'B':
+            r.mainPercent = pct;
+            r.subPercent = pct;
+            return r;
+        default:
+            return std::nullopt;
+        }
+    }
     case 'C':
         // @CV<0..100>: CW sidetone volume
         if (line[2] == 'V' && line.size() >= 4 && parseLeadingInt(line.mid(3), v) && v >= 0

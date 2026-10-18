@@ -112,6 +112,13 @@ inline constexpr double kS9Dbm = -73.0;
 // program sets it. ?TO answers @TO<n>.
 [[nodiscard]] QByteArray setMonitor(int percent);
 [[nodiscard]] QByteArray queryMonitor();
+// *UM / *US: the radio's own AF volume per receiver (its speaker/phones).
+// Documented 0..100 but really a byte: *UM100 is only ~40% of full audio
+// (reference program, measured on v3). Percent here, 0..255 on the wire.
+// ?UM / ?US answer @UM<b>, @US<b>, @UB<b> (both) or @UM<b>S<b>.
+[[nodiscard]] QByteArray setAfVolume(Rx rx, int percent);
+[[nodiscard]] QByteArray queryAfVolume(Rx rx);
+
 // *CV: the radio's CW sidetone volume, 0..100 (0 = silent), as the
 // reference program sets it. ?CV answers @CV<n>.
 [[nodiscard]] QByteArray setCwSidetoneVolume(int percent);
@@ -157,11 +164,13 @@ struct TxLevelReply {
 struct TunerReply { bool in; };
 // @CV<0..100>: CW sidetone volume.
 struct SidetoneReply { int volume; };
+// @UM / @US / @UB / @UM<m>S<s>: AF volume in percent, per receiver present.
+struct AfVolumeReply { std::optional<int> mainPercent; std::optional<int> subPercent; };
 
 using Reply = std::variant<FrequencyReply, ModeReply, BandwidthReply, PbtReply,
                            AgcReply, RfGainReply, AttenuatorReply, PreampReply,
                            SMeterReply, TxMeterReply, VfoAssignmentReply, VfoLockReply,
-                           TxLevelReply, TunerReply, SidetoneReply>;
+                           TxLevelReply, TunerReply, SidetoneReply, AfVolumeReply>;
 
 // Decode one line (CR already stripped). nullopt for anything that is not a
 // well-formed, in-range reply this decoder knows; replies glued together on

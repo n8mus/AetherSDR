@@ -605,6 +605,22 @@ now closed the way the RTL backend does it:
   back next session (FFT AVG had been sitting at 0).
 The console's own appearance is not brought over (fork rule 2).
 
+**Radio AF volume (2026-10-18, bench-tested on the fake radio only):**
+PC Audio decides where a slice's volume and mute act. On: the RSP2 audio
+in AetherSDR, as before. Off (listening to the radio): slice A drives the
+Orion's main AF (*UM), slice B the sub (*US), on the radio's byte scale
+(percent x 255 / 100; *U100 is only ~40 % of full audio, reference
+program). Mute = 0 with the level kept; a level moved while muted waits.
+?UM / ?US are read on connect, in the slow wheel and when PC Audio turns
+off, so the radio's own knobs show on the sliders; each mode keeps its own
+level. Disconnect gives a muted receiver its level back (stand-alone
+rule). Balance stays RSP2-only; the radio's phones/speaker routing (*UC)
+is not wired. PC Audio reaches the backend through the "orion" extension
+namespace (audio.pc / audio.pc.state; hook in RadioModel, FORK-NOTES).
+Also 2026-10-18: Center Lock + Zero Beat crash fixed (pan centre echo
+loop); serial device remembered and startup auto-connect for serial
+radios.
+
 **PAUSED 2026-10-17 (operator decision).** The fork runs the whole station
 on air (CAT, RSP2 pan and both receivers, split, TX on both paths, TUNE,
 ATU, WinKeyer CW, sidetone). Open when it resumes: the 2D panadapter (the

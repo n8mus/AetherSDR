@@ -63,7 +63,7 @@ QList<QByteArray> OrionPollScheduler::next(qint64 nowMs)
         return frequency(mainMoving ? Rx::Main : Rx::Sub, nowMs);
     }
     if (tick % kSlowWheelEveryTicks == 3) {
-        const int item = m_slowWheel++ % 7;
+        const int item = m_slowWheel++ % 8;
         switch (item) {
         case 0:
             return {queryVfoAssignment()};
@@ -77,9 +77,12 @@ QList<QByteArray> OrionPollScheduler::next(qint64 nowMs)
             return {queryAttenuator(Rx::Main)};
         case 5:
             return {queryPreamp(Rx::Main)};
-        default:
+        case 6:
             // The front panel can switch the tuner in or out.
             return {queryTuner()};
+        default:
+            // The radio's own volume knobs (shown when PC Audio is off).
+            return {queryAfVolume(Rx::Main), queryAfVolume(Rx::Sub)};
         }
     }
     return {querySMeter()};

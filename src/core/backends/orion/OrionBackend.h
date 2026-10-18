@@ -212,6 +212,9 @@ private:
     [[nodiscard]] bool tuneHoldsReadback() const;
     void finishAtuCycle(const char* status, const QString& warning = {});
     void publishAtu(const char* status);
+    void setPcAudio(bool on);
+    void publishSliceAudio(Rx rx);
+    void sendRadioVolume(Rx rx);
     void leaveRadioSafe();
     void updateTxAudioGate();
     void onTxFailsafe();
@@ -329,6 +332,14 @@ private:
     std::array<bool, 2> m_sliceMuted{false, false};
     std::array<float, 2> m_sliceGain{1.0f, 1.0f};
     std::array<int, 2> m_slicePan{50, 50};
+    // PC Audio decides where a slice's volume and mute act: on, the RSP2
+    // audio here (the three arrays above); off, the radio's own AF volume
+    // (*UM / *US), so the operator hears the Orion. AetherSDR reports the
+    // button through the "orion" extension (audio.pc / audio.pc.state).
+    bool m_pcAudio = true;
+    std::array<int, 2> m_radioVolume{-1, -1};      // percent; the unmuted level
+    std::array<bool, 2> m_radioMuted{false, false};
+    static constexpr int kRadioVolumeFallback = 40;   // ~ the radio's *U100
     std::array<QByteArray, 2> m_mixPending;
     std::array<std::optional<bool>, 2> m_inCapture;
     int m_cwPitchHz = 600;

@@ -96,6 +96,22 @@ static void testReplies()
     check(!decodeReply("@CV101"), "sidetone out of range");
     check(setCwSidetoneVolume(55) == "*CV55" && queryCwSidetoneVolume() == "?CV",
           "sidetone commands as the reference program sends them");
+    check(setAfVolume(Rx::Main, 40) == "*UM102" && setAfVolume(Rx::Sub, 100) == "*US255"
+              && setAfVolume(Rx::Main, 150) == "*UM255",
+          "AF volume: percent to the radio's byte scale, clamped");
+    check(queryAfVolume(Rx::Main) == "?UM" && queryAfVolume(Rx::Sub) == "?US", "AF volume queries");
+    const auto um = decodeReply("@UM102");
+    check(as<AfVolumeReply>(um) && as<AfVolumeReply>(um)->mainPercent == 40
+              && !as<AfVolumeReply>(um)->subPercent, "@UM102 = main 40 %");
+    const auto us = decodeReply("@US255");
+    check(as<AfVolumeReply>(us) && as<AfVolumeReply>(us)->subPercent == 100, "@US255 = sub 100 %");
+    const auto ub = decodeReply("@UB51");
+    check(as<AfVolumeReply>(ub) && as<AfVolumeReply>(ub)->mainPercent == 20
+              && as<AfVolumeReply>(ub)->subPercent == 20, "@UB51 = both 20 %");
+    const auto both = decodeReply("@UM102S51");
+    check(as<AfVolumeReply>(both) && as<AfVolumeReply>(both)->mainPercent == 40
+              && as<AfVolumeReply>(both)->subPercent == 20, "@UM102S51 = main 40 %, sub 20 %");
+    check(!decodeReply("@UM300"), "AF volume out of range");
     check(setTuner(true) == "*TT1" && setTuner(false) == "*TT0" && startTunerCycle() == "*TTT"
               && queryTuner() == "?TT",
           "tuner commands as the reference program sends them");

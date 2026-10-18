@@ -217,6 +217,8 @@ RadioCapabilities OrionBackend::capabilities() const
     c.txMonitorControl = RadioCapabilities::TxMonitorControl{};
     c.hasTxFilterControls = false;
     // The internal tuner (*TT): in, bypass and the radio's own tune cycle.
+    // PC Audio's state arrives on this namespace (audio.pc, audio.pc.state).
+    c.extensionNamespaces << QStringLiteral("orion");
     c.hasTuner = true;
     c.hasTunerMemories = false;
     // TUNE switches the radio to FM for its carrier, so it works from CW too.
@@ -591,6 +593,19 @@ void OrionBackend::onLine(const QByteArray& line)
             if (m_atuCycle) {
                 m_atuLastSwr = r.swr;
             }
+        } else if constexpr (std::is_same_v<T, AfVolumeReply>) {
+            for (Rx rx : {Rx::Main, Rx::Sub}) {
+                const std::optional<int> pct = rx == Rx::Main ? r.mainPercent : r.subPercent;
+                const auto i = static_cast<std::size_t>(sliceForRx(rx));
+                // Muted, the radio reads 0 by our doing: keep the level.
+                if (!pct || m_radioMuted[i] || *pct == m_radioVolume[i]) {
+                    continue;
+                }
+                m_radioVolume[i] = *pct;
+                if (!m_pcAudio) {
+                    publishSliceAudio(rx);   // the radio's own knob moved
+                }
+            }
         } else if constexpr (std::is_same_v<T, SidetoneReply>) {
             // One knob on the radio: 0 is sidetone off, and the level is kept.
             TransmitDelta d;
@@ -797,6 +812,8 @@ void OrionBackend::startupQueries()
     send(queryTuner());
     send(queryMonitor());
     send(queryCwSidetoneVolume());
+    send(queryAfVolume(Rx::Main));
+    send(queryAfVolume(Rx::Sub));
     send(queryMicGain());
     send(querySpeechProcessor());
     send(queryAuxGain());
@@ -1278,16 +1295,79 @@ ReceiveDispatch OrionBackend::requestSliceAudio(int sliceId, const SliceAudioReq
 
 void OrionBackend::setSliceAudioMute(int sliceId, bool mute)
 {
-    if (rxForSlice(sliceId)) {
-        m_sliceMuted[static_cast<std::size_t>(sliceId)] = mute;
+    const std::optional<Rx> rx = rxForSlice(sliceId);
+    if (!rx) {
+        return;
     }
+    const auto i = static_cast<std::size_t>(sliceId);
+    if (m_pcAudio) {
+        m_sliceMuted[i] = mute;
+        return;
+    }
+    // The radio has no mute: 0, and the level is kept to come back to.
+    m_radioMuted[i] = mute;
+    sendRadioVolume(*rx);
 }
 
 void OrionBackend::setSliceAudioGain(int sliceId, int gainPercent)
 {
-    if (rxForSlice(sliceId)) {
-        m_sliceGain[static_cast<std::size_t>(sliceId)] = std::clamp(gainPercent, 0, 100) / 100.0f;
+    const std::optional<Rx> rx = rxForSlice(sliceId);
+    if (!rx) {
+        return;
     }
+    const auto i = static_cast<std::size_t>(sliceId);
+    if (m_pcAudio) {
+        m_sliceGain[i] = std::clamp(gainPercent, 0, 100) / 100.0f;
+        return;
+    }
+    m_radioVolume[i] = std::clamp(gainPercent, 0, 100);
+    if (!m_radioMuted[i]) {
+        sendRadioVolume(*rx);
+    }
+}
+
+void OrionBackend::sendRadioVolume(Rx rx)
+{
+    if (!m_connected) {
+        return;
+    }
+    const auto i = static_cast<std::size_t>(sliceForRx(rx));
+    const int level = m_radioVolume[i] >= 0 ? m_radioVolume[i] : kRadioVolumeFallback;
+    send(orion::setAfVolume(rx, m_radioMuted[i] ? 0 : level));
+}
+
+void OrionBackend::setPcAudio(bool on)
+{
+    if (on == m_pcAudio) {
+        return;
+    }
+    m_pcAudio = on;
+    qCInfo(lcOrion) << "Orion: slice volume and mute now drive"
+                    << (on ? "the RSP2 audio (PC Audio on)" : "the radio's own AF (PC Audio off)");
+    // Each place keeps its own level; the sliders show the one now in use.
+    for (Rx rx : {Rx::Main, Rx::Sub}) {
+        publishSliceAudio(rx);
+    }
+    if (!on && m_connected) {
+        send(queryAfVolume(Rx::Main));
+        send(queryAfVolume(Rx::Sub));
+    }
+}
+
+void OrionBackend::publishSliceAudio(Rx rx)
+{
+    const auto i = static_cast<std::size_t>(sliceForRx(rx));
+    SliceDelta d;
+    if (m_pcAudio) {
+        d.audioGain = std::round(m_sliceGain[i] * 100.0f);
+        d.audioMute = m_sliceMuted[i];
+    } else {
+        if (m_radioVolume[i] >= 0) {
+            d.audioGain = m_radioVolume[i];
+        }
+        d.audioMute = m_radioMuted[i];
+    }
+    emit sliceChanged(sliceForRx(rx), d);
 }
 
 void OrionBackend::setSliceAudioPan(int sliceId, int panPercent)
@@ -1924,6 +2004,16 @@ void OrionBackend::leaveRadioSafe()
         m_atuCycle = false;
         send(orion::setPtt(false));
     }
+    // A receiver we muted (volume 0) gets its level back: the radio must not
+    // be left silent for the front panel (stand-alone rule).
+    for (Rx rx : {Rx::Main, Rx::Sub}) {
+        const auto i = static_cast<std::size_t>(sliceForRx(rx));
+        if (m_radioMuted[i]) {
+            m_radioMuted[i] = false;
+            send(orion::setAfVolume(rx, m_radioVolume[i] >= 0 ? m_radioVolume[i]
+                                                              : kRadioVolumeFallback));
+        }
+    }
     // A carrier cut short by a disconnect still gives back mode and power.
     if (m_tuning) {
         m_tuning = false;
@@ -2395,7 +2485,12 @@ void OrionBackend::setCwSpeed(int wpm)
 void OrionBackend::invokeExtension(const QString& ns, const QString& verb,
                                    quint64 requestId, const QVariant& arg)
 {
-    Q_UNUSED(arg);
+    // PC Audio: the click (audio.pc) and the state at connect (audio.pc.state).
+    if (ns == QLatin1String("orion")
+        && (verb == QLatin1String("audio.pc") || verb == QLatin1String("audio.pc.state"))) {
+        setPcAudio(arg.toBool());
+        return;
+    }
     if (requestId != 0) {
         emit extensionError(requestId, tr("Orion backend has no extension %1.%2")
                                            .arg(ns, verb));

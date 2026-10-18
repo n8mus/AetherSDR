@@ -610,6 +610,14 @@ void RadioModel::setPcAudioEnabled(bool on)
     // "looks identical to one that works" while asking a different question.
     // It also silently excludes anything that speaks the icom verbs without
     // being family "icom" — a gateway, or an Icom variant backend.
+#ifdef AETHER_BACKEND_ORION
+    // N8EM fork: PC Audio decides whether slice volume drives the RSP2 audio
+    // or the Orion's own AF (FORK-NOTES.md).
+    if (backendDeclaresExtension(QStringLiteral("orion"))) {
+        m_backend->invokeExtension(QStringLiteral("orion"), QStringLiteral("audio.pc"), 0, on);
+        return;
+    }
+#endif
     if (!backendDeclaresExtension(QStringLiteral("icom"))) {
         return;
     }
@@ -620,6 +628,12 @@ void RadioModel::setPcAudioEnabled(bool on)
 void RadioModel::notePcAudioEnabled(bool on)
 {
     // Same rule as setPcAudioEnabled above: the namespace is the contract.
+#ifdef AETHER_BACKEND_ORION
+    if (backendDeclaresExtension(QStringLiteral("orion"))) {
+        m_backend->invokeExtension(QStringLiteral("orion"), QStringLiteral("audio.pc.state"), 0, on);
+        return;
+    }
+#endif
     if (!backendDeclaresExtension(QStringLiteral("icom"))) {
         return;
     }
