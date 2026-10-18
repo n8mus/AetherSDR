@@ -622,6 +622,25 @@ Also 2026-10-18: Center Lock + Zero Beat crash fixed (pan centre echo
 loop); serial device remembered and startup auto-connect for serial
 radios.
 
+**Step 8, CW skimmer stage 1 (2026-10-18, tested on synthetic IQ only):**
+the Orion console's skimmer, ported (src/core/backends/orion/skimmer/: its
+engine, fldigi and Bayes decoders, and DX-cluster server, as is apart from
+the namespace and the engine watching the LO rather than the dial, since
+here the LO follows the pan view). The RSP2 callback copies IQ into
+OrionSkimmerFeed's ring; its own thread feeds the decoder bank (OpenMP
+across cores when found, as the console builds it). Every 2.5 s the RSP2
+worker posts the whole capture's spectrum; OrionSkimmer lays the channels
+out on the band's CW segment from it, and only then lets blocks taken at
+that LO through, so a pan move never feeds the decoders the wrong offsets.
+Calls are checked against AetherSDR's cty.dat and cqrlog's MASTER.SCP
+(the console's confidence tiers). Finds go to the telnet server on
+localhost:7300 (cqrlog, Not1MM) and, as an "orion"/"skimmer.spot"
+extension event, onto the panadapter through the RBN spot path (violet,
+10 min). Radio Setup -> Orion: on/off (default off), pause outside CW
+(default on), Bayes, channels (24), port (7300); it also pauses while the
+radio transmits. Health shows status, channels decoding, the telnet feed
+and dropped IQ. Stage 2 (later): the band map and SKIM waterfall windows.
+
 **PAUSED 2026-10-17 (operator decision).** The fork runs the whole station
 on air (CAT, RSP2 pan and both receivers, split, TX on both paths, TUNE,
 ATU, WinKeyer CW, sidetone). Open when it resumes: the 2D panadapter (the

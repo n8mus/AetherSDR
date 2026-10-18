@@ -12,6 +12,7 @@
 #include <QElapsedTimer>
 #include <QSignalSpy>
 #include <QSocketNotifier>
+#include <QTemporaryDir>
 #include <QTimer>
 
 #include <cmath>
@@ -302,6 +303,10 @@ struct SliceView {
 
 int main(int argc, char** argv)
 {
+    // Never the operator's settings: the skimmer's switches are AetherSDR
+    // settings, and this test changes them.
+    QTemporaryDir settingsDir;
+    qputenv("AETHER_SETTINGS_DIR", settingsDir.path().toUtf8());
     QCoreApplication app(argc, argv);
     qRegisterMetaType<SliceDelta>();
     qRegisterMetaType<TransmitDelta>();
@@ -930,6 +935,37 @@ int main(int argc, char** argv)
             usleep(2000);
         }
         check(radio.routing == "MSS", "an invalid choice changes nothing");
+        QObject::disconnect(conn);
+    }
+
+    std::printf("-- CW skimmer switches (the RSP2 is off in this test)\n");
+    {
+        QVariantMap state;
+        quint64 want = 0;
+        const auto conn = QObject::connect(&backend, &IRadioBackend::extensionResult,
+                                           [&](quint64 id, const QVariant& r) {
+                                               if (id == want) state = r.toMap();
+                                           });
+        want = 91;
+        backend.invokeExtension(QStringLiteral("orion"), QStringLiteral("skimmer.get"), want);
+        check(state.value("enabled") == false && state.value("cwOnly") == true
+                  && state.value("channels") == 24 && state.value("port") == 7300,
+              "defaults: off, pause outside CW, 24 channels, telnet :7300");
+        check(state.value("available") == false, "no skimmer without the RSP2");
+        QVariantMap set;
+        set.insert(QStringLiteral("enabled"), true);
+        set.insert(QStringLiteral("channels"), 99);
+        want = 92;
+        backend.invokeExtension(QStringLiteral("orion"), QStringLiteral("skimmer.set"), want, set);
+        check(state.value("enabled") == true && state.value("channels") == 64,
+              "switched on; channels clamped to 64");
+        want = 93;
+        backend.invokeExtension(QStringLiteral("orion"), QStringLiteral("skimmer.get"), want);
+        check(state.value("enabled") == true, "the switch persists");
+        set.clear();
+        set.insert(QStringLiteral("enabled"), false);
+        set.insert(QStringLiteral("channels"), 24);
+        backend.invokeExtension(QStringLiteral("orion"), QStringLiteral("skimmer.set"), 0, set);
         QObject::disconnect(conn);
     }
 

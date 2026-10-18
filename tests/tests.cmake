@@ -9561,6 +9561,15 @@ if(AETHER_BACKEND_ORION AND UNIX AND NOT APPLE)
     add_test(NAME orion_peripherals_test COMMAND orion_peripherals_test)
     set_tests_properties(orion_peripherals_test PROPERTIES TIMEOUT 90)
 
+    # Step 8: the CW skimmer against synthetic IQ (engine, telnet server, glue).
+    add_executable(orion_skimmer_test tests/orion_skimmer_test.cpp)
+    target_include_directories(orion_skimmer_test PRIVATE src tests)
+    target_compile_definitions(orion_skimmer_test PRIVATE
+        ORION_TEST_CTY_DAT="${CMAKE_SOURCE_DIR}/resources/cty.dat")
+    target_link_libraries(orion_skimmer_test PRIVATE aethercore Qt6::Core Qt6::Network)
+    add_test(NAME orion_skimmer_test COMMAND orion_skimmer_test)
+    set_tests_properties(orion_skimmer_test PROPERTIES TIMEOUT 180)
+
     add_executable(orion_backend_test tests/orion_backend_test.cpp)
     target_include_directories(orion_backend_test PRIVATE src tests)
     target_link_libraries(orion_backend_test PRIVATE aethercore Qt6::Core Qt6::Test util)

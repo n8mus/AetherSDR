@@ -16,7 +16,10 @@ class OrionRxAudio {};
 #include "core/backends/orion/OrionPatMonitor.h"
 #include "core/backends/orion/OrionRotor.h"
 #include "core/backends/orion/OrionTxAudio.h"
+#include "core/backends/orion/OrionSkimmer.h"
+#include "core/backends/orion/OrionSkimmerFeed.h"
 #include "core/backends/orion/OrionWinKeyer.h"
+#include "core/AppSettings.h"
 #include "core/dsp/SpectrumTemporalAverage.h"
 
 #include <QLoggingCategory>
@@ -979,6 +982,7 @@ void OrionBackend::applyMode(Rx rx, Mode mode)
     publishPassband(rx);
     if (rx == Rx::Main) {
         emit capabilitiesChanged();   // the filter ceiling follows the mode
+        updateSkimmerGate();          // the skimmer pauses outside CW
     }
 }
 
@@ -1123,6 +1127,19 @@ void OrionBackend::startSdr(const QVariantMap& params)
     m_mixPending = {};
     m_sdr = std::make_unique<Rsp2Receiver>();
     m_sdr->setAudioSinks(m_rxAudio[0].get(), m_rxAudio[1].get());
+    // The skimmer's feed, like the audio chains, must exist before the first
+    // block (step 8).
+    startSkimmer(params);
+    if (m_skimmer) {
+        m_sdr->setSkimmerSink(m_skimmer->feed());
+        connect(m_sdr.get(), &Rsp2Receiver::fullSpectrumReady, this,
+                [this](const std::vector<float>& db, qint64 lo) {
+            if (m_skimmer) {
+                m_skimmer->onFullSpectrum(db, static_cast<int>(spectrum::kCaptureHz), lo,
+                                          m_rx[0].hz.value_or(0));
+            }
+        });
+    }
     connect(m_sdr.get(), &Rsp2Receiver::frameReady, this, [this](const QByteArray& frame) {
         if (m_connected) {
             emit spectrumFrameReady(0, frame);
@@ -1147,6 +1164,7 @@ void OrionBackend::startSdr(const QVariantMap& params)
         return;
     }
     m_sdrStatus = tr("streaming");
+    updateSkimmerGate();
     m_sdr->setView(m_view, m_panPoints);
     pushRxTuning();
     m_sdrStartedMs = nowMs();
@@ -1392,9 +1410,92 @@ void OrionBackend::stopSdr()
     // thread. Both join before returning (IRadioBackend rule 5), so nothing
     // reaches a seam signal afterwards.
     m_sdr.reset();
+    // After the device: its callback fed the skimmer's ring.
+    m_skimmer.reset();
     m_rxAudio = {};
     m_mixPending = {};
     m_inCapture = {};
+}
+
+void OrionBackend::startSkimmer(const QVariantMap& params)
+{
+    // The operator's switches are AetherSDR settings; "none" turns the
+    // skimmer off for a session (tests, and a second instance).
+    auto& settings = AppSettings::instance();
+    m_skimmerEnabled = settings.value(QStringLiteral("OrionSkimmerEnabled"), false).toBool();
+    m_skimmerCwOnly = settings.value(QStringLiteral("OrionSkimmerCwOnly"), true).toBool();
+    if (params.value(QStringLiteral("orion.skimmer")).toString() == QLatin1String("none")) {
+        m_skimmerStatus = tr("off for this connection");
+        return;
+    }
+    OrionSkimmer::Settings s;
+    s.channels = settings.value(QStringLiteral("OrionSkimmerChannels"), s.channels).toInt();
+    s.telnetPort = settings.value(QStringLiteral("OrionSkimmerPort"), s.telnetPort).toInt();
+    s.bayes = settings.value(QStringLiteral("OrionSkimmerBayes"), false).toBool();
+    s.spotterCall = settings.value(QStringLiteral("StationCallsign")).toString().trimmed().toUpper();
+    m_skimmer = std::make_unique<OrionSkimmer>(static_cast<double>(spectrum::kCaptureHz), s);
+    QString error;
+    if (!m_skimmer->startServer(&error)) {
+        qCWarning(lcOrion) << "Skimmer:" << error;
+        emit configurationWarning(tr("Skimmer telnet feed: %1").arg(error));
+    }
+    connect(m_skimmer.get(), &OrionSkimmer::spotFound, this,
+            [this](const QString& call, qint64 hz, int wpm) {
+        qCInfo(lcOrion).noquote() << "Skimmer:" << call << "on" << hz / 1000.0 << "kHz"
+                                  << (wpm > 0 ? QStringLiteral("%1 WPM").arg(wpm) : QString());
+        QVariantMap f;
+        f.insert(QStringLiteral("call"), call);
+        f.insert(QStringLiteral("freqHz"), hz);
+        f.insert(QStringLiteral("wpm"), wpm);
+        emit extensionStatus(QStringLiteral("orion"), QStringLiteral("skimmer.spot"), f);
+    });
+    qCInfo(lcOrion) << "Skimmer:" << m_skimmer->channelCount() << "channels, telnet port"
+                    << m_skimmer->serverPort() << ", cty.dat"
+                    << (m_skimmer->callValidatorLoaded() ? "loaded" : "missing")
+                    << ", MASTER.SCP" << m_skimmer->knownCalls() << "calls";
+}
+
+void OrionBackend::updateSkimmerGate()
+{
+    if (!m_skimmer) {
+        if (m_skimmerStatus.isEmpty()) {
+            m_skimmerStatus = tr("off");
+        }
+        return;
+    }
+    const std::optional<Mode> mode = m_rx[0].mode;
+    const bool cw = mode && (*mode == Mode::Cw || *mode == Mode::Cwl);
+    const bool active = m_skimmerEnabled && !m_radioTx && (cw || !m_skimmerCwOnly);
+    m_skimmer->setActive(active);
+#ifdef AETHER_ORION_SDRPLAY
+    if (m_sdr) {
+        // The channel search reads the whole capture every 2.5 s (console).
+        m_sdr->setFullSpectrumInterval(active ? 2500 : 0);
+    }
+#endif
+    m_skimmerStatus = !m_skimmerEnabled ? tr("off")
+        : m_radioTx ? tr("paused while transmitting")
+        : !active ? tr("paused outside CW")
+        : tr("decoding");
+}
+
+QVariantMap OrionBackend::skimmerState() const
+{
+    QVariantMap m;
+    m.insert(QStringLiteral("enabled"), m_skimmerEnabled);
+    m.insert(QStringLiteral("cwOnly"), m_skimmerCwOnly);
+    auto& settings = AppSettings::instance();
+    m.insert(QStringLiteral("bayes"), settings.value(QStringLiteral("OrionSkimmerBayes"), false).toBool());
+    m.insert(QStringLiteral("channels"), settings.value(QStringLiteral("OrionSkimmerChannels"), 24).toInt());
+    m.insert(QStringLiteral("port"), settings.value(QStringLiteral("OrionSkimmerPort"), 7300).toInt());
+    m.insert(QStringLiteral("status"), m_skimmerStatus);
+    m.insert(QStringLiteral("available"), m_skimmer != nullptr);
+    if (m_skimmer) {
+        m.insert(QStringLiteral("activeChannels"), m_skimmer->activeChannels());
+        m.insert(QStringLiteral("serverPort"), m_skimmer->serverPort());
+        m.insert(QStringLiteral("serverClients"), m_skimmer->serverClients());
+    }
+    return m;
 }
 
 // ---- intents down ------------------------------------------------------------
@@ -1555,6 +1656,7 @@ void OrionBackend::setSliceMode(int sliceId, const QString& neutral)
     publishPassband(*rx);
     if (*rx == Rx::Main) {
         emit capabilitiesChanged();
+        updateSkimmerGate();
     }
 }
 
@@ -2039,6 +2141,7 @@ void OrionBackend::setRadioTx(bool on)
                     << (m_atuCycle ? "(its ATU tune cycle)"
                         : on && !m_keyIntent ? "(keyed from the radio, not by AetherSDR)" : "");
     m_radioTx = on;
+    updateSkimmerGate();
     if (m_atuCycle) {
         if (on) {
             m_atuSawTx = true;
@@ -2528,6 +2631,46 @@ void OrionBackend::invokeExtension(const QString& ns, const QString& verb,
         }
         return;
     }
+    // The CW skimmer's switches (Radio Setup -> Orion): skimmer.get answers the
+    // state; skimmer.set takes any of enabled / cwOnly / bayes (live) and
+    // channels / port (applied at the next connect), and persists them.
+    if (ns == QLatin1String("orion") && verb == QLatin1String("skimmer.get")) {
+        if (requestId != 0) {
+            emit extensionResult(requestId, skimmerState());
+        }
+        return;
+    }
+    if (ns == QLatin1String("orion") && verb == QLatin1String("skimmer.set")) {
+        const QVariantMap m = arg.toMap();
+        auto& settings = AppSettings::instance();
+        if (m.contains(QStringLiteral("enabled"))) {
+            m_skimmerEnabled = m.value(QStringLiteral("enabled")).toBool();
+            settings.setValue(QStringLiteral("OrionSkimmerEnabled"), m_skimmerEnabled);
+        }
+        if (m.contains(QStringLiteral("cwOnly"))) {
+            m_skimmerCwOnly = m.value(QStringLiteral("cwOnly")).toBool();
+            settings.setValue(QStringLiteral("OrionSkimmerCwOnly"), m_skimmerCwOnly);
+        }
+        if (m.contains(QStringLiteral("bayes"))) {
+            settings.setValue(QStringLiteral("OrionSkimmerBayes"),
+                              m.value(QStringLiteral("bayes")).toBool());
+        }
+        if (m.contains(QStringLiteral("channels"))) {
+            settings.setValue(QStringLiteral("OrionSkimmerChannels"),
+                              std::clamp(m.value(QStringLiteral("channels")).toInt(), 4, 64));
+        }
+        if (m.contains(QStringLiteral("port"))) {
+            settings.setValue(QStringLiteral("OrionSkimmerPort"),
+                              std::clamp(m.value(QStringLiteral("port")).toInt(), 0, 65535));
+        }
+        settings.save();
+        qCInfo(lcOrion) << "Skimmer settings:" << m;
+        updateSkimmerGate();
+        if (requestId != 0) {
+            emit extensionResult(requestId, skimmerState());
+        }
+        return;
+    }
     // PC Audio: the click (audio.pc) and the state at connect (audio.pc.state).
     if (ns == QLatin1String("orion")
         && (verb == QLatin1String("audio.pc") || verb == QLatin1String("audio.pc.state"))) {
@@ -2572,6 +2715,18 @@ IRadioBackend::HealthSnapshot OrionBackend::healthSnapshot() const
     }
     h.values.insert(QStringLiteral("cwDaemonStatus"), m_cwDaemonStatus);
     h.values.insert(QStringLiteral("patStatus"), m_patStatus);
+    h.values.insert(QStringLiteral("skimmerStatus"), m_skimmerStatus);
+    if (m_skimmer) {
+        h.values.insert(QStringLiteral("skimmerChannels"),
+                        QStringLiteral("%1 of %2").arg(m_skimmer->activeChannels())
+                            .arg(m_skimmer->channelCount()));
+        h.values.insert(QStringLiteral("skimmerServer"),
+                        m_skimmer->serverPort() != 0
+                            ? tr("localhost:%1, %2 client(s)").arg(m_skimmer->serverPort())
+                                  .arg(m_skimmer->serverClients())
+                            : tr("off"));
+        h.values.insert(QStringLiteral("skimmerDropped"), m_skimmer->droppedSamples());
+    }
     h.values.insert(QStringLiteral("sdrStatus"), m_sdrStatus);
 #ifdef AETHER_ORION_SDRPLAY
     if (m_sdr) {
@@ -2590,7 +2745,9 @@ IRadioBackend::HealthSnapshot OrionBackend::healthSnapshot() const
                QStringLiteral("txAudioDropped"), QStringLiteral("keyerStatus"),
                QStringLiteral("cwDaemonStatus"), QStringLiteral("rotorStatus"),
                QStringLiteral("rotorAzimuth"), QStringLiteral("rotctldPort"),
-               QStringLiteral("patStatus"), QStringLiteral("sdrStatus"),
+               QStringLiteral("patStatus"), QStringLiteral("skimmerStatus"),
+               QStringLiteral("skimmerChannels"), QStringLiteral("skimmerServer"),
+               QStringLiteral("skimmerDropped"), QStringLiteral("sdrStatus"),
                QStringLiteral("sdrLoHz"), QStringLiteral("sdrDeliveryPercent"),
                QStringLiteral("sdrOverloads")};
     h.sections.insert(QStringLiteral("txPath"), tr("Transmit"));
@@ -2605,6 +2762,11 @@ IRadioBackend::HealthSnapshot OrionBackend::healthSnapshot() const
     h.labels.insert(QStringLiteral("rotorAzimuth"), tr("Rotor heading (deg)"));
     h.labels.insert(QStringLiteral("rotctldPort"), tr("rotctld port"));
     h.labels.insert(QStringLiteral("patStatus"), tr("Pat (Winlink)"));
+    h.sections.insert(QStringLiteral("skimmerStatus"), tr("CW skimmer"));
+    h.labels.insert(QStringLiteral("skimmerStatus"), tr("Status"));
+    h.labels.insert(QStringLiteral("skimmerChannels"), tr("Channels decoding"));
+    h.labels.insert(QStringLiteral("skimmerServer"), tr("Telnet feed"));
+    h.labels.insert(QStringLiteral("skimmerDropped"), tr("IQ samples dropped"));
     h.sections.insert(QStringLiteral("sdrStatus"), tr("RSP2 panadapter"));
     h.labels.insert(QStringLiteral("sdrStatus"), tr("Status"));
     h.labels.insert(QStringLiteral("sdrLoHz"), tr("LO (Hz)"));

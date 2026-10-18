@@ -1,4 +1,5 @@
 #include "core/backends/orion/Rsp2Receiver.h"
+#include "core/backends/orion/OrionSkimmerFeed.h"
 
 #include "core/backends/orion/OrionRxAudio.h"
 #include "core/backends/orion/SdrPlayApi.h"
@@ -277,6 +278,9 @@ void Rsp2Receiver::onStream(const short* xi, const short* xq, unsigned int n, bo
             sink->push(m_scratch.data(), n, lo);
         }
     }
+    if (m_skimmerSink) {
+        m_skimmerSink->push(m_scratch.data(), n, lo);
+    }
 }
 
 void Rsp2Receiver::eventCallback(sdrplay_api_EventT eventId, sdrplay_api_TunerSelectT tuner,
@@ -310,6 +314,7 @@ void Rsp2Receiver::workerLoop()
     quint64 lastSamples = 0;
     // The average is a time constant, so it needs the time between frames.
     auto lastFrame = std::chrono::steady_clock::now();
+    auto lastFullSpectrum = lastFrame;
 
     while (!m_stopWorker) {
         int intervalMs = 40;
@@ -363,6 +368,17 @@ void Rsp2Receiver::workerLoop()
         const double elapsed = std::chrono::duration<double>(now - lastFrame).count();
         lastFrame = now;
         const std::vector<float>& db = processor.process(block.data(), elapsed, lo);
+        // The skimmer's channel search reads the whole capture, not the view.
+        const int fullMs = m_fullSpectrumMs.load(std::memory_order_relaxed);
+        if (fullMs > 0 && now - lastFullSpectrum >= std::chrono::milliseconds(fullMs)) {
+            lastFullSpectrum = now;
+            std::vector<float> full = db;
+            QMetaObject::invokeMethod(this, [this, full = std::move(full), lo, generation] {
+                if (generation == m_generation) {
+                    emit fullSpectrumReady(full, lo);
+                }
+            }, Qt::QueuedConnection);
+        }
         std::vector<float> frame = spectrum::cropToView(db, lo, view, points);
         const float offset = static_cast<float>(levelOffsetDb());
         for (float& v : frame) {

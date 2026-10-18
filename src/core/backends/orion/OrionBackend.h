@@ -32,6 +32,7 @@ class QSerialPort;
 namespace AetherSDR::orion {
 
 class Rsp2Receiver;
+class OrionSkimmer;
 class OrionRxAudio;
 class OrionTxAudio;
 class OrionWinKeyer;
@@ -223,6 +224,9 @@ private:
     void applyPcProfile();
     void setTxPath(TxPath path);
     void setRadioTx(bool on);
+    void startSkimmer(const QVariantMap& params);
+    void updateSkimmerGate();
+    [[nodiscard]] QVariantMap skimmerState() const;
     void openTxAudio(const QVariantMap& params);
 
     // Station peripherals (step 7), owned with the session: one owner per
@@ -327,6 +331,12 @@ private:
     QVariantMap m_connectParams;
     std::unique_ptr<Rsp2Receiver> m_sdr;
     std::array<std::unique_ptr<OrionRxAudio>, 2> m_rxAudio;
+    // CW skimmer (step 8): runs on the RSP2's IQ, so it lives with m_sdr
+    // (created before it starts, destroyed after it stops).
+    std::unique_ptr<OrionSkimmer> m_skimmer;
+    bool m_skimmerEnabled = false;      // the operator's switch (persisted)
+    bool m_skimmerCwOnly = true;        // pause outside CW (console default)
+    QString m_skimmerStatus;
     // Per-slice monitor controls, applied in the speaker mix only (the
     // per-slice feed stays pre-mute, pre-gain, for TCI and decoders).
     std::array<bool, 2> m_sliceMuted{false, false};

@@ -20,6 +20,7 @@
 #include "core/MqttSettings.h"
 #endif
 #include "core/AppSettings.h"
+#include "core/backends/IRadioBackend.h"
 #include "core/LogManager.h"
 #include "core/ThemeManager.h"
 #include "models/RadioModel.h"
@@ -27,6 +28,7 @@
 #include "models/SpotModel.h"
 
 #include <QDateTime>
+#include <QPointer>
 #include <QMessageBox>
 #include <QSet>
 #ifdef HAVE_MQTT
@@ -690,6 +692,52 @@ void MainWindow::wireSpotSubsystem()
             this, [queueSpotCmd](const DxSpot& spot) {
         queueSpotCmd(spot, "RBN");
     });
+
+#ifdef AETHER_BACKEND_ORION
+    // N8EM fork: the Orion's CW skimmer reports its finds on the "orion"
+    // extension channel; they join the panadapter like RBN spots
+    // (FORK-NOTES.md). The backend object changes on each connect, so the
+    // listener is re-armed then, with a guard owning the old connection.
+    {
+        auto guard = std::make_shared<QPointer<QObject>>();
+        connect(&m_radioModel, &RadioModel::connectionStateChanged, this,
+                [this, queueSpotCmd, guard](bool connected) {
+            delete guard->data();
+            *guard = nullptr;
+            IRadioBackend* backend = m_radioModel.backend();
+            if (!connected || !backend
+                || !m_radioModel.backendDeclaresExtension(QStringLiteral("orion"))) {
+                return;
+            }
+            *guard = new QObject(this);
+            connect(backend, &IRadioBackend::extensionStatus, guard->data(),
+                    [queueSpotCmd](const QString& ns, const QString& kind,
+                                   const QVariantMap& f) {
+                if (ns != QLatin1String("orion") || kind != QLatin1String("skimmer.spot")) {
+                    return;
+                }
+                auto& as = AppSettings::instance();
+                DxSpot spot;
+                const QString station =
+                    as.value(QStringLiteral("StationCallsign")).toString().trimmed().toUpper();
+                spot.spotterCall = station.isEmpty() ? QStringLiteral("SKIMMER")
+                                                     : station + QStringLiteral("-#");
+                spot.dxCall = f.value(QStringLiteral("call")).toString();
+                spot.freqMhz = f.value(QStringLiteral("freqHz")).toDouble() / 1e6;
+                const int wpm = f.value(QStringLiteral("wpm")).toInt();
+                spot.comment = wpm > 0 ? QStringLiteral("CW %1 WPM").arg(wpm)
+                                       : QStringLiteral("CW");
+                spot.utcTime = QDateTime::currentDateTimeUtc().time();
+                spot.source = QStringLiteral("Skimmer");
+                // The console's skimmer violet; spots age out after 10 minutes.
+                spot.color = as.value(QStringLiteral("OrionSkimmerSpotColor"),
+                                      QStringLiteral("#CD8CFF")).toString();
+                spot.lifetimeSec = 600;
+                queueSpotCmd(spot, "Skimmer");
+            });
+        });
+    }
+#endif
 
     connect(m_wsjtxClient, &WsjtxClient::spotReceived,
             this, [this, isDuplicateSpot, spotLifetimeSeconds, addPassiveSpotToModel](const DxSpot& spot) {

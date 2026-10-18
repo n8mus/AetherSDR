@@ -33,10 +33,40 @@ else()
         src/core/backends/orion/OrionCwDaemon.h
         src/core/backends/orion/OrionPatMonitor.cpp
         src/core/backends/orion/OrionPatMonitor.h)
+    # CW skimmer (step 8), ported from the Orion console: a bank of CW decoders
+    # fed with the RSP2's raw IQ, and a DX-cluster telnet server on :7300.
+    target_sources(aethercore PRIVATE
+        src/core/backends/orion/skimmer/BayesCwEngine.cpp
+        src/core/backends/orion/skimmer/BayesCwEngine.h
+        src/core/backends/orion/skimmer/CwDecoder.cpp
+        src/core/backends/orion/skimmer/CwDecoder.h
+        src/core/backends/orion/skimmer/FldigiCwEngine.cpp
+        src/core/backends/orion/skimmer/FldigiCwEngine.h
+        src/core/backends/orion/skimmer/SkimServer.cpp
+        src/core/backends/orion/skimmer/SkimServer.h
+        src/core/backends/orion/skimmer/SkimmerEngine.cpp
+        src/core/backends/orion/skimmer/SkimmerEngine.h
+        src/core/backends/orion/OrionSkimmer.cpp
+        src/core/backends/orion/OrionSkimmer.h
+        src/core/backends/orion/OrionSkimmerFeed.cpp
+        src/core/backends/orion/OrionSkimmerFeed.h)
+    # OpenMP spreads the decoder bank across cores (as the console builds it);
+    # optional, and scoped to that one file: without it the bank runs serial.
+    find_package(OpenMP QUIET COMPONENTS CXX)
+    if(OpenMP_CXX_FOUND)
+        set_source_files_properties(src/core/backends/orion/skimmer/SkimmerEngine.cpp
+            TARGET_DIRECTORY aethercore
+            PROPERTIES COMPILE_OPTIONS "${OpenMP_CXX_FLAGS}")
+        target_link_libraries(aethercore PRIVATE OpenMP::OpenMP_CXX)
+        message(STATUS "Ten-Tec Orion ... CW skimmer with OpenMP")
+    else()
+        message(STATUS "Ten-Tec Orion ... CW skimmer without OpenMP (decoder bank runs serial)")
+    endif()
+
     # The fork's own GUI page (Radio Setup -> Orion Audio).
     target_sources(AetherSDR PRIVATE
-        src/gui/orion/OrionAudioPage.cpp
-        src/gui/orion/OrionAudioPage.h)
+        src/gui/orion/OrionSetupPage.cpp
+        src/gui/orion/OrionSetupPage.h)
 
     # RSP2 panadapter and receive audio (steps 2-3). Needs the SDRplay API HEADERS from the
     # operator's install and fftw3f. The library itself is dlopen()ed at run

@@ -32,6 +32,7 @@
 namespace AetherSDR::orion {
 
 class OrionRxAudio;
+class OrionSkimmerFeed;
 
 class Rsp2Receiver : public QObject {
     Q_OBJECT
@@ -66,6 +67,12 @@ public:
     {
         m_audioSinks = {main, sub};
     }
+    // The CW skimmer's feed (step 8) gets every block too; same rules as the
+    // audio sinks. It copies and returns: decoding runs on its own thread.
+    void setSkimmerSink(OrionSkimmerFeed* feed) { m_skimmerSink = feed; }
+    // The whole capture's spectrum (dB, DC-centred, bin n/2 = the LO) every
+    // intervalMs for the skimmer's channel search; 0 = never. Any thread.
+    void setFullSpectrumInterval(int intervalMs) { m_fullSpectrumMs.store(intervalMs); }
 
     // While the Orion transmits: hardware gain to minimum (gRdB 59, LNA 8)
     // so the RSP2's front end is not driven into overload by our own signal;
@@ -87,6 +94,8 @@ public:
 signals:
     // One pan frame: float dB per point across the current view.
     void frameReady(const QByteArray& frame);
+    // The whole capture, see setFullSpectrumInterval(). Owner thread.
+    void fullSpectrumReady(const std::vector<float>& db, qint64 loHz);
     void deviceLost(const QString& reason);
 
 private:
@@ -116,6 +125,8 @@ private:
     std::atomic<qint64> m_pendingLo{0};
     std::atomic<qint64> m_activeLo{0};
     std::array<OrionRxAudio*, 2> m_audioSinks{nullptr, nullptr};
+    OrionSkimmerFeed* m_skimmerSink = nullptr;
+    std::atomic<int> m_fullSpectrumMs{0};
     std::vector<std::complex<float>> m_scratch;   // stream-callback thread only
 
     // What the worker draws (owner writes, worker reads).
