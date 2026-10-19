@@ -286,7 +286,10 @@ RadioCapabilities OrionBackend::capabilities() const
     c.hasDaxStreams = false;
     c.hasDdcPanEdgeRolloff = false;
     c.panZoomModes = std::nullopt;
-    c.panFrameRateShaping = std::nullopt;
+    // This engine paces its own frames and rows, and the radio echoes
+    // neither, so the client owns both and keeps them between sessions.
+    c.panFrameRateShaping = PanFrameRateShaping{/*clientPersistsFrameRate*/ true};
+    c.panWaterfallRateShaping = PanWaterfallRateShaping{/*clientPersistsWaterfallRate*/ true};
     c.widebandConverterView = std::nullopt;
 
     // The radio's DSP (NR/NB/notch) exists but is not wired in step 1.
@@ -1190,6 +1193,10 @@ void OrionBackend::startSdr(const QVariantMap& params)
     });
     m_sdr->setWaterfallHoldMs(m_waterfallHoldMs);
     m_sdr->setWaterfallAverage(m_waterfallAverage);
+    // The display settings the client restored before the receiver existed.
+    m_sdr->setAverage(m_panAverage);
+    m_sdr->setWeightedAverage(m_panWeightedAverage);
+    m_sdr->setFrameRate(m_panFps);
     connect(m_sdr.get(), &Rsp2Receiver::deviceLost, this, [this](const QString& reason) {
         stopSdr();
         m_sdrStatus = reason;
@@ -1832,12 +1839,11 @@ void OrionBackend::setPanBandwidth(const QString& panId, double hz)
 void OrionBackend::setPanFrameRate(const QString& panId, int fps)
 {
     Q_UNUSED(panId);
+    m_panFps = std::clamp(fps, 1, 60);
 #ifdef AETHER_ORION_SDRPLAY
     if (m_sdr) {
-        m_sdr->setFrameRate(fps);
+        m_sdr->setFrameRate(m_panFps);
     }
-#else
-    Q_UNUSED(fps);
 #endif
 }
 
@@ -1854,15 +1860,19 @@ void OrionBackend::setPanWaterfallRate(const QString& panId, int rate)
 #endif
 }
 
+// Remembered, not just forwarded: the operator's saved FFT AVG arrives
+// while the client is wiring the pan, which is BEFORE the RSP2 has
+// started. Forwarding only when m_sdr exists dropped it on the floor —
+// the slider kept the number and the panadapter ran unaveraged. startSdr()
+// applies whatever is held here. Same for Wt Avg below.
 void OrionBackend::setPanAverage(const QString& panId, int average)
 {
     Q_UNUSED(panId);
+    m_panAverage = std::clamp(average, 0, 100);
 #ifdef AETHER_ORION_SDRPLAY
     if (m_sdr) {
-        m_sdr->setAverage(average);
+        m_sdr->setAverage(m_panAverage);
     }
-#else
-    Q_UNUSED(average);
 #endif
 }
 
@@ -1880,6 +1890,7 @@ void OrionBackend::setPanWaterfallAverage(const QString& panId, int average)
 void OrionBackend::setPanWeightedAverage(const QString& panId, bool on)
 {
     Q_UNUSED(panId);
+    m_panWeightedAverage = on;
 #ifdef AETHER_ORION_SDRPLAY
     if (m_sdr) {
         m_sdr->setWeightedAverage(on);

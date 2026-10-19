@@ -1,6 +1,10 @@
 #include "gui/orion/OrionRotorApplet.h"
 
+#include <QAction>
+#include <QDialog>
 #include <QHBoxLayout>
+#include <QMainWindow>
+#include <QMenu>
 #include <QLabel>
 #include <QPointer>
 #include <QPushButton>
@@ -30,9 +34,8 @@ bool orionConnected(RadioModel* model)
 
 }  // namespace
 
-OrionRotorApplet::OrionRotorApplet(RadioModel* model, QWidget* parent)
+OrionRotorApplet::OrionRotorApplet(QWidget* parent)
     : QWidget(parent)
-    , m_model(model)
 {
     auto* v = new QVBoxLayout(this);
     v->setContentsMargins(6, 6, 6, 6);
@@ -79,6 +82,19 @@ OrionRotorApplet::OrionRotorApplet(RadioModel* model, QWidget* parent)
     connect(m_bearing, &QSpinBox::editingFinished, this, [] {});   // no send on edit
     connect(m_stop, &QPushButton::clicked, this, &OrionRotorApplet::stopRotor);
 
+    applyState({});
+}
+
+void OrionRotorApplet::setModel(RadioModel* model)
+{
+    if (m_model == model) {
+        return;
+    }
+    m_model = model;
+    if (!m_model) {
+        applyState({});
+        return;
+    }
     // Live azimuth: the backend posts it as it changes, re-armed on each
     // connect so a reconnect does not leave a dead listener behind.
     auto guard = std::make_shared<QPointer<QObject>>();
@@ -88,7 +104,8 @@ OrionRotorApplet::OrionRotorApplet(RadioModel* model, QWidget* parent)
         *guard = nullptr;
         if (!connected || !orionConnected(m_model)) {
             m_reported = -1.0;
-            refresh();
+            m_hasAsked = false;
+            applyState({});
             return;
         }
         *guard = new QObject(this);
@@ -229,6 +246,32 @@ void OrionRotorApplet::note(const QString& text)
 {
     m_status->setText(text);
     m_status->setVisible(!text.isEmpty());
+}
+
+void installOrionRotorWindow(QMainWindow* window, QMenu* menu, RadioModel* model)
+{
+    auto* act = menu->addAction(QObject::tr("Rotor..."));
+    act->setToolTip(QObject::tr("The DCU-3: where the beam is pointing, and the one place a "
+                                "turn is sent from"));
+    auto held = std::make_shared<QPointer<QDialog>>();
+    QObject::connect(act, &QAction::triggered, window, [=] {
+        if (!*held) {
+            auto* dlg = new QDialog(window);
+            dlg->setWindowTitle(QObject::tr("Rotor"));
+            dlg->setObjectName(QStringLiteral("orionRotorWindow"));
+            auto* lay = new QVBoxLayout(dlg);
+            lay->setContentsMargins(0, 0, 0, 0);
+            auto* applet = new OrionRotorApplet(dlg);
+            applet->setModel(model);
+            applet->setFloating(true);   // a window: the compass earns its space
+            lay->addWidget(applet);
+            dlg->resize(280, 420);
+            *held = dlg;
+        }
+        (*held)->show();
+        (*held)->raise();
+        (*held)->activateWindow();
+    });
 }
 
 }  // namespace AetherSDR

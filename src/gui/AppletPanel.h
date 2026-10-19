@@ -63,6 +63,7 @@ class DaxIqApplet;
 class AntennaGeniusApplet;
 class ShackSwitchApplet;
 class GreenHeronApplet;
+class OrionRotorApplet;
 class MeterApplet;
 class ProfileSwitcherApplet;
 class HealthApplet;
@@ -160,6 +161,10 @@ public:
     // The GHE tile owns its own GreenHeronModel — see GreenHeronApplet.h for
     // why this one is not handed a model by MainWindow.
     GreenHeronApplet*    greenHeronApplet() const { return m_greenHeronApplet; }
+#ifdef AETHER_BACKEND_ORION
+    // N8EM fork: the DCU-3 rotor tile; MainWindow hands it the radio model.
+    OrionRotorApplet*    orionRotorApplet() const { return m_orionRotorApplet; }
+#endif
     MeterApplet*  meterApplet()  { return m_meterApplet; }
     ProfileSwitcherApplet* profileSwitcherApplet() { return m_profApplet; }
     HealthApplet* healthApplet() { return m_healthApplet; }
@@ -449,6 +454,9 @@ private:
     AntennaGeniusApplet* m_agApplet{nullptr};
     ShackSwitchApplet*   m_ssApplet{nullptr};
     GreenHeronApplet*    m_greenHeronApplet{nullptr};
+#ifdef AETHER_BACKEND_ORION
+    OrionRotorApplet*    m_orionRotorApplet{nullptr};
+#endif
     MeterApplet* m_meterApplet{nullptr};
     ProfileSwitcherApplet* m_profApplet{nullptr};
     HealthApplet* m_healthApplet{nullptr};

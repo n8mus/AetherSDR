@@ -135,6 +135,9 @@
 #include "PskReporterMapDialog.h"
 #include "FlexControlDialog.h"
 #include "CwxPanel.h"
+#ifdef AETHER_BACKEND_ORION
+#include "gui/orion/OrionRotorApplet.h"
+#endif
 #include "DvkAvailabilityGate.h"
 #include "VoiceModeGate.h"
 #include "DvkPanel.h"
@@ -5876,6 +5879,13 @@ void MainWindow::buildUI()
 
     // Right — applet panel (includes S-Meter)
     m_appletPanel = new AppletPanel(splitter);
+#ifdef AETHER_BACKEND_ORION
+    // N8EM fork: the DCU-3 rotor tile is built with the panel, before any
+    // radio exists; hand it the model now (FORK-NOTES.md).
+    if (OrionRotorApplet* rotor = m_appletPanel->orionRotorApplet()) {
+        rotor->setModel(&m_radioModel);
+    }
+#endif
     splitter->addWidget(m_appletPanel);
     splitter->setStretchFactor(3, 0);
     splitter->setCollapsible(3, false);

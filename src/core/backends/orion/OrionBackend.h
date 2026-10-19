@@ -325,6 +325,9 @@ private:
     spectrum::View m_view;
     int m_waterfallHoldMs = 0;   // the waterfall's row interval, see setPanWaterfallRate
     int m_waterfallAverage = 0;  // the waterfall's own WF AVG (0 = off)
+    int m_panAverage = 0;        // FFT AVG, held until the RSP2 starts
+    int m_panFps = 25;           // FFT FPS, likewise
+    bool m_panWeightedAverage = false;
     bool m_viewKnown = false;
     double m_viewCentreEchoHz = 0.0;   // the centre exactly as last requested
     int m_panPoints = 1024;

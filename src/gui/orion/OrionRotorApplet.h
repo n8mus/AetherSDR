@@ -16,6 +16,8 @@
 
 #include <QWidget>
 
+class QMainWindow;
+class QMenu;
 class QLabel;
 class QPushButton;
 class QSpinBox;
@@ -29,7 +31,12 @@ class OrionRotorApplet : public QWidget {
     Q_OBJECT
 
 public:
-    explicit OrionRotorApplet(RadioModel* model, QWidget* parent = nullptr);
+    explicit OrionRotorApplet(QWidget* parent = nullptr);
+
+    // The panel builds this tile before a radio exists, so the model
+    // arrives afterwards (MainWindow hands it over, as it does for the
+    // Green Heron tile). Everything is inert until it does.
+    void setModel(RadioModel* model);
 
     // Docked vs floating, as the Green Heron tile does it: the compass is
     // the one thing that only earns its space when the tile is floated.
@@ -64,5 +71,10 @@ private:
     double m_asked = -1.0;
     bool m_hasAsked = false;
 };
+
+// Adds "Rotor..." to `menu` and opens the tile in a window. Interim: the
+// tile is meant for the right-hand panel, and moves there with the button
+// chooser. See FORK-NOTES.md.
+void installOrionRotorWindow(QMainWindow* window, QMenu* menu, RadioModel* model);
 
 }  // namespace AetherSDR
