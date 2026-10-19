@@ -697,6 +697,7 @@ public:
     void setTraceFollowsScheme(bool on);
     [[nodiscard]] bool traceFollowsScheme() const { return m_traceFollowsScheme; }
     void applySchemeToTrace();
+    [[nodiscard]] float traceColourFloorFraction() const;
     void setFftLineColor(const QColor& c);
     void setFftHeatMap(bool on);
     void setShowGrid(bool on);

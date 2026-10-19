@@ -4475,6 +4475,17 @@ void SpectrumWidget::setFftLineColor(const QColor& c) {
 // trace on its factory cyan, so the two halves of one panadapter disagreed.
 // The line is sampled near the hot end of the ramp and the fill from its
 // middle, which is what makes a scheme look like itself.
+// Where the measured noise floor sits as a fraction of the display window
+// (0 = bottom, 1 = top). Both trace paths anchor the colour ramp there.
+float SpectrumWidget::traceColourFloorFraction() const
+{
+    if (m_dynamicRange <= 1.0f || m_measuredNoiseFloorDbm <= -500.0f) {
+        return 0.0f;
+    }
+    const float norm = (m_refLevel - m_measuredNoiseFloorDbm) / m_dynamicRange;
+    return qBound(0.0f, 1.0f - norm, 1.0f);
+}
+
 void SpectrumWidget::applySchemeToTrace()
 {
     if (!m_traceFollowsScheme) {
@@ -15375,7 +15386,7 @@ void SpectrumWidget::renderGpuFrame(QRhiCommandBuffer* cb,
                     kFftLineFeatherAlpha,
                     fa,                                             // fillAlpha
                     m_fftHeatMap ? 1.0f : 0.0f,
-                    0.0f,                                           // fillP.z — unused (pad)
+                    traceColourFloorFraction(),                     // fillP.z — colour floor
                     0.0f,
                     static_cast<float>(m_fftFillColor.redF()),
                     static_cast<float>(m_fftFillColor.greenF()),
@@ -16177,7 +16188,22 @@ void SpectrumWidget::drawSpectrum(QPainter& p, const QRect& r)
         pts[i].x = static_cast<float>(r.left()) + xFrac * static_cast<float>(w);
         pts[i].y = static_cast<float>(r.top())
             + qBound(0.0f, norm * static_cast<float>(h), static_cast<float>(h - 1));
-        pts[i].t = 1.0f - norm;  // 0=noise floor, 1=strong signal
+        pts[i].t = 1.0f - norm;  // 0=bottom of the window, 1=top
+    }
+
+    // AetherSDR Orion fork: colour the trace across the range that holds
+    // SIGNALS, not across the whole dB window. The floor usually sits in the
+    // bottom tenth of the axis, so mapping the ramp over the window left
+    // every ordinary signal in the ramp's first third — "Purple" reached
+    // purple only on the single tallest peak, and read as blue-green
+    // everywhere else. Anchoring 0 at the measured floor spends the whole
+    // ramp on what is above it.
+    const float traceFloorT = traceColourFloorFraction();
+    if (traceFloorT > 0.0f && traceFloorT < 0.98f) {
+        const float span = 1.0f - traceFloorT;
+        for (int i = 0; i < n; ++i) {
+            pts[i].t = qBound(0.0f, (pts[i].t - traceFloorT) / span, 1.0f);
+        }
     }
 
     p.setRenderHint(QPainter::Antialiasing, true);
@@ -16202,9 +16228,11 @@ void SpectrumWidget::drawSpectrum(QPainter& p, const QRect& r)
                       << QPointF(pts[i + 1].x, bottom)
                       << QPointF(pts[i].x, bottom);
 
-            float avgT = (pts[i].t + pts[i + 1].t) * 0.5f;
-            QColor top = heatColor(avgT);
+            // The fill is keyed to the dB AXIS (see the shader): a vertical
+            // gradient through the whole ramp, identical in every column, so
+            // the bands run horizontally and a signal climbs through them.
             const float swFillAlpha = m_fftFillAlpha;
+            QColor top = heatColor(1.0f);
             top.setAlphaF(swFillAlpha * AetherSDR::FftHeatMap::kTopAlphaScale);
             QColor bot = AetherSDR::FftHeatMap::gradientBase(swFillAlpha);
             if (useScheme) {
@@ -16213,9 +16241,16 @@ void SpectrumWidget::drawSpectrum(QPainter& p, const QRect& r)
                 bot = heatColor(0.06f);
                 bot.setAlphaF(swFillAlpha);
             }
-            QLinearGradient grad(0, std::min(pts[i].y, pts[i + 1].y), 0, bottom);
-            grad.setColorAt(0.0, top);
-            grad.setColorAt(1.0, bot);
+            // Full-height gradient so every column shares the same bands.
+            QLinearGradient grad(0, r.top(), 0, bottom);
+            for (int k = 0; k <= 8; ++k) {
+                const float f = static_cast<float>(k) / 8.0f;
+                QColor c = heatColor(1.0f - f);
+                c.setAlphaF(swFillAlpha * (k == 0
+                                               ? AetherSDR::FftHeatMap::kTopAlphaScale
+                                               : 1.0f));
+                grad.setColorAt(f, c);
+            }
             p.setPen(Qt::NoPen);
             p.setBrush(grad);
             p.drawPolygon(trapezoid);

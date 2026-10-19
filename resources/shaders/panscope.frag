@@ -24,7 +24,7 @@ layout(binding = 1) uniform sampler2D columns;
 layout(std140, binding = 0) uniform U {
     vec4 plot;       // wPx, hPx, columnCount, hasData
     vec4 stroke;     // coreHalfWidthPx, featherPx, coreAlpha, featherAlpha
-    vec4 fillP;      // fillAlpha, heatMap (0/1), pad, pad
+    vec4 fillP;      // fillAlpha, heatMap (0/1), colourFloor, pad
     vec4 fillColor;  // straight rgb, a unused
     vec4 darkColor;  // straight rgb (solid-mode base blend), a unused
     vec4 lineColor;  // straight rgb — trace stroke, independent of fill (#4239); a unused
@@ -82,6 +82,13 @@ void main()
     bool heat = fillP.y > 0.5;
     float fa = fillP.x;
 
+    // AetherSDR Orion fork: the colour ramp is spent on the range that holds
+    // signals. The noise floor usually sits in the bottom tenth of the
+    // window, so colouring across the whole window left every ordinary
+    // signal in the ramp's first third. fillP.z is where the floor sits.
+    float floorT = clamp(fillP.z, 0.0, 0.98);
+    float tc = (floorT > 0.0) ? clamp((t - floorT) / (1.0 - floorT), 0.0, 1.0) : t;
+
     // ── Fill under the trace ────────────────────────────────────────────
     if (fa > 0.0 && py >= yTrace) {
         float g = (hPx > yTrace)
@@ -89,8 +96,15 @@ void main()
         vec3 rgb;
         float a;
         if (heat) {
-            // Heat: trace color at the line fading to dark blue at the base.
-            rgb = mix(heatColor(t), vec3(0.0, 0.0, 0.3), g);
+            // AetherSDR Orion fork: the fill is keyed to the dB AXIS, so the
+            // colour bands run HORIZONTALLY and every signal climbs through
+            // the same ramp as it rises — the Orion console's panadapter
+            // (fork rule 2 allows its look here). Colouring each column by
+            // its own peak instead, as this did, gives a per-column vertical
+            // gradient: the same ramp, a completely different picture.
+            float yT = clamp(1.0 - py / max(hPx, 1.0), 0.0, 1.0);
+            float yTc = (floorT > 0.0) ? clamp((yT - floorT) / (1.0 - floorT), 0.0, 1.0) : yT;
+            rgb = heatColor(yTc);
             a = mix(fa * 0.3, fa, g);
         } else {
             // Solid: bright at the line, darker + fainter toward the base,
@@ -138,7 +152,7 @@ void main()
         // out to halfWidth-1, a 1 px fade to halfWidth; the feather adds one
         // more 1 px annulus at low alpha. The first cut's fixed ±0.75 px
         // smoothstep band read as a soft "blurred" stroke at 1x DPI.
-        vec3 lineRgb = heat ? heatColor(t) : lineColor.rgb;
+        vec3 lineRgb = heat ? heatColor(tc) : lineColor.rgb;
         float featherHalf = coreHalf + stroke.y;
         float covF = 1.0 - smoothstep(coreHalf, featherHalf, d);
         outc = over(outc, pm(lineRgb, stroke.w, covF));
