@@ -669,7 +669,7 @@ one headerless ADIF record), and while cqrlog runs its new QSOs are pulled
 in every 2 min through the mysql client on cqrlog's socket (the first pull
 brings in cqrlog's whole history; near-duplicates are skipped and imported
 QSOs are marked as already uploaded). GUI in AetherSDR's own widgets
-(src/gui/orion/OrionLogbookUi): a Logbook menu (Log QSO... Ctrl+Alt+L,
+(src/gui/orion/OrionLogbookUi): a Logbook menu (Log QSO... Ctrl+Shift+N,
 Import/Export ADIF, the two cqrlog switches, the log file shown) and a Log
 QSO window: frequency/mode from the active slice, the call from a spot on
 that frequency, the UTC clock running until edited, country and zones from
@@ -678,7 +678,7 @@ near-duplicate question, the last 8 QSOs with the station.
 
 **Step 9, logbook stage 2 (2026-10-18, tested without cqrlog or WSJT-X
 running):**
-- Logbook browser (Logbook -> Logbook... Ctrl+Alt+B), the console's window
+- Logbook browser (Logbook -> Logbook... Ctrl+Shift+B), the console's window
   re-expressed in AetherSDR widgets: the whole log as a table (search by
   call, sort, edit in place, delete with a question; bookkeeping columns
   hidden), ADIF in/out, and the console's on-demand "check against cqrlog"
@@ -718,7 +718,11 @@ buttons, traffic list, Retry and LoTW QSL sync.
 
 **Step 10, the CW window and the panadapter's two averages (2026-10-19,
 bench-tested against the fake radio and the real RSP2, receive only):**
-- **The CW window** (Tools -> CW window..., Ctrl+Alt+W), the Orion
+- **The fork's shortcuts avoid Ctrl+Alt** (operator, 2026-10-19):
+  Ctrl+Alt+L locks the screen on an Arch desktop, and the whole Ctrl+Alt
+  group is the desktop's. Log QSO is Ctrl+Shift+N, the logbook browser
+  Ctrl+Shift+B, the CW window Ctrl+Shift+W.
+- **The CW window** (Tools -> CW window..., Ctrl+Shift+W), the Orion
   console's `CwWindow` re-expressed on AetherSDR's own plumbing
   (`src/gui/orion/OrionCwWindow`). Fork rule 2 was amended by the operator
   to allow the console's appearance here, because this window replaces

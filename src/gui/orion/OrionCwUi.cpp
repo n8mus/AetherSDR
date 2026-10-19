@@ -36,7 +36,7 @@ void installOrionCwWindow(QMainWindow* window, QMenu* menu, RadioModel* model,
 {
     menu->addSeparator();
     auto* act = menu->addAction(QObject::tr("CW window..."));
-    act->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+W")));
+    act->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+W")));
     act->setToolTip(QObject::tr("Type-ahead CW, F1-F12 macros in plain language, and the CW "
                                 "reader — sharing the station being worked with the Log QSO "
                                 "window"));

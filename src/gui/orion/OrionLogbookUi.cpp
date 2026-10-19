@@ -1,6 +1,8 @@
 #include "gui/orion/OrionLogbookUi.h"
 
 #include "core/AppSettings.h"
+#include "core/CallsignInfo.h"
+#include "core/CallsignLookupService.h"
 #include "core/backends/orion/log/CqrlogSync.h"
 #include "core/backends/orion/log/OrionLogbook.h"
 #include "core/backends/orion/log/OrionUploadSecrets.h"
@@ -97,6 +99,7 @@ public:
         , m_activeSlice(std::move(activeSlice))
     {
         setWindowTitle(tr("Log QSO"));
+        setObjectName(QStringLiteral("orionLogQsoWindow"));
         auto* vbox = new QVBoxLayout(this);
 
         auto* form = new QGridLayout;
@@ -106,6 +109,7 @@ public:
             form->addWidget(w, row, col * 2 + 1, 1, span);
         };
         m_call = new QLineEdit;
+        m_call->setObjectName(QStringLiteral("orionLogCall"));
         m_call->setPlaceholderText(tr("Callsign"));
         QFont big = m_call->font();
         big.setPointSizeF(big.pointSizeF() * 1.4);
@@ -113,6 +117,18 @@ public:
         m_call->setFont(big);
         add(tr("Call:"), m_call, 0, 3);
         ++row;
+        // The callbook, through AetherSDR's own QRZ client (Settings ->
+        // Radio Setup -> Callsign Lookup holds the login): name, QTH and
+        // grid for the boxes below. It fills only what is still empty, so
+        // what you copied off the air always wins over what QRZ thinks.
+        m_qrz = new QPushButton(tr("QRZ"));
+        m_qrz->setObjectName(QStringLiteral("orionLogQrz"));
+        m_qrz->setToolTip(tr("Look this call up in the callbook and fill Name, QTH and Grid.\n"
+                             "Only empty boxes are filled — what you typed is never overwritten.\n"
+                             "Runs by itself when a call looks complete."));
+        form->addWidget(m_qrz, row, 1, 1, 3);
+        ++row;
+        connect(m_qrz, &QPushButton::clicked, this, [this] { lookupCall(true); });
         m_country = new QLabel;
         form->addWidget(m_country, row, 1, 1, 3);
         ++row;
@@ -153,9 +169,23 @@ public:
         ++row;
         m_comment = new QLineEdit;
         add(tr("Comment:"), m_comment, 0, 3);
+        // Named for the automation bridge and the tests: every box the
+        // operator fills is addressable.
+        m_freq->setObjectName(QStringLiteral("orionLogFreq"));
+        m_mode->setObjectName(QStringLiteral("orionLogMode"));
+        m_rstS->setObjectName(QStringLiteral("orionLogRstSent"));
+        m_rstR->setObjectName(QStringLiteral("orionLogRstRcvd"));
+        m_name->setObjectName(QStringLiteral("orionLogName"));
+        m_handle->setObjectName(QStringLiteral("orionLogHandle"));
+        m_qth->setObjectName(QStringLiteral("orionLogQth"));
+        m_grid->setObjectName(QStringLiteral("orionLogGrid"));
+        m_pota->setObjectName(QStringLiteral("orionLogPota"));
+        m_comment->setObjectName(QStringLiteral("orionLogComment"));
+        m_country->setObjectName(QStringLiteral("orionLogCountry"));
         vbox->addLayout(form);
 
         m_status = new QLabel;
+        m_status->setObjectName(QStringLiteral("orionLogStatus"));
         m_status->setWordWrap(true);
         vbox->addWidget(m_status);
 
@@ -198,6 +228,15 @@ public:
         m_clock = new QTimer(this);
         m_clock->setInterval(1000);
         connect(m_clock, &QTimer::timeout, this, [this] { tick(); });
+        auto& lookup = CallsignLookupService::instance();
+        connect(&lookup, &CallsignLookupService::infoReady, this,
+                [this](const CallsignInfo& info, bool) { applyLookup(info); });
+        connect(&lookup, &CallsignLookupService::lookupFailed, this,
+                [this](const QString& call, const QString& message) {
+                    if (call.trimmed().toUpper() == m_call->text().trimmed().toUpper()) {
+                        m_status->setText(tr("Callbook: %1").arg(message));
+                    }
+                });
         m_clock->start();
         clearForNext(true);
         // After the form is seeded, not before: clearForNext() empties every
@@ -334,6 +373,55 @@ private:
         }
     }
 
+    // The callbook fill. `manual` is the QRZ button: it says so in the
+    // status line and asks even when the service would rather wait.
+    void lookupCall(bool manual)
+    {
+        const QString call = m_call->text().trimmed().toUpper();
+        if (call.size() < 3) {
+            if (manual) m_status->setText(tr("Enter a callsign first."));
+            return;
+        }
+        auto& svc = CallsignLookupService::instance();
+        if (!svc.enabled() || (!svc.hasCredentials() && !svc.hasCachedEntry(call))) {
+            if (manual) {
+                m_status->setText(tr("No callbook login yet — Settings -> Radio Setup -> "
+                                     "Callsign Lookup."));
+            }
+            return;
+        }
+        if (!manual && call == m_lookedUp) {
+            return;   // one lookup per call, however the call got here
+        }
+        m_lookedUp = call;
+        if (manual) m_status->setText(tr("Asking the callbook about %1...").arg(call));
+        svc.lookup(call);
+    }
+
+    // What came back. Empty boxes only: the operator's copy outranks the
+    // callbook, and the handle is never touched — that is what he SAID.
+    void applyLookup(const CallsignInfo& info)
+    {
+        if (info.call.trimmed().toUpper() != m_call->text().trimmed().toUpper()) {
+            return;   // a late answer for a station we have moved off
+        }
+        if (info.prefixOnly) {
+            return;   // country-level only; cty.dat already filled that line
+        }
+        const auto fill = [](QLineEdit* e, const QString& v) {
+            if (!v.isEmpty() && e->text().trimmed().isEmpty()) e->setText(v);
+        };
+        QString qth = info.city;
+        if (!info.state.isEmpty()) {
+            qth += (qth.isEmpty() ? QString() : QStringLiteral(", ")) + info.state;
+        }
+        fill(m_name, info.displayName() == info.call ? QString() : info.displayName());
+        fill(m_qth, qth);
+        fill(m_grid, info.grid.toUpper());
+        pushContext();   // the CW macros read these
+        m_status->setText(tr("Callbook: %1").arg(info.displayName()));
+    }
+
     void onCallChanged()
     {
         const QString call = m_call->text().trimmed().toUpper();
@@ -355,6 +443,9 @@ private:
                 m_prev->setItem(i, c2, new QTableWidgetItem(cells[c2]));
             }
         }
+        // Worked before beats the callbook: his own history fills first,
+        // and the lookup below then only fills what is still empty.
+        lookupCall(false);
         if (!prev.isEmpty()) {
             // Worked before: the operator's name and QTH carry over, as in the
             // console.
@@ -418,6 +509,7 @@ private:
         // (clearQsoContext()).
         m_country->clear();
         m_prev->setRowCount(0);
+        m_lookedUp.clear();
         m_timeEdited = false;
         m_freqEdited = false;
         m_modeEdited = false;
@@ -444,6 +536,8 @@ private:
     QLineEdit* m_grid = nullptr;
     QLineEdit* m_pota = nullptr;
     QLineEdit* m_comment = nullptr;
+    QPushButton* m_qrz = nullptr;
+    QString m_lookedUp;            // the call the callbook was last asked about
     QLabel* m_status = nullptr;
     QTableWidget* m_prev = nullptr;
     QTimer* m_clock = nullptr;
@@ -906,11 +1000,11 @@ void installOrionLogbook(QMainWindow* window, QMenuBar* bar, RadioModel* model,
     auto* menu = bar->addMenu(QObject::tr("&Logbook"));
     menu->setToolTipsVisible(true);
     auto* logAct = menu->addAction(QObject::tr("Log QSO..."));
-    logAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+L")));
+    logAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+N")));
     logAct->setToolTip(QObject::tr("Log a contact: frequency and mode come from the active "
                                    "slice, the call from a spot on that frequency"));
     auto* browseAct = menu->addAction(QObject::tr("Logbook..."));
-    browseAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+B")));
+    browseAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+B")));
     browseAct->setToolTip(QObject::tr("The whole log: search, edit, delete, ADIF, and a check "
                                       "against cqrlog"));
     auto* onlineAct = menu->addAction(QObject::tr("Online logs..."));

@@ -25,7 +25,7 @@ possible merge conflict when pulling from `upstream`.
 | `src/gui/SpectrumOverlayMenu.cpp/.h` | A "WF AVG:" row at the top of the WATERFALL group, `wfAverageChanged`, `setWaterfallAverageAvailable()`, `syncWaterfallAverage()` | Separate controls for the trace and the waterfall: FFT AVG smooths the trace, WF AVG the waterfall. Hidden on every radio that does not declare it |
 | `src/gui/MainWindow_Wiring.cpp` | The WF AVG connection, its availability, and its per-radio/per-pan persistence (`DisplayWfAverage/...`) | Nothing echoes the setting back, so the client owns it |
 | `src/gui/MainWindow_Shortcuts.cpp` | In `toggleCwKeyerPanel()`, under `AETHER_BACKEND_ORION`: on the `orion` family the CWX indicator opens the fork's CW window instead of the CWX panel (setting `OrionCw/replaceCwx`) | Fork rule 2's CW exception: the station's CW window is the console's, on AetherSDR's keying |
-| `src/gui/MainWindow_Menus.cpp` | Under `AETHER_BACKEND_ORION`: the include of `gui/orion/OrionCwUi.h` and one call, `installOrionCwWindow(...)`, adding a Tools item | Tools -> CW window... (Ctrl+Alt+W) |
+| `src/gui/MainWindow_Menus.cpp` | Under `AETHER_BACKEND_ORION`: the include of `gui/orion/OrionCwUi.h` and one call, `installOrionCwWindow(...)`, adding a Tools item | Tools -> CW window... (Ctrl+Shift+W) |
 | `tests/tests.cmake` | `orion_cat_test`, `orion_spectrum_test`, `orion_rxaudio_test`, `orion_peripherals_test`, `orion_skimmer_test`, `orion_logbook_test`, `orion_upload_test` and `orion_backend_test` appended at the end | Upstream requires every test target to be declared there |
 | `tests/backend_seam_affinity_test.cpp` | `orion` added to the constructed-families list | The seam contract test covers the new backend too |
 
