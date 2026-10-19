@@ -1109,6 +1109,17 @@ void MainWindow::buildMenuBar()
         if (SliceModel* s = activeSlice()) {
             requestZeroBeatForSlice(s->sliceId());
         }
+    }, [this](const QString& key) {
+        // The host's own backend switch lives behind HAVE_DEEPFIST (it was
+        // written when DeepFist was the only alternative), and the widgets
+        // it drives are guarded with it. So the swap is done here: stop the
+        // reader, change it, start it again. refreshCwDecodeState() still
+        // has the last word on whether it should be running at all.
+        m_cwDecoder.stop();
+        if (m_cwDecoder.selectBackend(key)) {
+            m_cwCallsignSpotter.clear();
+            m_cwDecoder.start();
+        }
     });
 #endif
 

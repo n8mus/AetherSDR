@@ -32,7 +32,8 @@ bool orionCwReplacesCwxPanel()
 }
 
 void installOrionCwWindow(QMainWindow* window, QMenu* menu, RadioModel* model,
-                          CwRxModel* decoder, std::function<void()> zeroBeat)
+                          CwRxModel* decoder, std::function<void()> zeroBeat,
+                          std::function<void(const QString&)> selectDecoder)
 {
     menu->addSeparator();
     auto* act = menu->addAction(QObject::tr("CW window..."));
@@ -76,12 +77,13 @@ void installOrionCwWindow(QMainWindow* window, QMenu* menu, RadioModel* model,
                 if (!keys.contains(want)) {
                     want = QStringLiteral("ggmorse");
                 }
-                if (decoder->backendKey() != want) {
-                    decoder->selectBackend(want);
+                // Through the host, never straight into the model: see the
+                // header. Without a host hook the box still shows which
+                // reader is running, but cannot change it.
+                if (selectDecoder && decoder->backendKey() != want) {
+                    selectDecoder(want);
                 }
-                w->setDecoders(keys, want, [decoder](const QString& key) {
-                    decoder->selectBackend(key);
-                });
+                w->setDecoders(keys, want, selectDecoder);
             }
             if (decoder) {
                 // AetherSDR's CW reader feeds the console-style pane. Both
