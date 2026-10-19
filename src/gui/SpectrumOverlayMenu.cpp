@@ -1993,6 +1993,29 @@ void SpectrumOverlayMenu::buildDisplayPanel()
 
     makeHeader("WATERFALL");
 
+    // AetherSDR Orion fork: the waterfall's OWN time average, separate from
+    // FFT AVG above. FFT AVG smooths the trace; on a backend that hands the
+    // waterfall its own copy of each frame, averaging the trace used to smear
+    // the waterfall with it, because both were built from the same averaged
+    // frames. Same scale and unit as FFT AVG (10 ms per step, 0 = off).
+    // Hidden unless the radio declares it (setWaterfallAverageAvailable).
+    makeRow("WF AVG:", 0, 100, 0, m_wfAvgSlider, m_wfAvgLabel, &m_wfAvgTitleLabel);
+    m_wfAvgSlider->setObjectName("displayWfAvgSlider");
+    m_wfAvgSlider->setAccessibleName(tr("Waterfall averaging"));
+    m_wfAvgSlider->setToolTip(
+        tr("Averages the waterfall over time, independently of FFT AVG above.\n"
+           "FFT AVG smooths the trace only, so you can quiet the trace and keep\n"
+           "the waterfall sharp — or smooth the waterfall and leave the trace\n"
+           "live. 10 ms per step; 0 = off."));
+    m_wfAvgSlider->setAccessibleDescription(
+        tr("Time-averages the waterfall rows. Zero is off. The spectrum trace is "
+           "not affected."));
+    connect(m_wfAvgSlider, &QSlider::valueChanged, this, [this](int v) {
+        m_wfAvgLabel->setText(QString::number(v));
+        emit wfAverageChanged(v);
+    });
+    setWaterfallAverageAvailable(false);
+
     // NB Blank + Off/On
     makeRowWithBtn("NB Blank:", 5, 95, 15, m_wfBlankerThreshSlider, m_wfBlankerThreshLabel,
                    m_wfBlankerBtn, "Off");
@@ -2847,6 +2870,32 @@ void SpectrumOverlayMenu::syncNoiseFloorPosition(int pos)
     if (m_floorLabel) {
         m_floorLabel->setText(QString::number(clamped));
     }
+}
+
+void SpectrumOverlayMenu::setWaterfallAverageAvailable(bool available)
+{
+    for (QWidget* w : {static_cast<QWidget*>(m_wfAvgSlider),
+                       static_cast<QWidget*>(m_wfAvgLabel),
+                       static_cast<QWidget*>(m_wfAvgTitleLabel)}) {
+        if (w) {
+            w->setVisible(available);
+        }
+    }
+}
+
+void SpectrumOverlayMenu::syncWaterfallAverage(int average)
+{
+    if (!m_wfAvgSlider) {
+        return;
+    }
+    const QSignalBlocker block(m_wfAvgSlider);
+    m_wfAvgSlider->setValue(average);
+    m_wfAvgLabel->setText(QString::number(average));
+}
+
+int SpectrumOverlayMenu::waterfallAverage() const
+{
+    return m_wfAvgSlider ? m_wfAvgSlider->value() : 0;
 }
 
 void SpectrumOverlayMenu::syncPanProcessingSettings(int avg, int fps,

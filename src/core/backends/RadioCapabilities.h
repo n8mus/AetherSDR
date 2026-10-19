@@ -338,6 +338,11 @@ struct RadioCapabilities {
     std::optional<PanAmplitudeModel> panAmplitude;
     // See BackendPanAveraging. Absent = the widget averages client-side.
     std::optional<BackendPanAveraging> backendPanAveraging;
+    // AetherSDR Orion fork: engaged when the backend averages its WATERFALL
+    // copy separately from the trace, so FFT AVG can smooth the trace without
+    // smearing the waterfall and the two get their own controls (the Display
+    // panel's WF AVG row). Absent = one average serves both, as before.
+    std::optional<BackendPanAveraging> backendPanWaterfallAveraging;
     // See PanFrameRateShaping. Absent = the client keeps no FFT frame rate.
     std::optional<PanFrameRateShaping> panFrameRateShaping;
     // See PanWaterfallRateShaping. Absent = the client keeps no waterfall rate.

@@ -126,7 +126,9 @@ public:
     void setPanCenter(const QString& panId, double hz, PanCenterIntent intent) override;
     void setPanBandwidth(const QString& panId, double hz) override;
     void setPanFrameRate(const QString& panId, int fps) override;
+    void setPanWaterfallRate(const QString& panId, int rate) override;
     void setPanAverage(const QString& panId, int average) override;
+    void setPanWaterfallAverage(const QString& panId, int average) override;
     void setPanWeightedAverage(const QString& panId, bool on) override;
     void setPanPixelWidth(const QString& panId, int pixels) override;
     void setPanRfGain(const QString& panId, int gainDb) override;
@@ -320,6 +322,8 @@ private:
     std::unique_ptr<OrionPatMonitor> m_pat;
     QString m_patStatus;
     spectrum::View m_view;
+    int m_waterfallHoldMs = 0;   // the waterfall's row interval, see setPanWaterfallRate
+    int m_waterfallAverage = 0;  // the waterfall's own WF AVG (0 = off)
     bool m_viewKnown = false;
     double m_viewCentreEchoHz = 0.0;   // the centre exactly as last requested
     int m_panPoints = 1024;

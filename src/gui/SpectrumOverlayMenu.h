@@ -76,6 +76,11 @@ public:
     void setTopLimit(int px) { m_topLimit = px; }
 
     void syncPanProcessingSettings(int avg, int fps, bool weightedAvg);
+    // AetherSDR Orion fork: the WF AVG row, shown only on a backend that
+    // averages its waterfall copy separately (backendPanWaterfallAveraging).
+    void setWaterfallAverageAvailable(bool available);
+    void syncWaterfallAverage(int average);
+    [[nodiscard]] int waterfallAverage() const;
     void syncWfLineDuration(int rate);
     void syncKiwiWaterfallSettings(int minDbm, int maxDbm, bool autoScale,
                                    int rate);
@@ -236,6 +241,8 @@ signals:
     // *RightClicked) were removed with the overlay's DSP panel.
     // Display sub-panel signals
     void fftAverageChanged(int frames);
+    // AetherSDR Orion fork: the waterfall's own average (WF AVG row).
+    void wfAverageChanged(int average);
     void fftFpsChanged(int fps);
     void fftWeightedAverageChanged(bool on);
     void fftFillAlphaChanged(float alpha);
@@ -465,6 +472,10 @@ private:
     QScrollArea* m_displayScroll{nullptr};
     bool         m_displayPanelVisible{false};
     QSlider*     m_avgSlider{nullptr};
+    // AetherSDR Orion fork: the WF AVG row (hidden unless declared).
+    QSlider*  m_wfAvgSlider{nullptr};
+    QLabel*   m_wfAvgLabel{nullptr};
+    QLabel*   m_wfAvgTitleLabel{nullptr};
     QLabel*      m_avgLabel{nullptr};
     QSlider*     m_fpsSlider{nullptr};
     QLabel*      m_fpsLabel{nullptr};

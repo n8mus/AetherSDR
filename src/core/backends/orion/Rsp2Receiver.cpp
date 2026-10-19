@@ -1,4 +1,5 @@
 #include "core/backends/orion/Rsp2Receiver.h"
+
 #include "core/backends/orion/OrionSkimmerFeed.h"
 
 #include "core/backends/orion/OrionRxAudio.h"
@@ -220,6 +221,18 @@ void Rsp2Receiver::setFrameRate(int fps)
     m_frameIntervalMs = 1000 / std::clamp(fps, 1, 60);
 }
 
+void Rsp2Receiver::setWaterfallHoldMs(int ms)
+{
+    std::lock_guard lock(m_viewLock);
+    m_waterfallHoldMs = std::clamp(ms, 0, 10000);
+}
+
+void Rsp2Receiver::setWaterfallAverage(int percent)
+{
+    std::lock_guard lock(m_viewLock);
+    m_waterfallAverage = std::clamp(percent, 0, 100);
+}
+
 void Rsp2Receiver::setAverage(int percent)
 {
     std::lock_guard lock(m_viewLock);
@@ -310,30 +323,40 @@ void Rsp2Receiver::eventCallback(sdrplay_api_EventT eventId, sdrplay_api_TunerSe
 
 void Rsp2Receiver::workerLoop()
 {
+    // Up to this many FFT blocks per frame: every sample since the previous
+    // frame at 25 fps (2 MS/s / 16384 / 25 = 4.9), with headroom for 5 fps.
+    constexpr int kMaxBlocks = 32;
     spectrum::SpectrumProcessor processor;
-    std::vector<std::complex<float>> block(static_cast<std::size_t>(processor.size()));
+    const std::size_t n = static_cast<std::size_t>(processor.size());
+    std::vector<std::complex<float>> blocks(n * kMaxBlocks);
+    spectrum::WaterfallHold waterfall;
     const quint64 generation = m_generation;
     quint64 lastSamples = 0;
     // The average is a time constant, so it needs the time between frames.
     auto lastFrame = std::chrono::steady_clock::now();
     auto lastFullSpectrum = lastFrame;
+    const auto started = lastFrame;
 
     while (!m_stopWorker) {
         int intervalMs = 40;
+        int holdMs = 0;
         spectrum::View view;
         int points = 1024;
         int average = 0;
+        int wfAverage = 0;
         bool weighted = false;
         {
             std::lock_guard lock(m_viewLock);
             intervalMs = m_frameIntervalMs;
+            holdMs = m_waterfallHoldMs;
             view = m_view;
             points = m_points;
             average = m_average;
+            wfAverage = m_waterfallAverage;
             weighted = m_weightedAverage;
         }
         qint64 lo = 0;
-        bool haveBlock = false;
+        int count = 0;
         bool resetAverage = false;
         {
             std::unique_lock lock(m_ringLock);
@@ -343,33 +366,38 @@ void Rsp2Receiver::workerLoop()
                 break;
             }
             const quint64 total = m_samples.load(std::memory_order_relaxed);
-            // A full FFT of samples all taken at the current LO, and new ones
-            // since the last frame (a stalled stream draws nothing).
-            if (m_samplesSinceRetune >= block.size() && total != lastSamples) {
+            // Whole FFT blocks of samples all taken at the current LO, and new
+            // ones since the last frame (a stalled stream draws nothing).
+            if (m_samplesSinceRetune >= n && total != lastSamples) {
+                const quint64 fresh = std::min<quint64>(
+                    {total - lastSamples, m_samplesSinceRetune, kRingSamples / 2});
                 lastSamples = total;
-                std::size_t start = (m_writeIndex + kRingSamples - block.size()) & (kRingSamples - 1);
-                for (std::size_t i = 0; i < block.size(); ++i) {
-                    block[i] = m_ring[start];
+                count = std::clamp(static_cast<int>(fresh / n), 1, kMaxBlocks);
+                const std::size_t want = n * static_cast<std::size_t>(count);
+                std::size_t start = (m_writeIndex + kRingSamples - want) & (kRingSamples - 1);
+                for (std::size_t i = 0; i < want; ++i) {
+                    blocks[i] = m_ring[start];
                     start = (start + 1) & (kRingSamples - 1);
                 }
                 lo = m_activeLo.load();
                 resetAverage = m_resetAverage;
                 m_resetAverage = false;
-                haveBlock = true;
             }
         }
-        if (!haveBlock) {
+        if (count == 0) {
             continue;
         }
         processor.setAverage(average);
+        processor.setWaterfallAverage(wfAverage);
         processor.setWeightedAverage(weighted);
         if (resetAverage) {
             processor.resetAverage();
+            waterfall.reset();
         }
         const auto now = std::chrono::steady_clock::now();
         const double elapsed = std::chrono::duration<double>(now - lastFrame).count();
         lastFrame = now;
-        const std::vector<float>& db = processor.process(block.data(), elapsed, lo);
+        const std::vector<float>& db = processor.process(blocks.data(), count, elapsed, lo);
         // The skimmer's channel search reads the whole capture, not the view.
         const int fullMs = m_fullSpectrumMs.load(std::memory_order_relaxed);
         if (fullMs > 0 && now - lastFullSpectrum >= std::chrono::milliseconds(fullMs)) {
@@ -381,16 +409,27 @@ void Rsp2Receiver::workerLoop()
                 }
             }, Qt::QueuedConnection);
         }
-        std::vector<float> frame = spectrum::cropToView(db, lo, view, points);
         const float offset = static_cast<float>(levelOffsetDb());
+        std::vector<float> frame = spectrum::cropToView(db, lo, view, points);
+        std::vector<float> raw = spectrum::cropToView(processor.waterfallDb(), lo, view, points);
         for (float& v : frame) {
             v += offset;
         }
+        for (float& v : raw) {
+            v += offset;
+        }
+        waterfall.setHoldMs(holdMs);
+        const std::vector<float>& held = waterfall.push(
+            raw, std::chrono::duration_cast<std::chrono::milliseconds>(now - started).count());
         QByteArray bytes(reinterpret_cast<const char*>(frame.data()),
                          static_cast<qsizetype>(frame.size() * sizeof(float)));
-        QMetaObject::invokeMethod(this, [this, bytes, generation] {
+        QByteArray wf(reinterpret_cast<const char*>(held.data()),
+                      static_cast<qsizetype>(held.size() * sizeof(float)));
+        const qint64 lowHz = view.centreHz - view.spanHz / 2;
+        const qint64 highHz = view.centreHz + view.spanHz / 2;
+        QMetaObject::invokeMethod(this, [this, bytes, wf, lowHz, highHz, generation] {
             if (generation == m_generation) {
-                emit frameReady(bytes);
+                emit frameReady(bytes, wf, lowHz, highHz);
             }
         }, Qt::QueuedConnection);
     }

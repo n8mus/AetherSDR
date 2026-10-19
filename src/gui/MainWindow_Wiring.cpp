@@ -130,6 +130,18 @@ void MainWindow::wireStatusBarMessages()
 
 namespace {
 
+// AetherSDR Orion fork: where the waterfall's own average is remembered. No
+// radio echoes it, so the client owns it, per radio and per pan (the same
+// shape ClientDisplaySettings uses for FFT AVG).
+QString orionWfAverageKey(const RadioSettingsScope& scope, int panIndex)
+{
+    return QStringLiteral("DisplayWfAverage/%1/%2/%3")
+        .arg(scope.family().isEmpty() ? QStringLiteral("unknown") : scope.family(),
+             scope.radioId().isEmpty() ? QStringLiteral("default") : scope.radioId())
+        .arg(panIndex);
+}
+
+
 // Pan-Follows-VFO edge margins, as a fraction of the visible span. Because
 // frequency now maps linearly across contentWidth() (#3482), these are a
 // constant fraction of the panadapter *width* in pixels at every zoom — trigger
@@ -3354,6 +3366,20 @@ void MainWindow::wirePanDisplayStatus(PanadapterApplet* applet,
     if (SpectrumOverlayMenu* menu = sw->overlayMenu()) {
         menu->setFftAverageDescriptions(averaging ? averaging->averageDescription : QString{},
                                        averaging ? averaging->weightedDescription : QString{});
+        // AetherSDR Orion fork: the WF AVG row exists only where the backend
+        // averages its waterfall copy separately, and nothing echoes it back,
+        // so its saved value is restored here and pushed to the backend.
+        const bool wfAvg =
+            m_radioModel.backendCapabilities().backendPanWaterfallAveraging.has_value();
+        menu->setWaterfallAverageAvailable(wfAvg);
+        if (wfAvg) {
+            const int saved =
+                AppSettings::instance()
+                    .value(orionWfAverageKey(m_radioModel.settingsScope(), sw->panIndex()), 0)
+                    .toInt();
+            menu->syncWaterfallAverage(saved);
+            m_radioModel.requestPanWaterfallAverage(applet->panId(), saved);
+        }
     }
     if (m_radioModel.shapesDisplayRatesLocally()) {
         if (averaging && averaging->clientPersistsAveraging) {
@@ -4795,6 +4821,16 @@ void MainWindow::wirePanadapter(PanadapterApplet* applet)
         sw->setFftAverage(v);
         if (m_radioModel.requestPanAverage(applet->panId(), v)) {
             scheduleClientFftAverageSave(sw->panIndex(), v, sw->fftWeightedAvg());
+        }
+    });
+    // AetherSDR Orion fork: the waterfall's own average, beside FFT AVG above
+    // (FORK-NOTES.md). Persisted per radio and pan, since no radio echoes it.
+    connect(menu, &SpectrumOverlayMenu::wfAverageChanged,
+            this, [this, applet, sw](int v) {
+        if (m_radioModel.requestPanWaterfallAverage(applet->panId(), v)) {
+            auto& settings = AppSettings::instance();
+            settings.setValue(orionWfAverageKey(m_radioModel.settingsScope(), sw->panIndex()), v);
+            settings.save();
         }
     });
     connect(menu, &SpectrumOverlayMenu::fftFpsChanged,

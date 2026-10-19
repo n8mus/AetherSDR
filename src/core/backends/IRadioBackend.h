@@ -392,6 +392,25 @@ public:
         Q_UNUSED(fps);
     }
 
+    // AetherSDR Orion fork: the pan's waterfall rate (1..100, WaterfallRate.h),
+    // for a backend that shapes its own waterfall copy (sent as coverage). The
+    // rows are still paced in RadioModel. Default no-op.
+    virtual void setPanWaterfallRate(const QString& panId, int rate)
+    {
+        Q_UNUSED(panId);
+        Q_UNUSED(rate);
+    }
+
+    // AetherSDR Orion fork: the WATERFALL's own average (Display -> WF AVG),
+    // 0..100 on the same scale as setPanAverage(), for a backend that shapes a
+    // separate waterfall copy (RadioCapabilities::backendPanWaterfallAveraging).
+    // Default no-op.
+    virtual void setPanWaterfallAverage(const QString& panId, int average)
+    {
+        Q_UNUSED(panId);
+        Q_UNUSED(average);
+    }
+
     // The operator's FFT-average setting (Display -> FFT AVG), 0..100:
     // 0 = no time averaging; what one step means is the backend's call.
     // Same situation as setPanFrameRate(): a backend

@@ -5997,6 +5997,21 @@ bool RadioModel::requestPanBandwidth(const QString& panId, double bandwidthMhz)
         panId, std::numeric_limits<double>::quiet_NaN(), bandwidthMhz);
 }
 
+// AetherSDR Orion fork: the waterfall's own average. No pan-model field and no
+// radio command — the trace's average owns those; this one only reaches the
+// backend that shapes a separate waterfall copy, so the control is inert on
+// every other radio.
+bool RadioModel::requestPanWaterfallAverage(const QString& panId, int average)
+{
+    if (panId.isEmpty() || average < 0 || average > 100 || !m_backend
+        || !shapesDisplayRatesLocally()
+        || !backendCapabilities().backendPanWaterfallAveraging) {
+        return false;
+    }
+    m_backend->setPanWaterfallAverage(backendPanIdFor(panId), average);
+    return true;
+}
+
 bool RadioModel::requestPanAverage(const QString& panId, int average)
 {
     if (panId.isEmpty() || average < 0 || average > 100) {
@@ -6122,6 +6137,9 @@ bool RadioModel::requestPanDisplayRates(const QString& panId, int fps,
         // see onBackendSpectrumFrame for why the two live in different places.
         if (fps > 0)
             m_backend->setPanFrameRate(backendPanIdFor(panId), fps);
+        // AetherSDR Orion fork: a backend shaping its own waterfall copy needs the rate.
+        if (wfRate > 0)
+            m_backend->setPanWaterfallRate(backendPanIdFor(panId), wfRate);
         return true;
     }
 

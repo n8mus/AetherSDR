@@ -87,7 +87,12 @@ public:
     [[nodiscard]] qint64 lo() const { return m_requestedLo; }
     void setView(const spectrum::View& view, int points);
     void setFrameRate(int fps);
+    // How long the waterfall's copy is peak-held: its row interval (0: none).
+    void setWaterfallHoldMs(int ms);
     void setAverage(int percent);
+    // The WATERFALL's own average (Display -> WF AVG), on the same 0..100
+    // scale: it shapes only the waterfall copy, never the trace.
+    void setWaterfallAverage(int percent);
     void setWeightedAverage(bool on);
 
     // Counters for health and the delivery-rate check (any thread).
@@ -96,8 +101,11 @@ public:
     [[nodiscard]] double levelOffsetDb() const;
 
 signals:
-    // One pan frame: float dB per point across the current view.
-    void frameReady(const QByteArray& frame);
+    // One pan frame: float dB per point across the current view, FFT AVG
+    // applied; and the waterfall's copy of the same view (raw frames,
+    // peak-held, see spectrum::WaterfallHold), view edges in Hz.
+    void frameReady(const QByteArray& frame, const QByteArray& waterfall, qint64 lowHz,
+                    qint64 highHz);
     // The whole capture, see setFullSpectrumInterval(). Owner thread.
     void fullSpectrumReady(const std::vector<float>& db, qint64 loHz);
     void deviceLost(const QString& reason);
@@ -138,7 +146,9 @@ private:
     spectrum::View m_view;
     int m_points = 1024;
     int m_frameIntervalMs = 40;
+    int m_waterfallHoldMs = 0;
     int m_average = 0;
+    int m_waterfallAverage = 0;
     bool m_weightedAverage = false;
 
     std::thread m_worker;

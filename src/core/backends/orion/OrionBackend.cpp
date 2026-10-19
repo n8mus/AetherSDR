@@ -1,5 +1,7 @@
 #include "core/backends/orion/OrionBackend.h"
 
+#include "core/WaterfallRate.h"
+
 #ifdef AETHER_ORION_SDRPLAY
 #include "core/backends/orion/OrionRxAudio.h"
 #include "core/backends/orion/Rsp2Receiver.h"
@@ -180,6 +182,13 @@ RadioCapabilities OrionBackend::capabilities() const
            "FPS changes."),
         tr("Off averages signal power. On averages dB levels for a smoother trace, but varying "
            "signals and noise read lower. Both modes use the FFT AVG time setting.")};
+    // The waterfall gets its OWN copy of every frame and its own average
+    // (Display -> WF AVG), so FFT AVG no longer smears the waterfall with the
+    // trace — they used to be built from the same averaged frames.
+    c.backendPanWaterfallAveraging = BackendPanAveraging{SpectrumTemporalAverage::kMsPerStep, true,
+        tr("Waterfall averaging time: 10 ms per step; 0 is off and 100 is one second. It shapes "
+           "the waterfall only — FFT AVG shapes the trace."),
+        QString()};
 
     // Two fixed receivers; slices are neither created nor removed.
     c.canCreateSlices = false;
@@ -245,9 +254,27 @@ RadioCapabilities OrionBackend::capabilities() const
     c.hasFullDuplex = false;
     c.twoToneGenerator = std::nullopt;
 
-    // No spectrum yet (the RSP2 arrives in step 2), and when it does the
-    // scale is ours, not the radio's.
+    // The RSP2's spectrum is computed on this host and the scale is ours, not
+    // the radio's.
     c.radioOwnsDbmScale = false;
+    // What the vertical axis means here (as the RTL backend declares it).
+    // Without this record the panadapter treated the Orion as "no backend has
+    // been read": the noise-floor auto-adjust was gated off, so the trace sat
+    // wherever the saved range left it — a flat floor jammed against the
+    // bottom of the pane with 60 dB of empty sky above it.
+    PanAmplitudeModel amplitude;
+    // Levels are relative: the RSP2's gain reduction and LNA state are known,
+    // but nothing here is calibrated to the antenna, so a level from this
+    // receiver is never published as a spot level or held against a report.
+    amplitude.calibratedDbm = false;
+    // Bins are absolute host-side levels (SpectrumProcessor: 10*log10 of
+    // window-normalised power, plus the fixed gain offset), so they do not
+    // move when the display reference moves and the auto-adjust converges.
+    amplitude.binsAbsolute = true;
+    // The operator's dB range is remembered here, per radio and pan: the radio
+    // echoes none of it.
+    amplitude.clientPersistsDbmRange = true;
+    c.panAmplitude = amplitude;
     c.hasDaxStreams = false;
     c.hasDdcPanEdgeRolloff = false;
     c.panZoomModes = std::nullopt;
@@ -1140,11 +1167,21 @@ void OrionBackend::startSdr(const QVariantMap& params)
             }
         });
     }
-    connect(m_sdr.get(), &Rsp2Receiver::frameReady, this, [this](const QByteArray& frame) {
+    // The waterfall's copy rides as same-observation coverage: RadioModel
+    // builds its rows from it, the trace from the frame (fork rule 2).
+    connect(m_sdr.get(), &Rsp2Receiver::frameReady, this,
+            [this](const QByteArray& frame, const QByteArray& waterfall, qint64 lowHz,
+                   qint64 highHz) {
         if (m_connected) {
-            emit spectrumFrameReady(0, frame);
+            SpectrumCoverage coverage;
+            coverage.bins = waterfall;
+            coverage.lowMhz = static_cast<double>(lowHz) / 1e6;
+            coverage.highMhz = static_cast<double>(highHz) / 1e6;
+            emit spectrumFrameReady(0, frame, coverage);
         }
     });
+    m_sdr->setWaterfallHoldMs(m_waterfallHoldMs);
+    m_sdr->setWaterfallAverage(m_waterfallAverage);
     connect(m_sdr.get(), &Rsp2Receiver::deviceLost, this, [this](const QString& reason) {
         stopSdr();
         m_sdrStatus = reason;
@@ -1783,6 +1820,19 @@ void OrionBackend::setPanFrameRate(const QString& panId, int fps)
 #endif
 }
 
+void OrionBackend::setPanWaterfallRate(const QString& panId, int rate)
+{
+    Q_UNUSED(panId);
+    // Peak-hold the waterfall's copy over one row interval, so every frame
+    // between two rows shows in the later one.
+    m_waterfallHoldMs = WaterfallRate::localRowIntervalMs(rate);
+#ifdef AETHER_ORION_SDRPLAY
+    if (m_sdr) {
+        m_sdr->setWaterfallHoldMs(m_waterfallHoldMs);
+    }
+#endif
+}
+
 void OrionBackend::setPanAverage(const QString& panId, int average)
 {
     Q_UNUSED(panId);
@@ -1792,6 +1842,17 @@ void OrionBackend::setPanAverage(const QString& panId, int average)
     }
 #else
     Q_UNUSED(average);
+#endif
+}
+
+void OrionBackend::setPanWaterfallAverage(const QString& panId, int average)
+{
+    Q_UNUSED(panId);
+    m_waterfallAverage = std::clamp(average, 0, 100);
+#ifdef AETHER_ORION_SDRPLAY
+    if (m_sdr) {
+        m_sdr->setWaterfallAverage(m_waterfallAverage);
+    }
 #endif
 }
 

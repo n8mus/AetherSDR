@@ -6,6 +6,7 @@
 
 #include "core/backends/orion/OrionSpectrum.h"
 
+#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <cstdio>
@@ -154,11 +155,78 @@ static void testAveraging()
     }
 }
 
+// The waterfall gets its own copy of every frame, with its own average
+// (Display -> WF AVG): FFT AVG must not reach it, and WF AVG must not
+// reach the trace. This is what let the operator tame one without
+// smearing the other.
+static void testWaterfallIsSeparate()
+{
+    const qint64 lo = 14'285'000;
+    const auto loud = tone(-50'000.0, 0.5, kFftSize);
+    const auto quiet = tone(-50'000.0, 0.0005, kFftSize);
+    const auto bin = static_cast<std::size_t>(kFftSize / 2 + std::lround(-50'000.0 / kBinHz));
+
+    // FFT AVG alone: the trace lags a fade, the waterfall's copy does not.
+    {
+        SpectrumProcessor p;
+        p.setAverage(100);            // one second on the trace
+        p.setWaterfallAverage(0);     // none on the waterfall
+        (void)p.process(loud.data(), 0.04, lo);
+        const std::vector<float> trace = p.process(quiet.data(), 0.04, lo);
+        const float wf = p.waterfallDb()[bin];
+        check(trace[bin] > wf + 10.0f,
+              "FFT AVG holds the trace up while the waterfall's copy drops at once");
+    }
+
+    // WF AVG alone: the waterfall lags, the trace does not.
+    {
+        SpectrumProcessor p;
+        p.setAverage(0);
+        p.setWaterfallAverage(100);
+        (void)p.process(loud.data(), 0.04, lo);
+        const std::vector<float> trace = p.process(quiet.data(), 0.04, lo);
+        const float wf = p.waterfallDb()[bin];
+        check(wf > trace[bin] + 10.0f,
+              "WF AVG holds the waterfall up while the trace drops at once");
+    }
+
+    // Off: the waterfall's copy is the frame itself.
+    {
+        SpectrumProcessor p;
+        p.setAverage(0);
+        p.setWaterfallAverage(0);
+        const std::vector<float> trace = p.process(loud.data(), 0.04, lo);
+        check(std::abs(trace[bin] - p.waterfallDb()[bin]) < 0.001f,
+              "with both averages off the waterfall's copy is the frame");
+    }
+}
+
+// Welch: a frame built from several blocks is the mean power of all of
+// them, so the noise floor steadies without the trace lagging.
+static void testWelchBlocks()
+{
+    const qint64 lo = 14'285'000;
+    const auto one = tone(-50'000.0, 0.25, kFftSize);
+    std::vector<std::complex<float>> four;
+    for (int b = 0; b < 4; ++b) {
+        four.insert(four.end(), one.begin(), one.end());
+    }
+    const auto bin = static_cast<std::size_t>(kFftSize / 2 + std::lround(-50'000.0 / kBinHz));
+    SpectrumProcessor p;
+    const float single = p.process(one.data(), 1, 0.04, lo)[bin];
+    SpectrumProcessor q;
+    const float welch = q.process(four.data(), 4, 0.04, lo)[bin];
+    check(std::abs(single - welch) < 0.1f,
+          "four identical blocks read the same level as one (mean power, not sum)");
+}
+
 int main()
 {
     testViewRules();
     testWindowAndPeak();
     testAveraging();
+    testWaterfallIsSeparate();
+    testWelchBlocks();
     if (g_failures == 0) {
         std::printf("orion_spectrum_test: all checks passed\n");
         return 0;

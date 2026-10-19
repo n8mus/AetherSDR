@@ -982,6 +982,10 @@ public:
     bool requestConfirmedReceiveTune(int sliceId, double mhz, IRadioBackend::ReceiveTuneView view);
     bool requestReceiveCaptureRecenter(const QString& panId);
     bool requestPanAverage(const QString& panId, int average);
+    // AetherSDR Orion fork: the waterfall's own average (Display -> WF AVG),
+    // for a backend declaring backendPanWaterfallAveraging. Local-shaping
+    // backends only; nothing is sent to a command-plane radio.
+    bool requestPanWaterfallAverage(const QString& panId, int average);
     // Weighted-average toggle for a backend that shapes its own spectrum:
     // straight down to that backend. Returns false on Flex, where the caller
     // sends the weighted_average= wire command itself.
