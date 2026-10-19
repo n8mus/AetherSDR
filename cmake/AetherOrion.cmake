@@ -34,7 +34,9 @@ else()
         src/core/backends/orion/OrionPatMonitor.cpp
         src/core/backends/orion/OrionPatMonitor.h
         src/core/backends/orion/CwMacros.cpp
-        src/core/backends/orion/CwMacros.h)
+        src/core/backends/orion/CwMacros.h
+        src/core/backends/orion/OrionCwRxBackend.cpp
+        src/core/backends/orion/OrionCwRxBackend.h)
     # CW skimmer (step 8), ported from the Orion console: a bank of CW decoders
     # fed with the RSP2's raw IQ, and a DX-cluster telnet server on :7300.
     target_sources(aethercore PRIVATE

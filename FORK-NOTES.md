@@ -26,6 +26,9 @@ possible merge conflict when pulling from `upstream`.
 | `src/gui/MainWindow_Wiring.cpp` | The WF AVG connection, its availability, and its per-radio/per-pan persistence (`DisplayWfAverage/...`) | Nothing echoes the setting back, so the client owns it |
 | `src/gui/MainWindow_Shortcuts.cpp` | In `toggleCwKeyerPanel()`, under `AETHER_BACKEND_ORION`: on the `orion` family the CWX indicator opens the fork's CW window instead of the CWX panel (setting `OrionCw/replaceCwx`) | Fork rule 2's CW exception: the station's CW window is the console's, on AetherSDR's keying |
 | `src/gui/MainWindow_Menus.cpp` | Under `AETHER_BACKEND_ORION`: the include of `gui/orion/OrionCwUi.h` and one call, `installOrionCwWindow(...)`, adding a Tools item | Tools -> CW window... (Ctrl+Shift+W) |
+| `src/models/CwRxModel.cpp` | Under `AETHER_BACKEND_ORION`: `orion-fldigi` and `orion-bayes` in `availableBackends()` and `makeBackend()`, plus one include | The Orion console's two CW readers join AetherSDR's own in the reader's decoder list |
+| `src/gui/AppletPanel.cpp/.h` | Under `AETHER_BACKEND_ORION`: the `ROT` applet entry (the DCU-3 rotor tile) beside `GHE`, its bar-order slot and its palette category | The operator asked for the rotor on the right-hand panel, in the same shape as the Green Heron tile |
+| `src/gui/MainWindow.cpp` | Under `AETHER_BACKEND_ORION`: hands the rotor tile the radio model after the panel is built | The panel is built before any radio exists |
 | `tests/tests.cmake` | `orion_cat_test`, `orion_spectrum_test`, `orion_rxaudio_test`, `orion_peripherals_test`, `orion_skimmer_test`, `orion_logbook_test`, `orion_upload_test` and `orion_backend_test` appended at the end | Upstream requires every test target to be declared there |
 | `tests/backend_seam_affinity_test.cpp` | `orion` added to the constructed-families list | The seam contract test covers the new backend too |
 
@@ -49,6 +52,9 @@ New files that upstream does not have (no merge risk):
   GPL-2.0-or-later, with AetherSDR settings and cty.dat; plus the glue
   `OrionLogbook`, and `OrionUploadSecrets` (upload secrets in the system
   keychain); needs Qt6::Sql)
+- `src/core/backends/orion/OrionCwRxBackend.cpp/.h` (the console's CW
+  readers as AetherSDR `CwRxBackend`s, over the skimmer's `skim::CwDecoder`)
+- `src/gui/orion/OrionRotorApplet.cpp/.h` (the DCU-3 rotor tile)
 - `src/core/backends/orion/CwMacros.cpp/.h` (the console's plain-language CW
   macro vocabulary, ported: namespace and include paths only)
 - `src/core/backends/orion/log/QsoContext.h` (the console's shared
