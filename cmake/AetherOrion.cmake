@@ -107,7 +107,9 @@ else()
         src/gui/orion/OrionCwUi.cpp
         src/gui/orion/OrionCwUi.h
         src/gui/orion/OrionCwWindow.cpp
-        src/gui/orion/OrionCwWindow.h)
+        src/gui/orion/OrionCwWindow.h
+        src/gui/orion/OrionRotorApplet.cpp
+        src/gui/orion/OrionRotorApplet.h)
 
     # RSP2 panadapter and receive audio (steps 2-3). Needs the SDRplay API HEADERS from the
     # operator's install and fftw3f. The library itself is dlopen()ed at run

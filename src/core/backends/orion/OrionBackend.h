@@ -233,6 +233,7 @@ private:
     void setRadioTx(bool on);
     void startSkimmer(const QVariantMap& params);
     void updateSkimmerGate();
+    [[nodiscard]] QVariantMap rotorState() const;
     [[nodiscard]] QVariantMap skimmerState() const;
     void openTxAudio(const QVariantMap& params);
 

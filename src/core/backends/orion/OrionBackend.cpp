@@ -244,6 +244,14 @@ RadioCapabilities OrionBackend::capabilities() const
     c.cwTextMaxWpm = OrionWinKeyer::kMaxWpm;
     c.cwSpeedMinWpm = OrionWinKeyer::kMinWpm;
     c.cwSpeedMaxWpm = OrionWinKeyer::kMaxWpm;
+    // The sidetone range this radio actually has (setCwPitch clamps to it).
+    // Undeclared, it fell back to the generic 100-6000 Hz, and a 5900 Hz
+    // span across a ~150 px slider is about 40 Hz per pixel — the operator
+    // could land on 540 or 580 but never on the 550 he uses. 1 kHz over the
+    // same slider is a few Hz per pixel, and the step keeps it on tens.
+    c.cwPitchMinHz = 200;
+    c.cwPitchMaxHz = 1200;
+    c.cwPitchStepHz = 10;
     c.cwTextMaxMessageChars = 0;
     c.cwTextAllowedCharacters = OrionWinKeyer::allowedCharacters(keyer && m_keyer->isWk3());
     c.cwTextHasProgress = false;
@@ -1527,6 +1535,19 @@ void OrionBackend::skimmerTuning(qint64& dialHz, qint64& loHz) const
 #endif
 }
 
+// What the rotor is doing, for rotor.get and for every rotor.* answer:
+// whether it is there, where it says it is pointing, and where it was last
+// asked to go. Azimuth is -1 when it has not reported yet.
+QVariantMap OrionBackend::rotorState() const
+{
+    QVariantMap m;
+    m.insert(QStringLiteral("open"), m_rotor && m_rotor->isOpen());
+    m.insert(QStringLiteral("alive"), m_rotor && m_rotor->isAlive());
+    m.insert(QStringLiteral("status"), m_rotorStatus);
+    m.insert(QStringLiteral("azimuth"), m_rotor ? m_rotor->azimuth() : -1.0);
+    return m;
+}
+
 QVariantMap OrionBackend::skimmerState() const
 {
     QVariantMap m;
@@ -2703,6 +2724,49 @@ void OrionBackend::invokeExtension(const QString& ns, const QString& verb,
         }
         return;
     }
+    // The DCU-3 rotor. rotor.get answers the state; rotor.turn takes a
+    // bearing in degrees and rotor.stop halts it where it is. Choosing a
+    // bearing and sending it are separate gestures in every UI that uses
+    // these, and this is the ONLY path that can move the antenna.
+    if (ns == QLatin1String("orion") && verb == QLatin1String("rotor.get")) {
+        if (requestId != 0) {
+            emit extensionResult(requestId, rotorState());
+        }
+        return;
+    }
+    if (ns == QLatin1String("orion") && verb == QLatin1String("rotor.turn")) {
+        const double degrees = arg.toMap().value(QStringLiteral("azimuth"), -1.0).toDouble();
+        QVariantMap m = rotorState();
+        if (!m_rotor || !m_rotor->isOpen()) {
+            m.insert(QStringLiteral("error"), tr("the rotor is not open"));
+        } else if (!(degrees >= 0.0 && degrees <= 360.0)) {
+            m.insert(QStringLiteral("error"), tr("%1 is not a bearing").arg(degrees));
+        } else if (!m_rotor->turnTo(degrees)) {
+            m.insert(QStringLiteral("error"), tr("the rotor refused the turn"));
+        } else {
+            qCInfo(lcOrion) << "Rotor: turning to" << degrees;
+            m.insert(QStringLiteral("asked"), degrees);
+        }
+        if (requestId != 0) {
+            emit extensionResult(requestId, m);
+        }
+        return;
+    }
+    if (ns == QLatin1String("orion") && verb == QLatin1String("rotor.stop")) {
+        QVariantMap m = rotorState();
+        if (!m_rotor || !m_rotor->isOpen()) {
+            m.insert(QStringLiteral("error"), tr("the rotor is not open"));
+        } else if (!m_rotor->stop()) {
+            m.insert(QStringLiteral("error"), tr("the rotor refused the stop"));
+        } else {
+            qCInfo(lcOrion) << "Rotor: stop";
+        }
+        if (requestId != 0) {
+            emit extensionResult(requestId, m);
+        }
+        return;
+    }
+
     // The CW skimmer's switches (Radio Setup -> Orion): skimmer.get answers the
     // state; skimmer.set takes any of enabled / cwOnly / bayes (live) and
     // channels / port (applied at the next connect), and persists them.
