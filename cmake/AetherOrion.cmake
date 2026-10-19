@@ -32,7 +32,9 @@ else()
         src/core/backends/orion/OrionCwDaemon.cpp
         src/core/backends/orion/OrionCwDaemon.h
         src/core/backends/orion/OrionPatMonitor.cpp
-        src/core/backends/orion/OrionPatMonitor.h)
+        src/core/backends/orion/OrionPatMonitor.h
+        src/core/backends/orion/CwMacros.cpp
+        src/core/backends/orion/CwMacros.h)
     # CW skimmer (step 8), ported from the Orion console: a bank of CW decoders
     # fed with the RSP2's raw IQ, and a DX-cluster telnet server on :7300.
     target_sources(aethercore PRIVATE
@@ -86,7 +88,8 @@ else()
             src/core/backends/orion/log/OrionUploadSecrets.cpp
             src/core/backends/orion/log/OrionUploadSecrets.h
             src/core/backends/orion/log/QslUploader.cpp
-            src/core/backends/orion/log/QslUploader.h)
+            src/core/backends/orion/log/QslUploader.h
+            src/core/backends/orion/log/QsoContext.h)
         target_sources(AetherSDR PRIVATE
             src/gui/orion/OrionLogbookUi.cpp
             src/gui/orion/OrionLogbookUi.h)
@@ -100,7 +103,11 @@ else()
         src/gui/orion/OrionSetupPage.cpp
         src/gui/orion/OrionSetupPage.h
         src/gui/orion/OrionSkimmerUi.cpp
-        src/gui/orion/OrionSkimmerUi.h)
+        src/gui/orion/OrionSkimmerUi.h
+        src/gui/orion/OrionCwUi.cpp
+        src/gui/orion/OrionCwUi.h
+        src/gui/orion/OrionCwWindow.cpp
+        src/gui/orion/OrionCwWindow.h)
 
     # RSP2 panadapter and receive audio (steps 2-3). Needs the SDRplay API HEADERS from the
     # operator's install and fftw3f. The library itself is dlopen()ed at run

@@ -105,6 +105,9 @@ void testLogDb(const QString& dir, const CtyDatParser& cty)
     q.rstS = QStringLiteral("599");
     q.rstR = QStringLiteral("579");
     q.name = QStringLiteral("Hiram");
+    // The ON-AIR name, kept apart from the callbook's: the CW macros send
+    // what he SAID, not what QRZ says.
+    q.handle = QStringLiteral("HI");
     const qint64 id = db.addQso(q);
     check(id > 0 && db.count() == 1, "a QSO is logged");
     check(db.qso(id).call == "W1AW" && db.qso(id).band == "20M", "call uppercased, band 20M");
@@ -113,9 +116,23 @@ void testLogDb(const QString& dir, const CtyDatParser& cty)
     check(db.hasNearDuplicate(again), "same call/band/mode 2 minutes later is a near-duplicate");
     again.tsUtc = q.tsUtc.addSecs(600);
     check(!db.hasNearDuplicate(again), "10 minutes later is not");
+    check(db.qso(id).handle == "HI", "the on-air handle is stored and read back");
     check(db.prevQsos(QStringLiteral("W1AW")).size() == 1
-              && db.prevQsos(QStringLiteral("W1AW")).first().name == "Hiram",
-          "previous QSOs with the station");
+              && db.prevQsos(QStringLiteral("W1AW")).first().name == "Hiram"
+              && db.prevQsos(QStringLiteral("W1AW")).first().handle == "HI",
+          "previous QSOs with the station, handle included");
+    {
+        // Standard ADIF by default: nothing we invented goes to an online log.
+        const AdifRecord plain = LogDb::toAdif(db.qso(id));
+        check(!plain.contains(QStringLiteral("APP_TTC_HANDLE")),
+              "an upload record carries no application field");
+        // Our own file export keeps it, so a file round-trips either way
+        // between this log and the station's Orion console.
+        const AdifRecord local = LogDb::toAdif(db.qso(id), /*withLocalFields=*/true);
+        check(local.value(QStringLiteral("APP_TTC_HANDLE")) == "HI",
+              "our own export carries the handle");
+        check(LogDb::fromAdif(local).handle == "HI", "and reads it back");
+    }
     check(LogDb::bandForHz(7074000) == "40M" && LogDb::bandForHz(50313000) == "6M"
               && LogDb::bandForHz(9000000).isEmpty(),
           "band names, empty off-band");
@@ -127,6 +144,7 @@ void testLogDb(const QString& dir, const CtyDatParser& cty)
     check(adif.contains("<PROGRAMID:9>AetherSDR") && adif.contains("<CALL:4>W1AW")
               && adif.contains("<RST_RCVD:3>579"),
           "the export carries AetherSDR's program id and the QSO's fields");
+    check(adif.contains("<APP_TTC_HANDLE:2>HI"), "and the handle, in the file export");
 
     LogDb other;
     check(other.open(dir + "/other.sqlite"), "a second log opens");
@@ -136,6 +154,9 @@ void testLogDb(const QString& dir, const CtyDatParser& cty)
     in.open(QIODevice::ReadOnly);
     QString err;
     check(other.importAdif(in, &cty, &err) == 2, "import adds both records");
+    check(!other.prevQsos(QStringLiteral("W1AW")).isEmpty()
+              && other.prevQsos(QStringLiteral("W1AW")).first().handle == "HI",
+          "the handle survives an export/import round trip");
     const QList<Qso> dl = other.prevQsos(QStringLiteral("DL1AB"));
     check(!dl.isEmpty() && dl.first().band == "40M", "a missing BAND comes from the frequency");
     check(!dl.isEmpty() && dl.first().country == "Fed. Rep. of Germany" && dl.first().cqz == 14,

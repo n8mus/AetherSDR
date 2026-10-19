@@ -9536,6 +9536,14 @@ target_include_directories(orion_cat_test PRIVATE src)
 target_link_libraries(orion_cat_test PRIVATE Qt6::Core)
 add_test(NAME orion_cat_test COMMAND orion_cat_test)
 
+# The CW window's plain-language macro expansion (the console's, ported).
+add_executable(orion_cwmacros_test
+    tests/orion_cwmacros_test.cpp
+    src/core/backends/orion/CwMacros.cpp)
+target_include_directories(orion_cwmacros_test PRIVATE src)
+target_link_libraries(orion_cwmacros_test PRIVATE Qt6::Core)
+add_test(NAME orion_cwmacros_test COMMAND orion_cwmacros_test)
+
 if(AETHER_ORION_SDRPLAY)
     add_executable(orion_spectrum_test
         tests/orion_spectrum_test.cpp

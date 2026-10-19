@@ -15,6 +15,10 @@ class QMenuBar;
 
 namespace AetherSDR {
 
+namespace orion::logbook {
+class QsoContext;
+}
+
 class RadioModel;
 class SliceModel;
 
@@ -23,6 +27,11 @@ class SliceModel;
 // mode the QSO window fills in.
 void installOrionLogbook(QMainWindow* window, QMenuBar* bar, RadioModel* model,
                          std::function<SliceModel*()> activeSlice);
+
+// The station being worked right now, shared by the Log QSO window and the
+// CW window (core/backends/orion/log/QsoContext.h). Null until
+// installOrionLogbook() has run.
+orion::logbook::QsoContext* orionQsoContext();
 
 // Worked-before colour for a spot, as the console colours them: never
 // worked red, worked on another band amber, worked this band green,

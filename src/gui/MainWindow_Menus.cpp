@@ -34,6 +34,9 @@
 #include "TciApplet.h"
 #include "ClientChainApplet.h"
 #include "CwxPanel.h"
+#ifdef AETHER_BACKEND_ORION
+#include "gui/orion/OrionCwUi.h"
+#endif
 #include "DxClusterDialog.h"
 #include "HelpDialog.h"
 #include "MainWindowHelpers.h"
@@ -1100,6 +1103,8 @@ void MainWindow::buildMenuBar()
 #ifdef AETHER_BACKEND_ORION
     // N8EM fork: the CW skimmer's band map and waterfall (FORK-NOTES.md).
     installOrionSkimmerWindows(this, toolsMenu, &m_radioModel, [this] { return activeSlice(); });
+    // N8EM fork: the CW window, which replaces the CWX panel here.
+    installOrionCwWindow(this, toolsMenu, &m_radioModel, &m_cwDecoder);
 #endif
 
     auto* viewMenu = menuBar()->addMenu("&View");

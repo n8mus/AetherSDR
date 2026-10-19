@@ -8,9 +8,19 @@ receiver. The fork's own rules come first; the upstream guide follows.
 
 1. **Never edit `~/orion3-sdr-console`.** Read it for reference only; no
    commits or builds there. It must keep starting exactly as it is.
-2. **Bring over no appearance from the Orion console**: no layouts,
-   colours, meter faces, panadapter drawing, dialogs or window styles.
-   AetherSDR's UI is the UI. Port drivers and protocol logic only, and
+2. **The Orion console's appearance may be used where it is the better
+   screen.** The operator lifted the old no-appearance rule
+   (2026-10-19). Two places take the console's look today, each in the
+   fork's own folder with its hook-up points in `FORK-NOTES.md`:
+   - the 2D panadapter (trace, fill, palettes, grid and scales,
+     waterfall timing and levels, the left-edge drag strips), as a
+     selectable Display mode beside AetherSDR's own 2D and 3D; and
+   - the CW window (`src/gui/orion/OrionCwWindow`), which replaces
+     AetherSDR's CWX panel on this radio.
+   Everywhere else AetherSDR's UI is still the UI — do not scatter
+   console layouts, colours or meter faces through upstream screens, and
+   keep anything borrowed inside the fork's folder so upstream merges
+   stay cheap. Drivers and protocol logic are still ported, not copied:
    re-express them in AetherSDR's own patterns.
 3. **Never key the transmitter or send CW in unattended tests.**
    Receive-only use of the real SDR is fine. Test CAT against a fake

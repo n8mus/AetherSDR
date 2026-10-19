@@ -716,6 +716,61 @@ each service's address is a setting (default the real one) so tests use
 a stand-in. Logbook -> Online logs... holds the switches, fields, Test
 buttons, traffic list, Retry and LoTW QSL sync.
 
+**Step 10, the CW window and the panadapter's two averages (2026-10-19,
+bench-tested against the fake radio and the real RSP2, receive only):**
+- **The CW window** (Tools -> CW window..., Ctrl+Alt+W), the Orion
+  console's `CwWindow` re-expressed on AetherSDR's own plumbing
+  (`src/gui/orion/OrionCwWindow`). Fork rule 2 was amended by the operator
+  to allow the console's appearance here, because this window replaces
+  AetherSDR's CWX panel at this station. From the console: the layout and
+  the dark shack-distance styling, the type-ahead line with Word keys and
+  Live keys, the DX box, F1-F12 macros on three rows of four with
+  right-click editing, and the plain-language macro vocabulary
+  (`[his call] DE [my call] UR RST [rst sent]`, with the old %c / %mc
+  spellings still keying; `core/backends/orion/CwMacros`, ported). From
+  AetherSDR: every byte on the air goes through `CwxModel`, so the TX
+  coordinator, the TUNE interlock, the sidetone and the backend's own
+  WinKeyer path are exactly the CWX panel's; the decoded CW in the RX pane
+  is AetherSDR's `CwRxModel`. Nothing here opens a serial port.
+  The CWX indicator opens this window instead of the CWX panel while the
+  `orion` family is connected (`OrionCw/replaceCwx`, default on); the CWX
+  panel is untouched for every other radio.
+- **One QSO, two windows.** The console's `QsoContext`, ported
+  (`core/backends/orion/log/QsoContext.h`): the Log QSO window and the CW
+  window share one record of the station being worked. A call typed or
+  clicked in either one fills the other (with the country line and the
+  previous-QSO table), and the reports in the Log QSO window are what
+  `[rst sent]` and `[rst rcvd]` key. It is cleared when the QSO is logged
+  or the form is wiped, never just because a window opened.
+- **The logbook gains the console's v3 `handle` column**: the ON-AIR name,
+  kept apart from the callbook's `name` ("the callbook says Robert, the man
+  sends BOB"), with its own box in the Log QSO window and `[his handle]` in
+  the macros. An older log gains the column by ALTER on open. It rides our
+  own ADIF export as `APP_TTC_HANDLE` — the spelling the station's console
+  writes and reads, so a file round-trips either way — and never goes to an
+  online log: every upload path takes standard ADIF.
+- **The panadapter's trace and waterfall now average separately.** The
+  backend hands the waterfall its own copy of each frame (as
+  same-observation `SpectrumCoverage`), built from the raw frame rather
+  than the averaged one, peak-held over the waterfall's row interval so a
+  dit between two rows still lands. FFT AVG shapes the trace; a new WF AVG
+  row at the top of the Display panel's WATERFALL group shapes the
+  waterfall, on the same 10 ms-per-step scale. The row appears only on a
+  backend declaring `backendPanWaterfallAveraging`, and the client keeps
+  its value per radio and pan. This is what the pause note below asked
+  for: averaging the trace no longer smears the waterfall.
+- **The pan's vertical axis is declared** (`panAmplitude`: relative levels,
+  absolute host-computed bins, client-persisted range). Without that record
+  AetherSDR read the Orion as a backend nobody had looked at and gated the
+  noise-floor auto-adjust off, so the trace sat wherever the saved range
+  left it. Measured on the bench: the capture is flat to within 3 dB across
+  the whole +/-500 kHz, and a frame crops to the view correctly at every
+  span — what looked wrong on screen was the Display panel in **3D Stacked
+  Trace** mode plus a floor position that pinned the trace to the bottom of
+  the pane. In 2D, with the floor position around 70, the pan reads
+  correctly: flat floor, carriers on their right frequencies, the waterfall
+  tracking them.
+
 **PAUSED 2026-10-17 (operator decision).** The fork runs the whole station
 on air (CAT, RSP2 pan and both receivers, split, TX on both paths, TUNE,
 ATU, WinKeyer CW, sidetone). Open when it resumes: the 2D panadapter (the

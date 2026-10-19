@@ -36,7 +36,12 @@ const char* kSchema =
     " eqsl_rcvd TEXT DEFAULT '',"
     // Online-log push bookkeeping (v2): '' pending, 'Y' sent, 'E' failed.
     " up_lotw TEXT DEFAULT '', up_eqsl TEXT DEFAULT '', up_qrz TEXT DEFAULT '',"
-    " up_club TEXT DEFAULT '', up_hrdlog TEXT DEFAULT '')";
+    " up_club TEXT DEFAULT '', up_hrdlog TEXT DEFAULT '',"
+    // The ON-AIR name (v3), kept apart from `name`: the callbook says
+    // Robert, the man sends BOB, and the CW macros want what he SAID.
+    // LAST on purpose — an older log gains it by ALTER, which can only
+    // append, and the table model addresses columns by position.
+    " handle TEXT DEFAULT '')";
 
 Qso qsoFromQuery(const QSqlQuery& q) {
     Qso o;
@@ -51,6 +56,7 @@ Qso qsoFromQuery(const QSqlQuery& q) {
     o.rstS     = q.value("rst_s").toString();
     o.rstR     = q.value("rst_r").toString();
     o.name     = q.value("name").toString();
+    o.handle   = q.value("handle").toString();
     o.qth      = q.value("qth").toString();
     o.grid     = q.value("grid").toString();
     o.country  = q.value("country").toString();
@@ -73,6 +79,7 @@ void bindQso(QSqlQuery& q, const Qso& o) {
     q.bindValue(":rsts", o.rstS.trimmed());
     q.bindValue(":rstr", o.rstR.trimmed());
     q.bindValue(":name", o.name.trimmed());
+    q.bindValue(":handle", o.handle.trimmed());
     q.bindValue(":qth", o.qth.trimmed());
     q.bindValue(":grid", o.grid.trimmed().toUpper());
     q.bindValue(":country", o.country.trimmed());
@@ -117,11 +124,14 @@ bool LogDb::open(const QString& path) {
     if (!q.exec(QString::fromLatin1(kSchema))) return false;
     q.exec("CREATE INDEX IF NOT EXISTS idx_qso_call ON qso(call)");
     q.exec("CREATE INDEX IF NOT EXISTS idx_qso_call_band ON qso(call, band)");
+    // v3: the on-air handle. Harmless once the column exists (the
+    // contest log's own idiom) — a log born before v3 gains it here.
+    q.exec("ALTER TABLE qso ADD COLUMN handle TEXT DEFAULT ''");
     // Repair migration: early imports bound absent text fields as SQL
     // NULL (a null QString binds as NULL, not ''), and NULL poisons
     // every <> comparison — the first LoTW sync skipped 6734 rows that
     // way. Normalize once per open; idempotent and cheap.
-    for (const char* col : {"rst_s", "rst_r", "name", "qth", "grid",
+    for (const char* col : {"rst_s", "rst_r", "name", "handle", "qth", "grid",
                             "country", "pota", "comment", "qsl_rcvd",
                             "lotw_rcvd", "eqsl_rcvd", "up_lotw", "up_eqsl",
                             "up_qrz", "up_club", "up_hrdlog"})
@@ -144,10 +154,10 @@ qint64 LogDb::addQso(const Qso& o) {
     QSqlQuery q(QSqlDatabase::database(conn_));
     q.prepare(
         "INSERT INTO qso (ts_utc, call, band, freq_hz, mode, rst_s, rst_r,"
-        " name, qth, grid, country, cqz, ituz, pota, comment,"
+        " name, handle, qth, grid, country, cqz, ituz, pota, comment,"
         " qsl_rcvd, lotw_rcvd, eqsl_rcvd) VALUES"
         " (:ts, :call, :band, :freq, :mode, :rsts, :rstr,"
-        "  :name, :qth, :grid, :country, :cqz, :ituz, :pota, :comment,"
+        "  :name, :handle, :qth, :grid, :country, :cqz, :ituz, :pota, :comment,"
         "  :qsl, :lotw, :eqsl)");
     bindQso(q, o);
     if (!q.exec()) return -1;
@@ -161,7 +171,8 @@ bool LogDb::updateQso(const Qso& o) {
     QSqlQuery q(QSqlDatabase::database(conn_));
     q.prepare(
         "UPDATE qso SET ts_utc=:ts, call=:call, band=:band, freq_hz=:freq,"
-        " mode=:mode, rst_s=:rsts, rst_r=:rstr, name=:name, qth=:qth,"
+        " mode=:mode, rst_s=:rsts, rst_r=:rstr, name=:name,"
+        " handle=:handle, qth=:qth,"
         " grid=:grid, country=:country, cqz=:cqz, ituz=:ituz, pota=:pota,"
         " comment=:comment, qsl_rcvd=:qsl, lotw_rcvd=:lotw, eqsl_rcvd=:eqsl"
         " WHERE id=:id");
@@ -220,7 +231,7 @@ int LogDb::count() const {
     return 0;
 }
 
-AdifRecord LogDb::toAdif(const Qso& o) {
+AdifRecord LogDb::toAdif(const Qso& o, bool withLocalFields) {
     AdifRecord r;
     const QDateTime ts = o.tsUtc.toUTC();
     r.insert("CALL", o.call.trimmed().toUpper());
@@ -247,6 +258,18 @@ AdifRecord LogDb::toAdif(const Qso& o) {
     if (o.qslRcvd == "Y") r.insert("QSL_RCVD", "Y");
     if (o.lotwRcvd == "Y") r.insert("LOTW_QSL_RCVD", "Y");
     if (o.eqslRcvd == "Y") r.insert("EQSL_QSL_RCVD", "Y");
+    // ADIF has no on-air-name field, so the handle rides in an
+    // application field — and ONLY in our own export. An APP_ field is
+    // legal ADIF but the online logs are not obliged to like it (the QRZ
+    // API already rejects POTA/SIG), and nothing the operator uploads
+    // should depend on a field we invented. Default OFF, so every upload
+    // path is standard ADIF unless it asks otherwise. The spelling is the
+    // station's Orion console's, so a file exported here imports there and
+    // the handle survives either way.
+    if (withLocalFields && !o.handle.isEmpty()) {
+        r.insert("APP_TTC_HANDLE", o.handle);
+        if (o.name.isEmpty()) r.insert("NAME", o.handle);
+    }
     return r;
 }
 
@@ -268,6 +291,7 @@ Qso LogDb::fromAdif(const AdifRecord& r) {
     o.rstS = r.value("RST_SENT");
     o.rstR = r.value("RST_RCVD");
     o.name = r.value("NAME");
+    o.handle = r.value("APP_TTC_HANDLE");
     o.qth = r.value("QTH");
     o.grid = r.value("GRIDSQUARE").toUpper();
     o.country = r.value("COUNTRY");
@@ -355,11 +379,11 @@ int LogDb::importAdif(QIODevice& in, const CtyDatParser* cty, QString* err) {
     // online-log push never re-uploads a 13k-QSO archive to anyone.
     ins.prepare(
         "INSERT INTO qso (ts_utc, call, band, freq_hz, mode, rst_s, rst_r,"
-        " name, qth, grid, country, cqz, ituz, pota, comment,"
+        " name, handle, qth, grid, country, cqz, ituz, pota, comment,"
         " qsl_rcvd, lotw_rcvd, eqsl_rcvd,"
         " up_lotw, up_eqsl, up_qrz, up_club, up_hrdlog) VALUES"
         " (:ts, :call, :band, :freq, :mode, :rsts, :rstr,"
-        "  :name, :qth, :grid, :country, :cqz, :ituz, :pota, :comment,"
+        "  :name, :handle, :qth, :grid, :country, :cqz, :ituz, :pota, :comment,"
         "  :qsl, :lotw, :eqsl, 'Y', 'Y', 'Y', 'Y', 'Y')");
     int added = 0;
     for (const AdifRecord& r : recs) {
@@ -391,7 +415,8 @@ bool LogDb::exportAdif(QIODevice& out) const {
     QSqlQuery q(QSqlDatabase::database(conn_));
     if (!q.exec("SELECT * FROM qso ORDER BY ts_utc")) return false;
     while (q.next())
-        out.write(Adif::writeRecord(toAdif(qsoFromQuery(q))).toUtf8());
+        out.write(Adif::writeRecord(
+            toAdif(qsoFromQuery(q), /*withLocalFields=*/true)).toUtf8());
     return true;
 }
 

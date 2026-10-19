@@ -1,5 +1,6 @@
 #include "gui/orion/OrionSetupPage.h"
 
+#include "core/AppSettings.h"
 #include "core/backends/IRadioBackend.h"
 #include "models/RadioModel.h"
 
@@ -8,6 +9,7 @@
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPointer>
 #include <QSpinBox>
 #include <QTimer>
@@ -142,6 +144,37 @@ QWidget* buildOrionSetupPage(RadioModel* model)
     skimStatus->setWordWrap(true);
     skimLay->addWidget(skimStatus);
     vbox->addWidget(skimBox);
+
+    // ---- The operator, for the CW macros --------------------------------------
+    // AetherSDR keeps the station callsign (Settings -> Radio Setup) but has
+    // no setting for the operator's name, town or grid, and the CW window's
+    // [my name] / [my qth] / [my grid] fields need all three.
+    auto* meBox = new QGroupBox(QObject::tr("You, for the CW macros"));
+    auto* meLay = new QVBoxLayout(meBox);
+    auto* meIntro = new QLabel(QObject::tr(
+        "What [my name], [my qth] and [my grid] send in a CW macro (the CW window, "
+        "Tools -> CW window). Your callsign comes from the station callsign in Radio "
+        "Setup."));
+    meIntro->setWordWrap(true);
+    meLay->addWidget(meIntro);
+    auto* meForm = new QFormLayout;
+    const auto meField = [&](const QString& label, const char* key, const QString& hint) {
+        auto* e = new QLineEdit(AppSettings::instance().value(QLatin1String(key)).toString());
+        e->setPlaceholderText(hint);
+        const QString k = QLatin1String(key);
+        QObject::connect(e, &QLineEdit::editingFinished, e, [e, k] {
+            auto& s = AppSettings::instance();
+            s.setValue(k, e->text().trimmed());
+            s.save();
+        });
+        meForm->addRow(label, e);
+    };
+    meField(QObject::tr("Your name:"), "OrionCw/myName", QObject::tr("as you send it"));
+    meField(QObject::tr("Your town:"), "OrionCw/myQth", QObject::tr("as you send it"));
+    meField(QObject::tr("Your grid:"), "OrionCw/myGrid", QObject::tr("e.g. EN82"));
+    meLay->addLayout(meForm);
+    vbox->addWidget(meBox);
+
     vbox->addStretch(1);
 
     QPointer<QWidget> pagePtr(page);

@@ -29,6 +29,9 @@ struct Qso {
     QString   call, band, mode;
     qint64    freqHz = 0;
     QString   rstS, rstR, name, qth, grid, country;
+    // The on-air name he gave ("handle"), kept apart from the callbook's
+    // `name`: what the CW macros send is what he SAID, not what QRZ says.
+    QString   handle;
     int       cqz = 0, ituz = 0;
     QString   pota, comment;
     QString   qslRcvd, lotwRcvd, eqslRcvd;
@@ -70,7 +73,12 @@ public:
     // 5 minutes) and stamps country/zones via cty when the record has none.
     int  importAdif(QIODevice& in, const CtyDatParser* cty, QString* err = nullptr);
     bool exportAdif(QIODevice& out) const;
-    static AdifRecord toAdif(const Qso& q);
+    // Standard ADIF by default — every upload path gets that. Our own
+    // file export passes withLocalFields so the HANDLE survives a round
+    // trip (as APP_TTC_HANDLE, the spelling the station's Orion console
+    // writes and reads, so a file moves either way); no online service
+    // ever sees it.
+    static AdifRecord toAdif(const Qso& q, bool withLocalFields = false);
     static Qso fromAdif(const AdifRecord& rec);
 
     // cqrlog-style band name ("20M") for a frequency; empty off-band. (The

@@ -21,6 +21,9 @@
 #include "AppletPanel.h"
 #include "BandStackPanel.h"
 #include "CwxPanel.h"
+#ifdef AETHER_BACKEND_ORION
+#include "gui/orion/OrionCwUi.h"
+#endif
 #include "DvkPanel.h"
 #include "GuardedSlider.h"
 #include "MeterSlider.h"
@@ -1035,6 +1038,23 @@ void MainWindow::toggleCwKeyerPanel()
     if (!m_cwxPanel || !m_cwxIndicator || !m_cwxIndicator->isEnabled()) {
         return;
     }
+#ifdef AETHER_BACKEND_ORION
+    // N8EM fork (rule 2's CW exception, operator 2026-10-19): on the Orion
+    // the station's CW window is the fork's own — the console's layout, its
+    // plain-language F1-F12 macros and the Log QSO window's QSO — so the CWX
+    // indicator opens that instead of AetherSDR's CWX panel. The panel is
+    // still there for every other radio, and OrionCw/replaceCwx=false brings
+    // it back here. See FORK-NOTES.md.
+    if (m_radioModel.family() == QLatin1String("orion") && orionCwReplacesCwxPanel()) {
+        if (m_cwxPanel->isVisible()) {
+            m_cwxPanel->hide();
+            updateKeyerAvailability();
+        }
+        if (openOrionCwWindow()) {
+            return;
+        }
+    }
+#endif
 
     const bool show = !m_cwxPanel->isVisible();
     // CW and voice keyer panels share the left splitter slot.

@@ -19,6 +19,13 @@ possible merge conflict when pulling from `upstream`.
 | `src/gui/MainWindow_Menus.cpp` | Under `AETHER_ORION_LOGBOOK`: the include of `gui/orion/OrionLogbookUi.h` and one call, `installOrionLogbook(...)`, right after the Tools menu is created; under `AETHER_BACKEND_ORION`: the include of `gui/orion/OrionSkimmerUi.h` and one call, `installOrionSkimmerWindows(...)`, adding two Tools items | The station logbook's "Logbook" menu sits between Tools and View; the skimmer's band map and waterfall open from Tools |
 | `src/gui/MainWindow_Wiring.cpp` | Under `AETHER_ORION_LOGBOOK`: the include of `gui/orion/OrionLogbookUi.h` and, in the spot-marker rebuild, `orionWorkedSpotColour()` when the DXCC colouring gave no colour | Spots coloured by worked-before status from the station log (red new, amber new band, green worked, grey confirmed) |
 | `src/gui/PhoneCwApplet.cpp` | `setSelectableMicInputs()` uses the model's mic-input list when it has one, instead of always FlexRadio's MIC/BAL/LINE/ACC/PC | Shows the Orion's MIC and PC; a Flex is unchanged (its list comes from `mic list`) |
+| `src/core/backends/IRadioBackend.h` | `setPanWaterfallRate()` and `setPanWaterfallAverage()`, both default no-ops | The waterfall gets its own copy of each frame from this backend, so it needs its own row interval and its own average; every other backend ignores them |
+| `src/core/backends/RadioCapabilities.h` | One field, `backendPanWaterfallAveraging` | Declares that the waterfall is averaged separately from the trace; the Display panel's WF AVG row is shown only when it is present |
+| `src/models/RadioModel.cpp` | In `requestPanDisplayRates()`: the waterfall rate also goes to the backend; plus `requestPanWaterfallAverage()` | The rows are still paced in RadioModel, but a backend shaping its own waterfall copy has to know the rate and the average |
+| `src/gui/SpectrumOverlayMenu.cpp/.h` | A "WF AVG:" row at the top of the WATERFALL group, `wfAverageChanged`, `setWaterfallAverageAvailable()`, `syncWaterfallAverage()` | Separate controls for the trace and the waterfall: FFT AVG smooths the trace, WF AVG the waterfall. Hidden on every radio that does not declare it |
+| `src/gui/MainWindow_Wiring.cpp` | The WF AVG connection, its availability, and its per-radio/per-pan persistence (`DisplayWfAverage/...`) | Nothing echoes the setting back, so the client owns it |
+| `src/gui/MainWindow_Shortcuts.cpp` | In `toggleCwKeyerPanel()`, under `AETHER_BACKEND_ORION`: on the `orion` family the CWX indicator opens the fork's CW window instead of the CWX panel (setting `OrionCw/replaceCwx`) | Fork rule 2's CW exception: the station's CW window is the console's, on AetherSDR's keying |
+| `src/gui/MainWindow_Menus.cpp` | Under `AETHER_BACKEND_ORION`: the include of `gui/orion/OrionCwUi.h` and one call, `installOrionCwWindow(...)`, adding a Tools item | Tools -> CW window... (Ctrl+Alt+W) |
 | `tests/tests.cmake` | `orion_cat_test`, `orion_spectrum_test`, `orion_rxaudio_test`, `orion_peripherals_test`, `orion_skimmer_test`, `orion_logbook_test`, `orion_upload_test` and `orion_backend_test` appended at the end | Upstream requires every test target to be declared there |
 | `tests/backend_seam_affinity_test.cpp` | `orion` added to the constructed-families list | The seam contract test covers the new backend too |
 
@@ -42,6 +49,13 @@ New files that upstream does not have (no merge risk):
   GPL-2.0-or-later, with AetherSDR settings and cty.dat; plus the glue
   `OrionLogbook`, and `OrionUploadSecrets` (upload secrets in the system
   keychain); needs Qt6::Sql)
+- `src/core/backends/orion/CwMacros.cpp/.h` (the console's plain-language CW
+  macro vocabulary, ported: namespace and include paths only)
+- `src/core/backends/orion/log/QsoContext.h` (the console's shared
+  current-QSO record, ported: the Log QSO window and the CW window are
+  about one station)
+- `src/gui/orion/OrionCwWindow.cpp/.h` and `src/gui/orion/OrionCwUi.cpp/.h`
+  (the CW window and its Tools entry)
 - `src/gui/orion/OrionSetupPage.cpp/.h` (Radio Setup -> Orion),
   `src/gui/orion/OrionLogbookUi.cpp/.h` (the Logbook menu, Log QSO window
   and logbook browser) and `src/gui/orion/OrionSkimmerUi.cpp/.h` (the

@@ -5,6 +5,7 @@
 #include "core/backends/orion/log/OrionLogbook.h"
 #include "core/backends/orion/log/OrionUploadSecrets.h"
 #include "core/backends/orion/log/QslUploader.h"
+#include "core/backends/orion/log/QsoContext.h"
 #include "models/RadioModel.h"
 #include "models/SliceModel.h"
 #include "models/SpotModel.h"
@@ -53,11 +54,16 @@ using orion::logbook::OrionUploadSecrets;
 using orion::logbook::QslUploader;
 using orion::logbook::OrionLogbook;
 using orion::logbook::Qso;
+using orion::logbook::QsoContext;
 
 namespace {
 
 // The logbook the spot colouring reads (one per application).
 QPointer<OrionLogbook> g_book;
+
+// The station being worked right now, shared with the CW window (one per
+// application; see log/QsoContext.h).
+QPointer<QsoContext> g_qsoContext;
 
 bool workedColoursOn()
 {
@@ -126,9 +132,18 @@ public:
         add(tr("Time:"), m_time, 0, 3);
         ++row;
         m_name = new QLineEdit;
-        m_qth = new QLineEdit;
+        m_handle = new QLineEdit;
+        // The ON-AIR name, kept apart from the callbook's: the callbook
+        // says Robert, the man sends BOB, and the CW macros want what he
+        // SAID ([his handle]).
+        m_handle->setPlaceholderText(tr("what he sends"));
+        m_handle->setToolTip(tr("The on-air name he gave you. [his handle] in a CW macro sends "
+                                "this;\n[his name] sends the callbook's Name above."));
         add(tr("Name:"), m_name, 0);
-        add(tr("QTH:"), m_qth, 1);
+        add(tr("Handle:"), m_handle, 1);
+        ++row;
+        m_qth = new QLineEdit;
+        add(tr("QTH:"), m_qth, 0);
         ++row;
         m_grid = new QLineEdit;
         m_pota = new QLineEdit;
@@ -162,7 +177,10 @@ public:
         logBtn->setDefault(true);
         vbox->addWidget(buttons);
         connect(logBtn, &QPushButton::clicked, this, [this] { logNow(); });
-        connect(clearBtn, &QPushButton::clicked, this, [this] { clearForNext(true); });
+        connect(clearBtn, &QPushButton::clicked, this, [this] {
+            clearQsoContext();
+            clearForNext(true);
+        });
         connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::hide);
 
         connect(m_call, &QLineEdit::textEdited, this, [this](const QString& t) {
@@ -182,6 +200,10 @@ public:
         connect(m_clock, &QTimer::timeout, this, [this] { tick(); });
         m_clock->start();
         clearForNext(true);
+        // After the form is seeded, not before: clearForNext() empties every
+        // box, so binding first adopted the station the CW window was working
+        // and then wiped it again.
+        bindContext();
     }
 
     // Fills frequency and mode from the active slice, and the call from a
@@ -236,6 +258,73 @@ public:
     }
 
 private:
+    // The shared current-QSO record (log/QsoContext.h), mirrored both ways
+    // with the CW window: the call and the report typed here are what the
+    // F-key macros send, and a call clicked in the CW window's decode pane
+    // or typed in its DX box fills this form. The echo flag keeps the two
+    // from writing each other in a loop.
+    void bindContext()
+    {
+        if (!g_qsoContext) return;
+        for (QLineEdit* e : {m_call, m_handle, m_name, m_qth, m_grid, m_rstS, m_rstR}) {
+            connect(e, &QLineEdit::textEdited, this, [this] { pushContext(); });
+        }
+        // The form's own fills count too: the reports this window puts up by
+        // default (599 on CW) are what [rst sent] has to send, without the
+        // operator having to retype them.
+        pushContext();
+        connect(g_qsoContext, &QsoContext::changed, this, [this] { adoptContext(); });
+        adoptContext();   // a station may already be on the CW window's DX box
+    }
+
+    // The form -> the shared record the CW macros read.
+    void pushContext()
+    {
+        if (!g_qsoContext || m_ctxEcho) return;
+        m_ctxEcho = true;
+        g_qsoContext->setCall(m_call->text());
+        g_qsoContext->setHandle(m_handle->text());
+        g_qsoContext->setName(m_name->text());
+        g_qsoContext->setQth(m_qth->text());
+        g_qsoContext->setGrid(m_grid->text());
+        g_qsoContext->setRstSent(m_rstS->text());
+        g_qsoContext->setRstRcvd(m_rstR->text());
+        m_ctxEcho = false;
+    }
+
+    void clearQsoContext()
+    {
+        if (g_qsoContext) {
+            m_ctxEcho = true;
+            g_qsoContext->clear();
+            m_ctxEcho = false;
+        }
+    }
+
+    void adoptContext()
+    {
+        if (m_ctxEcho || !g_qsoContext) return;
+        {
+            m_ctxEcho = true;
+            // A call arriving from the CW window fills the form the same way
+            // a spot does — including the country line and the previous-QSO
+            // table — but never overwrites something typed here.
+            const QString call = g_qsoContext->call();
+            if (!call.isEmpty() && call != m_call->text()) {
+                m_call->setText(call);
+                onCallChanged();
+            }
+            const auto fill = [](QLineEdit* e, const QString& v) {
+                if (!v.isEmpty() && e->text().isEmpty()) e->setText(v);
+            };
+            fill(m_handle, g_qsoContext->handle());
+            fill(m_name, g_qsoContext->name());
+            fill(m_qth, g_qsoContext->qth());
+            fill(m_grid, g_qsoContext->grid());
+            m_ctxEcho = false;
+        }
+    }
+
     void tick()
     {
         if (!m_timeEdited) {
@@ -270,9 +359,11 @@ private:
             // Worked before: the operator's name and QTH carry over, as in the
             // console.
             if (m_name->text().isEmpty()) m_name->setText(prev.first().name);
+            if (m_handle->text().isEmpty()) m_handle->setText(prev.first().handle);
             if (m_qth->text().isEmpty()) m_qth->setText(prev.first().qth);
             if (m_grid->text().isEmpty()) m_grid->setText(prev.first().grid);
         }
+        pushContext();   // the name and handle a macro would send
     }
 
     void logNow()
@@ -290,6 +381,7 @@ private:
         q.rstS = m_rstS->text().trimmed();
         q.rstR = m_rstR->text().trimmed();
         q.name = m_name->text().trimmed();
+        q.handle = m_handle->text().trimmed();
         q.qth = m_qth->text().trimmed();
         q.grid = m_grid->text().trimmed().toUpper();
         q.pota = m_pota->text().trimmed().toUpper();
@@ -304,6 +396,7 @@ private:
             return;
         }
         const qint64 id = m_book->logQso(q);
+        if (id >= 0) clearQsoContext();   // that QSO is over
         if (id < 0) {
             m_status->setText(tr("Could not write the log (%1).").arg(m_book->path()));
             return;
@@ -316,9 +409,13 @@ private:
 
     void clearForNext(bool clearStatus)
     {
-        for (QLineEdit* e : {m_call, m_name, m_qth, m_grid, m_pota, m_comment}) {
+        for (QLineEdit* e : {m_call, m_name, m_handle, m_qth, m_grid, m_pota, m_comment}) {
             e->clear();
         }
+        // The shared record is NOT cleared here: this also runs when the
+        // window is first built, and the CW window may already be working a
+        // station. Only an explicit Clear and a successful log wipe it
+        // (clearQsoContext()).
         m_country->clear();
         m_prev->setRowCount(0);
         m_timeEdited = false;
@@ -327,6 +424,7 @@ private:
         if (clearStatus) m_status->clear();
         tick();
         refreshFromRadio();
+        pushContext();
         m_call->setFocus();
     }
 
@@ -341,6 +439,7 @@ private:
     QLineEdit* m_rstR = nullptr;
     QDateTimeEdit* m_time = nullptr;
     QLineEdit* m_name = nullptr;
+    QLineEdit* m_handle = nullptr;
     QLineEdit* m_qth = nullptr;
     QLineEdit* m_grid = nullptr;
     QLineEdit* m_pota = nullptr;
@@ -352,6 +451,7 @@ private:
     bool m_settingTime = false;
     bool m_freqEdited = false;
     bool m_modeEdited = false;
+    bool m_ctxEcho = false;
 };
 
 // The logbook browser: the console's Logbook window, re-expressed in
@@ -768,6 +868,11 @@ private:
 
 }  // namespace
 
+orion::logbook::QsoContext* orionQsoContext()
+{
+    return g_qsoContext;
+}
+
 QColor orionWorkedSpotColour(const QString& call, double freqMhz)
 {
     if (!g_book || !workedColoursOn() || call.trimmed().isEmpty()) {
@@ -787,6 +892,10 @@ void installOrionLogbook(QMainWindow* window, QMenuBar* bar, RadioModel* model,
 {
     auto* book = new OrionLogbook(window);
     g_book = book;
+    // The shared current-QSO record, created before the Log QSO window so
+    // it binds to it (and before the CW window asks for it).
+    auto* ctx = new QsoContext(window);
+    g_qsoContext = ctx;
     QString error;
     const bool open = book->open(QString(), QString(), &error);
     if (open) {
