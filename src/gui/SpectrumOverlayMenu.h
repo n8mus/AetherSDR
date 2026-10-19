@@ -76,6 +76,9 @@ public:
     void setTopLimit(int px) { m_topLimit = px; }
 
     void syncPanProcessingSettings(int avg, int fps, bool weightedAvg);
+    // AetherSDR Orion fork: reflect the trace-follows-scheme state without
+    // emitting, and grey the two manual colour buttons while it is on.
+    void syncTraceFollowsScheme(bool on);
     // AetherSDR Orion fork: the WF AVG row, shown only on a backend that
     // averages its waterfall copy separately (backendPanWaterfallAveraging).
     void setWaterfallAverageAvailable(bool available);
@@ -241,6 +244,8 @@ signals:
     // *RightClicked) were removed with the overlay's DSP panel.
     // Display sub-panel signals
     void fftAverageChanged(int frames);
+    // AetherSDR Orion fork: trace colours follow the waterfall scheme.
+    void traceFollowsSchemeChanged(bool on);
     // AetherSDR Orion fork: the waterfall's own average (WF AVG row).
     void wfAverageChanged(int average);
     void fftFpsChanged(int fps);
@@ -494,6 +499,7 @@ private:
     QSlider*     m_lineWidthSlider{nullptr};
     QLabel*      m_lineWidthLabel{nullptr};
     QPushButton* m_weightedAvgBtn{nullptr};
+    QPushButton* m_matchSchemeBtn{nullptr};
     QSlider*     m_gainSlider{nullptr};
     QLabel*      m_gainTitleLabel{nullptr};
     QLabel*      m_gainLabel{nullptr};

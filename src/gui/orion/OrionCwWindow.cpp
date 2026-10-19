@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QGridLayout>
@@ -143,9 +144,25 @@ OrionCwWindow::OrionCwWindow(CwxModel* cwx, orion::logbook::QsoContext* ctx, QWi
     stopBtn->setObjectName(QStringLiteral("orionCwStop"));
     stopBtn->setToolTip(tr("Dump the keying buffer immediately — same as touching the paddle"));
     g->addWidget(stopBtn, 0, 3);
+    // 0-BEAT lives here too: with this window open the type-ahead line owns
+    // the keyboard, and the VFO box's own button is a long way from the
+    // hand that is typing.
+    m_zeroBeatBtn = new QPushButton(QStringLiteral("0-BEAT"), this);
+    m_zeroBeatBtn->setObjectName(QStringLiteral("orionCwZeroBeat"));
+    m_zeroBeatBtn->setToolTip(tr("Zero-beat the station you are copying — the same correction\n"
+                                 "as the VFO box's Zero Beat, without leaving the keyboard."));
+    m_zeroBeatBtn->setVisible(false);
+    g->addWidget(m_zeroBeatBtn, 0, 4);
+    connect(m_zeroBeatBtn, &QPushButton::clicked, this, [this] {
+        if (m_zeroBeat) {
+            m_zeroBeat();
+            updateStatus(tr("0-beat"));
+        }
+    });
+
     m_status = new QLabel(this);
     m_status->setObjectName(QStringLiteral("orionCwStatus"));
-    g->addWidget(m_status, 0, 4);
+    g->addWidget(m_status, 0, 5);
 
     // Row 1: the type-ahead line.
     m_line = new QLineEdit(this);
@@ -157,7 +174,7 @@ OrionCwWindow::OrionCwWindow(CwxModel* cwx, orion::logbook::QsoContext* ctx, QWi
                           "Macro fields in square brackets expand here too.\n"
                           "Esc or the paddle stops everything instantly."));
     m_line->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-    g->addWidget(m_line, 1, 0, 1, 5);
+    g->addWidget(m_line, 1, 0, 1, 6);
 
     // Row 2: what went out this over, and the two send styles. Neither box
     // = the whole line waits for Enter; Word keys = each word goes out when
@@ -232,7 +249,7 @@ OrionCwWindow::OrionCwWindow(CwxModel* cwx, orion::logbook::QsoContext* ctx, QWi
                 [this, i] { sendText(fkeySpec(i).section(QLatin1Char('|'), 1)); });
     }
     memOuter->addLayout(fkeyGrid);
-    g->addWidget(memRow, 3, 0, 1, 5);
+    g->addWidget(memRow, 3, 0, 1, 6);
 
     connect(m_dxCall, &QLineEdit::textEdited, this, [this](const QString& t) {
         // Uppercase as it lands, and drop whitespace outright: no call has
@@ -280,6 +297,26 @@ OrionCwWindow::OrionCwWindow(CwxModel* cwx, orion::logbook::QsoContext* ctx, QWi
     m_rxInfo->setMinimumWidth(
         m_rxInfo->fontMetrics().horizontalAdvance(QStringLiteral("88 WPM · 8888 Hz")) + 12);
     g->addWidget(m_rxInfo, 4, 1);
+    // Which reader is doing the copy. The operator's pick is remembered
+    // across restarts; AetherSDR's own is the first-run default.
+    m_decoder = new QComboBox(this);
+    m_decoder->setObjectName(QStringLiteral("orionCwDecoder"));
+    m_decoder->setToolTip(tr("Which CW decoder reads the air.\n"
+                             "Your choice is remembered the next time you start."));
+    g->addWidget(m_decoder, 4, 2);
+    connect(m_decoder, &QComboBox::currentIndexChanged, this, [this](int idx) {
+        if (idx < 0 || !m_chooseDecoder) {
+            return;
+        }
+        const QString key = m_decoder->itemData(idx).toString();
+        if (key.isEmpty()) {
+            return;
+        }
+        saveSetting(QStringLiteral("OrionCw/decoder"), key);
+        m_chooseDecoder(key);
+        updateStatus(tr("reader: %1").arg(m_decoder->itemText(idx)));
+    });
+
     auto* rxClear = new QPushButton(tr("Clear"), this);
     rxClear->setObjectName(QStringLiteral("orionCwRxClear"));
     g->addWidget(rxClear, 4, 3);
@@ -293,7 +330,7 @@ OrionCwWindow::OrionCwWindow(CwxModel* cwx, orion::logbook::QsoContext* ctx, QWi
     m_rx->setToolTip(tr("Decoded CW. Double-click a callsign to put it in the DX box\n"
                         "and the Log QSO window."));
     m_rx->viewport()->installEventFilter(this);
-    g->addWidget(m_rx, 5, 0, 1, 5);
+    g->addWidget(m_rx, 5, 0, 1, 6);
     g->setRowStretch(5, 1);
 
     connect(m_rxOn, &QCheckBox::toggled, this, [this](bool on) {
@@ -416,6 +453,41 @@ void OrionCwWindow::setTuneHandler(std::function<void(bool)> handler)
     if (m_tuneBtn) {
         m_tuneBtn->setVisible(static_cast<bool>(m_tune));
     }
+}
+
+void OrionCwWindow::setZeroBeatHandler(std::function<void()> handler)
+{
+    m_zeroBeat = std::move(handler);
+    if (m_zeroBeatBtn) {
+        m_zeroBeatBtn->setVisible(static_cast<bool>(m_zeroBeat));
+    }
+}
+
+// A readable name for each decoder key.
+static QString decoderLabel(const QString& key)
+{
+    if (key == QLatin1String("ggmorse")) return QObject::tr("AetherSDR");
+    if (key == QLatin1String("orion-fldigi")) return QObject::tr("Orion (fldigi)");
+    if (key == QLatin1String("orion-bayes")) return QObject::tr("Orion (Bayes)");
+    if (key == QLatin1String("deepfist")) return QObject::tr("DeepFist");
+    return key;
+}
+
+void OrionCwWindow::setDecoders(const QStringList& keys, const QString& current,
+                                std::function<void(const QString&)> choose)
+{
+    m_chooseDecoder = {};   // filling the box must not look like a choice
+    const QSignalBlocker block(m_decoder);
+    m_decoder->clear();
+    for (const QString& key : keys) {
+        m_decoder->addItem(decoderLabel(key), key);
+    }
+    const int at = m_decoder->findData(current);
+    if (at >= 0) {
+        m_decoder->setCurrentIndex(at);
+    }
+    m_decoder->setVisible(keys.size() > 1);
+    m_chooseDecoder = std::move(choose);
 }
 
 void OrionCwWindow::setStationFields(const QString& call, const QString& name, const QString& qth,

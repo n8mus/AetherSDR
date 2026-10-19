@@ -28,6 +28,16 @@ layout(std140, binding = 0) uniform U {
     vec4 fillColor;  // straight rgb, a unused
     vec4 darkColor;  // straight rgb (solid-mode base blend), a unused
     vec4 lineColor;  // straight rgb — trace stroke, independent of fill (#4239); a unused
+    // AetherSDR Orion fork: the heat ramp, sampled from the operator's
+    // waterfall colour scheme at t = 0, 1/3, 2/3, 1. The ramp used to be
+    // hardcoded here, so picking a scheme recoloured the waterfall and left
+    // the trace blue-green. With "Match Scheme" off these carry the legacy
+    // blue → cyan → green → red stops, so nothing changes for anyone who
+    // wants that.
+    vec4 ramp0;
+    vec4 ramp1;
+    vec4 ramp2;
+    vec4 ramp3;
 };
 
 // Straight color + coverage → premultiplied.
@@ -43,17 +53,16 @@ vec4 over(vec4 dst, vec4 src)
     return src + dst * (1.0 - src.a);
 }
 
-// Same 4-stop heat ramp the vertex bake used (blue → cyan → green → red).
+// Four-stop heat ramp, its stops supplied by the CPU (see the U block).
 vec3 heatColor(float t)
 {
-    if (t < 0.25) {
-        return vec3(0.0, t / 0.25, 1.0);
-    } else if (t < 0.5) {
-        return vec3(0.0, 1.0, 1.0 - (t - 0.25) / 0.25);
-    } else if (t < 0.75) {
-        return vec3((t - 0.5) / 0.25, 1.0, 0.0);
+    t = clamp(t, 0.0, 1.0);
+    if (t < 0.3333333) {
+        return mix(ramp0.rgb, ramp1.rgb, t * 3.0);
+    } else if (t < 0.6666667) {
+        return mix(ramp1.rgb, ramp2.rgb, (t - 0.3333333) * 3.0);
     }
-    return vec3(1.0, 1.0 - (t - 0.75) / 0.25, 0.0);
+    return mix(ramp2.rgb, ramp3.rgb, (t - 0.6666667) * 3.0);
 }
 
 void main()

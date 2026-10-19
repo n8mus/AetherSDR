@@ -32,7 +32,7 @@ bool orionCwReplacesCwxPanel()
 }
 
 void installOrionCwWindow(QMainWindow* window, QMenu* menu, RadioModel* model,
-                          CwRxModel* decoder)
+                          CwRxModel* decoder, std::function<void()> zeroBeat)
 {
     menu->addSeparator();
     auto* act = menu->addAction(QObject::tr("CW window..."));
@@ -61,6 +61,28 @@ void installOrionCwWindow(QMainWindow* window, QMenu* menu, RadioModel* model,
                                 s.value(QStringLiteral("OrionCw/myQth")).toString(),
                                 s.value(QStringLiteral("OrionCw/myGrid")).toString());
 
+            if (zeroBeat) {
+                w->setZeroBeatHandler(zeroBeat);
+            }
+            if (decoder) {
+                // The reader's decoders. The operator's pick is remembered;
+                // AetherSDR's own is the first-run default, and a key that
+                // no longer exists falls back to it rather than to nothing.
+                const QStringList keys = CwRxModel::availableBackends();
+                QString want = AppSettings::instance()
+                                   .value(QStringLiteral("OrionCw/decoder"),
+                                          QStringLiteral("ggmorse"))
+                                   .toString();
+                if (!keys.contains(want)) {
+                    want = QStringLiteral("ggmorse");
+                }
+                if (decoder->backendKey() != want) {
+                    decoder->selectBackend(want);
+                }
+                w->setDecoders(keys, want, [decoder](const QString& key) {
+                    decoder->selectBackend(key);
+                });
+            }
             if (decoder) {
                 // AetherSDR's CW reader feeds the console-style pane. Both
                 // text signals: a backend without a calibrated cost emits

@@ -18,7 +18,7 @@ class RadioModel;
 // AetherSDR's own station settings, and the shared current-QSO record from
 // the logbook (so the Log QSO window and this one are about one station).
 void installOrionCwWindow(QMainWindow* window, QMenu* menu, RadioModel* model,
-                          CwRxModel* decoder);
+                          CwRxModel* decoder, std::function<void()> zeroBeat = {});
 
 // Shows the CW window (creating it on first use). False when
 // installOrionCwWindow() has not run, so the caller can fall back.

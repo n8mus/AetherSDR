@@ -693,6 +693,10 @@ public:
     void setFftFps(int fps);
     void setFftFillAlpha(float a);
     void setFftFillColor(const QColor& c);
+    // AetherSDR Orion fork: trace colours derived from the waterfall scheme.
+    void setTraceFollowsScheme(bool on);
+    [[nodiscard]] bool traceFollowsScheme() const { return m_traceFollowsScheme; }
+    void applySchemeToTrace();
     void setFftLineColor(const QColor& c);
     void setFftHeatMap(bool on);
     void setShowGrid(bool on);
@@ -1052,6 +1056,8 @@ signals:
     void radioDbmHeadroomRecoveryRequested(float lowerHeadroomDb, float upperHeadroomDb);
     void noiseFloorPositionResolved(int pos);
     void dssFloorDepthResolved(int dB);
+    // AetherSDR Orion fork: the trace-follows-scheme toggle settled.
+    void traceFollowsSchemeResolved(bool on);
     void waterfallLineDurationChangeRequested(int ms);
     void kiwiSdrDisplaySourceRequested(bool kiwi);
     // TNF signals
@@ -1760,6 +1766,7 @@ private:
 
     // ── FFT display controls (radio-side via "display pan set") ──────────
     int   m_panIndex{0};             // per-pan settings index (0, 1, 2, 3)
+    bool  m_traceFollowsScheme{true};  // trace colours from the wf scheme
     int   m_fftAverage{0};           // 0=off, 1-10 frames
     bool  m_fftWeightedAvg{false};
     int   m_fftFps{25};

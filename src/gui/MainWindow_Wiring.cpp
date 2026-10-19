@@ -3295,6 +3295,43 @@ void MainWindow::scheduleClientFftAverageSave(int panIndex, int average, bool we
     });
 }
 
+// Client-side CW zero-beat, shared by the VFO box's Zero Beat button and
+// the fork's CW window (which puts it within reach while you are typing).
+// One implementation, so the two can never drift apart.
+void MainWindow::requestZeroBeatForSlice(int sliceId)
+{
+#ifdef HAVE_DEEPFIST
+        if (CwDecodeSettings::deepFistSelected()) { return; }
+#endif
+        // #2516: act on the slice that owns the clicked VfoWidget, NOT the
+        // active slice — otherwise pressing Zero Beat on slice A while slice
+        // B is active would tune B.
+        SliceModel* slice = m_radioModel.slice(sliceId);
+        if (!slice) return;
+        // The shared CW decoder is fed by the active slice's audio and its
+        // estimatedPitch() re-routes per active slice (see routeCwDecoderOutput()).
+        // The detected pitch is therefore only meaningful for the active slice,
+        // so refuse to apply it to a non-active slice rather than tuning on a
+        // pitch that belongs to a different slice's audio.
+        SliceModel* active = activeSlice();
+        if (!active || active->sliceId() != sliceId) return;
+        float detected = m_cwDecoder.estimatedPitch();
+        if (detected <= 0.0f) return;
+        int configured = m_radioModel.transmitModel().cwPitch();
+        // The beat note sits above the carrier on CWU but below it on CWL,
+        // so the correction is mirrored — adding unconditionally doubles a
+        // CWL operator's error instead of removing it (#5213).  Same sign
+        // convention as the Kiwi CW BFO (KiwiSdrProtocol.cpp).  Flex radios
+        // express CWL as mode "CW" plus the transmit flag; Icom/HL2/sim
+        // express it as slice mode "CWL" and never set the flag — honor both.
+        const bool cwl = slice->mode() == QLatin1String("CWL")
+                      || m_radioModel.transmitModel().cwlEnabled();
+        const int sign = cwl ? -1 : 1;
+        double offsetMhz = sign * (detected - configured) / 1.0e6;
+        applyTuneRequest(slice, slice->frequency() + offsetMhz,
+                         TuneIntent::IncrementalTune, "zero-beat");
+}
+
 void MainWindow::wirePanDisplayStatus(PanadapterApplet* applet,
                                       PanadapterModel* pan)
 {
@@ -4860,6 +4897,17 @@ void MainWindow::wirePanadapter(PanadapterApplet* applet)
     connect(menu, &SpectrumOverlayMenu::wfColorSchemeChanged,
             sw, &SpectrumWidget::setWfColorScheme,
             Qt::UniqueConnection);
+    // AetherSDR Orion fork: the trace in the waterfall's own colours
+    // (FORK-NOTES.md). Seeded from the widget, which decides the default
+    // from whether the operator ever picked trace colours by hand.
+    connect(menu, &SpectrumOverlayMenu::traceFollowsSchemeChanged,
+            sw, &SpectrumWidget::setTraceFollowsScheme,
+            Qt::UniqueConnection);
+    connect(sw, &SpectrumWidget::traceFollowsSchemeResolved,
+            menu, &SpectrumOverlayMenu::syncTraceFollowsScheme,
+            Qt::UniqueConnection);
+    menu->syncTraceFollowsScheme(sw->traceFollowsScheme());
+    sw->applySchemeToTrace();
     connect(menu, &SpectrumOverlayMenu::spectrumRenderModeChanged,
             sw, &SpectrumWidget::setSpectrumRenderMode,
             Qt::UniqueConnection);
@@ -6225,38 +6273,8 @@ void MainWindow::wireVfoWidget(VfoWidget* w, SliceModel* s)
         if (m_radioModel.slice(sliceId))
             m_radioModel.cwAutoTuneOnce(sliceId);
     });
-    connect(w, &VfoWidget::zeroBeatRequested, this, [this, sliceId]() {
-#ifdef HAVE_DEEPFIST
-        if (CwDecodeSettings::deepFistSelected()) { return; }
-#endif
-        // #2516: act on the slice that owns the clicked VfoWidget, NOT the
-        // active slice — otherwise pressing Zero Beat on slice A while slice
-        // B is active would tune B.
-        SliceModel* slice = m_radioModel.slice(sliceId);
-        if (!slice) return;
-        // The shared CW decoder is fed by the active slice's audio and its
-        // estimatedPitch() re-routes per active slice (see routeCwDecoderOutput()).
-        // The detected pitch is therefore only meaningful for the active slice,
-        // so refuse to apply it to a non-active slice rather than tuning on a
-        // pitch that belongs to a different slice's audio.
-        SliceModel* active = activeSlice();
-        if (!active || active->sliceId() != sliceId) return;
-        float detected = m_cwDecoder.estimatedPitch();
-        if (detected <= 0.0f) return;
-        int configured = m_radioModel.transmitModel().cwPitch();
-        // The beat note sits above the carrier on CWU but below it on CWL,
-        // so the correction is mirrored — adding unconditionally doubles a
-        // CWL operator's error instead of removing it (#5213).  Same sign
-        // convention as the Kiwi CW BFO (KiwiSdrProtocol.cpp).  Flex radios
-        // express CWL as mode "CW" plus the transmit flag; Icom/HL2/sim
-        // express it as slice mode "CWL" and never set the flag — honor both.
-        const bool cwl = slice->mode() == QLatin1String("CWL")
-                      || m_radioModel.transmitModel().cwlEnabled();
-        const int sign = cwl ? -1 : 1;
-        double offsetMhz = sign * (detected - configured) / 1.0e6;
-        applyTuneRequest(slice, slice->frequency() + offsetMhz,
-                         TuneIntent::IncrementalTune, "zero-beat");
-    });
+    connect(w, &VfoWidget::zeroBeatRequested, this,
+            [this, sliceId]() { requestZeroBeatForSlice(sliceId); });
     connect(w, &VfoWidget::addSpotRequested, this, [this](double freqMhz) {
         if (auto* sw = spectrum()) sw->showAddSpotDialog(freqMhz);
     });

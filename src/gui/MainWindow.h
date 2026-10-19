@@ -878,6 +878,9 @@ private:
                                   float minDbm, float maxDbm);
     void restoreClientOwnedDbmRange(PanadapterModel* pan, int panIndex);
     void scheduleClientFftAverageSave(int panIndex, int average, bool weighted);
+    // Client-side CW zero-beat for one slice; the VFO box's button and the
+    // fork's CW window both call it.
+    void requestZeroBeatForSlice(int sliceId);
     void wirePanDisplayStatus(PanadapterApplet* applet, PanadapterModel* pan);
     void reassertUnmutedSliceAudioForPan(const QString& panId);
     void onMuteAllSlicesToggle();

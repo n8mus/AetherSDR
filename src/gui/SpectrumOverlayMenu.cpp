@@ -1794,9 +1794,17 @@ void SpectrumOverlayMenu::buildDisplayPanel()
         makeToggle("Heat Map", m_heatMapBtn);
         makeToggle("Grid", m_showGridBtn, true);
         makeToggle("Wt Avg", m_weightedAvgBtn);
+        // The trace in the waterfall's own colours: picking a scheme used to
+        // recolour the waterfall and leave the trace cyan.
+        makeToggle("Match Scheme", m_matchSchemeBtn, true);
         m_heatMapBtn->setObjectName("displayHeatMapBtn");
         m_showGridBtn->setObjectName("displayShowGridBtn");
         m_weightedAvgBtn->setObjectName("displayWeightedAvgBtn");
+        m_matchSchemeBtn->setObjectName("displayMatchSchemeBtn");
+        m_matchSchemeBtn->setToolTip(
+            tr("Take the trace's line and fill colours from the waterfall's colour\n"
+               "scheme, so both halves of the panadapter match. Turn it off to\n"
+               "choose the two colours yourself."));
 
         grid->addWidget(toggleRow, row, 0, 1, 4);
         ++row;
@@ -1809,6 +1817,11 @@ void SpectrumOverlayMenu::buildDisplayPanel()
         });
         connect(m_weightedAvgBtn, &QPushButton::toggled, this, [this](bool on) {
             emit fftWeightedAverageChanged(on);
+        });
+        connect(m_matchSchemeBtn, &QPushButton::toggled, this, [this](bool on) {
+            if (m_lineColorBtn) m_lineColorBtn->setEnabled(!on);
+            if (m_fillColorBtn) m_fillColorBtn->setEnabled(!on);
+            emit traceFollowsSchemeChanged(on);
         });
     }
 
@@ -2870,6 +2883,17 @@ void SpectrumOverlayMenu::syncNoiseFloorPosition(int pos)
     if (m_floorLabel) {
         m_floorLabel->setText(QString::number(clamped));
     }
+}
+
+void SpectrumOverlayMenu::syncTraceFollowsScheme(bool on)
+{
+    if (!m_matchSchemeBtn) {
+        return;
+    }
+    const QSignalBlocker block(m_matchSchemeBtn);
+    m_matchSchemeBtn->setChecked(on);
+    if (m_lineColorBtn) m_lineColorBtn->setEnabled(!on);
+    if (m_fillColorBtn) m_fillColorBtn->setEnabled(!on);
 }
 
 void SpectrumOverlayMenu::setWaterfallAverageAvailable(bool available)

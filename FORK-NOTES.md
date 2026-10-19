@@ -29,6 +29,10 @@ possible merge conflict when pulling from `upstream`.
 | `src/models/CwRxModel.cpp` | Under `AETHER_BACKEND_ORION`: `orion-fldigi` and `orion-bayes` in `availableBackends()` and `makeBackend()`, plus one include | The Orion console's two CW readers join AetherSDR's own in the reader's decoder list |
 | `src/gui/AppletPanel.cpp/.h` | Under `AETHER_BACKEND_ORION`: the `ROT` applet entry (the DCU-3 rotor tile) beside `GHE`, its bar-order slot and its palette category | The operator asked for the rotor on the right-hand panel, in the same shape as the Green Heron tile |
 | `src/gui/MainWindow.cpp` | Under `AETHER_BACKEND_ORION`: hands the rotor tile the radio model after the panel is built | The panel is built before any radio exists |
+| `src/gui/SpectrumWidget.cpp/.h` | `setTraceFollowsScheme()` / `applySchemeToTrace()`, the heat ramp sampled from the waterfall scheme on both the painter and GPU paths, and four ramp stops added to the pan-scope uniform block | Picking a colour scheme recoloured the waterfall and left the trace on a hardcoded blue-cyan-green-red ramp; the two halves of one panadapter disagreed |
+| `resources/shaders/panscope.frag` | The heat ramp's four stops come from the uniform block instead of being hardcoded | Same reason; the GPU path draws the trace |
+| `src/gui/SpectrumOverlayMenu.cpp/.h` | A "Match Scheme" toggle beside Heat Map / Grid / Wt Avg, which greys the two manual colour buttons while on | The operator's switch between the scheme's colours and their own |
+| `src/gui/MainWindow_Wiring.cpp` | `requestZeroBeatForSlice()` extracted from the VfoWidget lambda | The CW window's 0-BEAT button and the VFO box's run one implementation |
 | `tests/tests.cmake` | `orion_cat_test`, `orion_spectrum_test`, `orion_rxaudio_test`, `orion_peripherals_test`, `orion_skimmer_test`, `orion_logbook_test`, `orion_upload_test` and `orion_backend_test` appended at the end | Upstream requires every test target to be declared there |
 | `tests/backend_seam_affinity_test.cpp` | `orion` added to the constructed-families list | The seam contract test covers the new backend too |
 

@@ -1104,7 +1104,12 @@ void MainWindow::buildMenuBar()
     // N8EM fork: the CW skimmer's band map and waterfall (FORK-NOTES.md).
     installOrionSkimmerWindows(this, toolsMenu, &m_radioModel, [this] { return activeSlice(); });
     // N8EM fork: the CW window, which replaces the CWX panel here.
-    installOrionCwWindow(this, toolsMenu, &m_radioModel, &m_cwDecoder);
+    installOrionCwWindow(this, toolsMenu, &m_radioModel, &m_cwDecoder, [this] {
+        // AetherSDR's own zero-beat, on the active slice.
+        if (SliceModel* s = activeSlice()) {
+            requestZeroBeatForSlice(s->sliceId());
+        }
+    });
 #endif
 
     auto* viewMenu = menuBar()->addMenu("&View");

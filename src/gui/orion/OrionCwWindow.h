@@ -26,8 +26,10 @@
 
 #include "core/backends/orion/CwMacros.h"
 #include <QString>
+#include <QStringList>
 
 class QCheckBox;
+class QComboBox;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
@@ -62,6 +64,13 @@ public:
 
     // Steady key-down for tuning; the host supplies it (AetherSDR's TUNE).
     void setTuneHandler(std::function<void(bool)> handler);
+    // AetherSDR's own zero-beat, put within reach of the typing hand. The
+    // button appears only once a host installs this.
+    void setZeroBeatHandler(std::function<void()> handler);
+    // The reader's decoders, and which one is running. `choose` is called
+    // with the chosen key; the window remembers it across restarts.
+    void setDecoders(const QStringList& keys, const QString& current,
+                     std::function<void(const QString&)> choose);
 
 public slots:
     void appendRx(const QString& text);   // decoded CW from AetherSDR's reader
@@ -110,9 +119,13 @@ private:
     QLabel* m_sentView = nullptr;
     QSpinBox* m_wpm = nullptr;
     QPushButton* m_tuneBtn = nullptr;
+    QPushButton* m_zeroBeatBtn = nullptr;
+    std::function<void()> m_zeroBeat;
     QCheckBox* m_live = nullptr;         // stream keystrokes as typed
     QCheckBox* m_word = nullptr;         // space bar releases each word
     QCheckBox* m_rxOn = nullptr;
+    QComboBox* m_decoder = nullptr;
+    std::function<void(const QString&)> m_chooseDecoder;
     QLabel* m_rxInfo = nullptr;
     QPlainTextEdit* m_rx = nullptr;
     QPushButton* m_mem[kFkeys] = {};

@@ -2525,6 +2525,14 @@ void SpectrumWidget::loadSettings()
         m_fftFillColor = parsed;
     // Trace line color is independent of the fill (#4239). Default matches the
     // legacy look where the line was drawn in the fill color (cyan).
+    // Default the trace to the waterfall's scheme for anyone who never
+    // picked trace colours by hand; an operator who did keeps theirs.
+    const bool customTrace =
+        s.value(settingsKey("DisplayFftFillColor"), "#00e5ff").toString() != "#00e5ff"
+        || s.value(settingsKey("DisplayFftLineColor"), "#00e5ff").toString() != "#00e5ff";
+    m_traceFollowsScheme =
+        s.value(settingsKey("DisplayFftTraceFollowsScheme"), customTrace ? "False" : "True")
+            .toString() == "True";
     const QString lineColorStr = s.value(settingsKey("DisplayFftLineColor"), "#00e5ff").toString();
     QColor parsedLine(lineColorStr);
     if (parsedLine.isValid())
@@ -4462,6 +4470,50 @@ void SpectrumWidget::setFftLineColor(const QColor& c) {
     s.save();
     markOverlayDirty();
 }
+// AetherSDR Orion fork: the trace taking its colours from the waterfall's
+// own scheme. Picking "Purple" used to recolour the waterfall and leave the
+// trace on its factory cyan, so the two halves of one panadapter disagreed.
+// The line is sampled near the hot end of the ramp and the fill from its
+// middle, which is what makes a scheme look like itself.
+void SpectrumWidget::applySchemeToTrace()
+{
+    if (!m_traceFollowsScheme) {
+        return;
+    }
+    int n = 0;
+    const auto* stops = wfSchemeStops(m_wfColorScheme, n);
+    if (!stops || n < 2) {
+        return;
+    }
+    m_fftLineColor = QColor::fromRgb(interpolateGradient(0.88f, stops, n));
+    m_fftFillColor = QColor::fromRgb(interpolateGradient(0.55f, stops, n));
+    markOverlayDirty();
+    update();
+}
+
+void SpectrumWidget::setTraceFollowsScheme(bool on)
+{
+    if (m_traceFollowsScheme == on) {
+        return;
+    }
+    m_traceFollowsScheme = on;
+    auto& s = AppSettings::instance();
+    s.setValue(settingsKey("DisplayFftTraceFollowsScheme"), on ? "True" : "False");
+    if (on) {
+        applySchemeToTrace();
+    } else {
+        // Back to whatever the operator picked by hand.
+        const QColor fill(s.value(settingsKey("DisplayFftFillColor"), "#00e5ff").toString());
+        const QColor line(s.value(settingsKey("DisplayFftLineColor"), "#00e5ff").toString());
+        if (fill.isValid()) m_fftFillColor = fill;
+        if (line.isValid()) m_fftLineColor = line;
+        markOverlayDirty();
+        update();
+    }
+    s.save();
+    emit traceFollowsSchemeResolved(on);
+}
+
 void SpectrumWidget::setWfColorGain(int gain) {
     int clamped = std::clamp(gain, 0, 100);
     if (clamped != m_wfColorGain) {
@@ -4861,6 +4913,7 @@ void SpectrumWidget::setWfColorScheme(int scheme) {
         s.setValue(settingsKey("DisplayWfColorScheme"), QString::number(static_cast<int>(m_wfColorScheme)));
         s.save();
         recolorWaterfallViewport();
+        applySchemeToTrace();   // the trace is part of the same picture
     }
     update();
 }
@@ -13361,7 +13414,8 @@ void SpectrumWidget::initSpectrumPipeline()
     // (same conclusion as PR #3968). Use it unconditionally.
     m_fftColFormat = QRhiTexture::R16F;
     m_fftScopeUbo = r->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer,
-                                 6 * 4 * sizeof(float));  // 6 vec4 — see panscope.frag U block (#4239)
+                                 10 * 4 * sizeof(float));  // 10 vec4 — see panscope.frag U block
+                                                           // (#4239, plus the fork's 4 ramp stops)
     m_fftScopeUbo->create();
 
     // LINEAR column sampling interpolates the trace between device pixel
@@ -15287,7 +15341,24 @@ void SpectrumWidget::renderGpuFrame(QRhiCommandBuffer* cb,
                 // UBO — see panscope.frag's U block.
                 const QColor dk = m_fftFillColor.darker(300);
                 const float fa = m_fftFillAlpha;
-                const float ubo[24] = {
+                // AetherSDR Orion fork: the heat ramp's four stops. With
+                // "Match Scheme" on they are sampled from the operator's
+                // waterfall scheme, so the trace is drawn in the same
+                // colours as the waterfall under it; otherwise they are the
+                // legacy blue → cyan → green → red the shader used to hold.
+                QColor ramp[4];
+                {
+                    int rampStops = 0;
+                    const WfGradientStop* st =
+                        m_traceFollowsScheme ? wfSchemeStops(m_wfColorScheme, rampStops) : nullptr;
+                    for (int i = 0; i < 4; ++i) {
+                        const float t = static_cast<float>(i) / 3.0f;
+                        ramp[i] = (st && rampStops >= 2)
+                                      ? QColor::fromRgb(interpolateGradient(t, st, rampStops))
+                                      : AetherSDR::FftHeatMap::heatColor(t);
+                    }
+                }
+                const float ubo[40] = {
                     static_cast<float>(specContentW) * fbDpr,       // plot: wPx
                     static_cast<float>(specH) * fbDpr,              // hPx
                     static_cast<float>(n),                          // columnCount
@@ -15318,6 +15389,23 @@ void SpectrumWidget::renderGpuFrame(QRhiCommandBuffer* cb,
                     static_cast<float>(m_fftLineColor.redF()),
                     static_cast<float>(m_fftLineColor.greenF()),
                     static_cast<float>(m_fftLineColor.blueF()),
+                    1.0f,
+                    // ramp0..ramp3
+                    static_cast<float>(ramp[0].redF()),
+                    static_cast<float>(ramp[0].greenF()),
+                    static_cast<float>(ramp[0].blueF()),
+                    1.0f,
+                    static_cast<float>(ramp[1].redF()),
+                    static_cast<float>(ramp[1].greenF()),
+                    static_cast<float>(ramp[1].blueF()),
+                    1.0f,
+                    static_cast<float>(ramp[2].redF()),
+                    static_cast<float>(ramp[2].greenF()),
+                    static_cast<float>(ramp[2].blueF()),
+                    1.0f,
+                    static_cast<float>(ramp[3].redF()),
+                    static_cast<float>(ramp[3].greenF()),
+                    static_cast<float>(ramp[3].blueF()),
                     1.0f,
                 };
                 batch->updateDynamicBuffer(m_fftScopeUbo, 0, sizeof(ubo), ubo);
@@ -16060,8 +16148,24 @@ void SpectrumWidget::drawSpectrum(QPainter& p, const QRect& r)
     const int h = r.height();
     const int n = fftBins.size();
 
-    // Heat-map ramp shared with the mini-pan — see gui/FftHeatMap.h.
-    const auto heatColor = &AetherSDR::FftHeatMap::heatColor;
+    // Heat-map ramp. AetherSDR Orion fork: with "Match Scheme" on the trace
+    // is coloured from the waterfall's OWN scheme, so picking Purple turns
+    // the whole panadapter purple. FftHeatMap's ramp is a fixed
+    // blue-cyan-green-yellow-red that ignored the scheme entirely, which is
+    // why the waterfall changed and the trace stayed blue-green; it is still
+    // what you get with the toggle off (gui/FftHeatMap.h, shared with the
+    // mini-pan).
+    int schemeStopCount = 0;
+    const WfGradientStop* schemeStops =
+        m_traceFollowsScheme ? wfSchemeStops(m_wfColorScheme, schemeStopCount) : nullptr;
+    const bool useScheme = schemeStops && schemeStopCount >= 2;
+    const auto heatColor = [&](float t) -> QColor {
+        if (useScheme) {
+            return QColor::fromRgb(
+                interpolateGradient(std::clamp(t, 0.0f, 1.0f), schemeStops, schemeStopCount));
+        }
+        return AetherSDR::FftHeatMap::heatColor(t);
+    };
 
     // Pre-compute positions and normalized levels
     struct Pt { float x, y, t; };
@@ -16102,7 +16206,13 @@ void SpectrumWidget::drawSpectrum(QPainter& p, const QRect& r)
             QColor top = heatColor(avgT);
             const float swFillAlpha = m_fftFillAlpha;
             top.setAlphaF(swFillAlpha * AetherSDR::FftHeatMap::kTopAlphaScale);
-            const QColor bot = AetherSDR::FftHeatMap::gradientBase(swFillAlpha);
+            QColor bot = AetherSDR::FftHeatMap::gradientBase(swFillAlpha);
+            if (useScheme) {
+                // The dark end of the operator's own ramp, so the fill fades
+                // into the scheme instead of into FftHeatMap's navy.
+                bot = heatColor(0.06f);
+                bot.setAlphaF(swFillAlpha);
+            }
             QLinearGradient grad(0, std::min(pts[i].y, pts[i + 1].y), 0, bottom);
             grad.setColorAt(0.0, top);
             grad.setColorAt(1.0, bot);
