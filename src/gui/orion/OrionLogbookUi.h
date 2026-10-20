@@ -25,8 +25,13 @@ class SliceModel;
 // Creates the logbook (opening its log and starting the cqrlog pull) and
 // adds the Logbook menu to `bar`. `activeSlice` supplies the frequency and
 // mode the QSO window fills in.
+// `spot` sends a call to the DX cluster the host is connected to, and
+// `showOnMap` puts the station on AetherSDR's map; both are the host's to
+// own, so the Log QSO window only says what it wants.
 void installOrionLogbook(QMainWindow* window, QMenuBar* bar, RadioModel* model,
-                         std::function<SliceModel*()> activeSlice);
+                         std::function<SliceModel*()> activeSlice,
+                         std::function<void(const QString&, double, const QString&)> spot = {},
+                         std::function<void(double, double, const QString&)> showOnMap = {});
 
 // The station being worked right now, shared by the Log QSO window and the
 // CW window (core/backends/orion/log/QsoContext.h). Null until

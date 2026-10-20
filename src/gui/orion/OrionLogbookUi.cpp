@@ -1,6 +1,12 @@
 #include "gui/orion/OrionLogbookUi.h"
 
 #include "core/AppSettings.h"
+#include <QDesktopServices>
+#include <QUrl>
+#include <QLocale>
+#include "core/MaidenheadLocator.h"
+#include "core/CtyDatParser.h"
+#include "core/backends/orion/log/LogbookIndex.h"
 #include "core/CallsignInfo.h"
 #include "core/CallsignLookupService.h"
 #include "core/backends/orion/log/CqrlogSync.h"
@@ -88,8 +94,38 @@ QString defaultRst(const QString& adif)
                                                                         : QStringLiteral("59");
 }
 
+// The worked-before ramp, the same colours the spot markers use.
+const char* workedColour(QChar st)
+{
+    switch (st.toLatin1()) {
+    case 'N': return "#ff5c46";    // never worked — a new one
+    case 'B': return "#ffbe3c";    // worked, not this band
+    case 'W': return "#82de8c";    // worked this band
+    case 'C': return "#96a2b2";    // confirmed
+    default: return "#dde7f0";     // no log data yet
+    }
+}
+
+QString neededText(QChar st, const QString& what)
+{
+    switch (st.toLatin1()) {
+    case 'N': return what + QObject::tr(" \u2014 needed");
+    case 'W': return what + QObject::tr(" worked, unconfirmed");
+    case 'C': return what + QObject::tr(" confirmed");
+    default: return what + QObject::tr(" \u2014 no log data");
+    }
+}
+
 // The Log QSO window: the console's New-QSO flow in AetherSDR's widgets.
 class OrionQsoDialog : public QDialog {
+    Q_OBJECT
+
+signals:
+    // Him on the map, and him on the cluster: the host owns both, so the
+    // window only says what it wants.
+    void mapRequested(double lat, double lon, const QString& call);
+    void spotRequested(const QString& call, double freqMhz, const QString& comment);
+
 public:
     OrionQsoDialog(OrionLogbook* book, RadioModel* model,
                    std::function<SliceModel*()> activeSlice, QWidget* parent)
@@ -100,14 +136,15 @@ public:
     {
         setWindowTitle(tr("Log QSO"));
         setObjectName(QStringLiteral("orionLogQsoWindow"));
+        // Four fields across need the width to show them; the console's
+        // window is this shape too. Squeezed into 320 px the names and
+        // towns were clipped to a few characters.
+        setMinimumWidth(720);
         auto* vbox = new QVBoxLayout(this);
 
-        auto* form = new QGridLayout;
-        int row = 0;
-        const auto add = [&](const QString& label, QWidget* w, int col = 0, int span = 1) {
-            form->addWidget(new QLabel(label), row, col * 2);
-            form->addWidget(w, row, col * 2 + 1, 1, span);
-        };
+        // ── Call row: the call, the three things you do with it, country ──
+        auto* callRow = new QHBoxLayout;
+        callRow->setSpacing(6);
         m_call = new QLineEdit;
         m_call->setObjectName(QStringLiteral("orionLogCall"));
         m_call->setPlaceholderText(tr("Callsign"));
@@ -115,83 +152,136 @@ public:
         big.setPointSizeF(big.pointSizeF() * 1.4);
         big.setBold(true);
         m_call->setFont(big);
-        add(tr("Call:"), m_call, 0, 3);
-        ++row;
-        // The callbook, through AetherSDR's own QRZ client (Settings ->
-        // Radio Setup -> Callsign Lookup holds the login): name, QTH and
-        // grid for the boxes below. It fills only what is still empty, so
-        // what you copied off the air always wins over what QRZ thinks.
+        m_call->setMaximumWidth(190);
+        callRow->addWidget(m_call, 0);
+
+        // The callbook, as a ham means it: the page opens in the browser and
+        // the boxes below fill behind it.
         m_qrz = new QPushButton(tr("QRZ"));
         m_qrz->setObjectName(QStringLiteral("orionLogQrz"));
-        m_qrz->setToolTip(tr("Look this call up in the callbook and fill Name, QTH and Grid.\n"
-                             "Only empty boxes are filled — what you typed is never overwritten.\n"
-                             "Runs by itself when a call looks complete."));
-        form->addWidget(m_qrz, row, 1, 1, 3);
-        ++row;
-        connect(m_qrz, &QPushButton::clicked, this, [this] { lookupCall(true); });
+        m_qrz->setFocusPolicy(Qt::NoFocus);
+        m_qrz->setToolTip(tr("Open this call on QRZ.com and fill Name, QTH and Grid.\n"
+                             "Only empty boxes are filled \u2014 what you typed is never "
+                             "overwritten.\nThe fill also runs by itself when a call looks "
+                             "complete."));
+        callRow->addWidget(m_qrz, 0);
+        connect(m_qrz, &QPushButton::clicked, this, [this] {
+            const QString call = m_call->text().trimmed().toUpper();
+            if (call.isEmpty()) {
+                m_status->setText(tr("Enter a callsign first."));
+                return;
+            }
+            QDesktopServices::openUrl(QUrl(QStringLiteral("https://www.qrz.com/db/") + call));
+            lookupCall(true);
+        });
+
+        m_globe = new QPushButton(tr("Globe"));
+        m_globe->setObjectName(QStringLiteral("orionLogGlobe"));
+        m_globe->setFocusPolicy(Qt::NoFocus);
+        m_globe->setToolTip(tr("Show this station on the map, with the great-circle path\n"
+                               "from your own grid. Needs his grid, or a country from "
+                               "cty.dat."));
+        callRow->addWidget(m_globe, 0);
+        connect(m_globe, &QPushButton::clicked, this, [this] { showOnGlobe(); });
+
+        m_spot = new QPushButton(tr("Spot"));
+        m_spot->setObjectName(QStringLiteral("orionLogSpot"));
+        m_spot->setFocusPolicy(Qt::NoFocus);
+        m_spot->setToolTip(tr("Send this call to the DX cluster you are connected to,\n"
+                              "at the frequency in the box below."));
+        callRow->addWidget(m_spot, 0);
+        connect(m_spot, &QPushButton::clicked, this, [this] { spotCall(); });
+
         m_country = new QLabel;
-        form->addWidget(m_country, row, 1, 1, 3);
-        ++row;
-        m_freq = new QLineEdit;
-        m_mode = new QLineEdit;
-        add(tr("Freq (MHz):"), m_freq, 0);
-        add(tr("Mode:"), m_mode, 1);
-        ++row;
-        m_rstS = new QLineEdit;
-        m_rstR = new QLineEdit;
-        add(tr("RST sent:"), m_rstS, 0);
-        add(tr("RST rcvd:"), m_rstR, 1);
-        ++row;
-        m_time = new QDateTimeEdit;
-        m_time->setTimeZone(QTimeZone::utc());
-        m_time->setDisplayFormat(QStringLiteral("yyyy-MM-dd HH:mm:ss 'UTC'"));
-        add(tr("Time:"), m_time, 0, 3);
-        ++row;
-        m_name = new QLineEdit;
-        m_handle = new QLineEdit;
-        // The ON-AIR name, kept apart from the callbook's: the callbook
-        // says Robert, the man sends BOB, and the CW macros want what he
-        // SAID ([his handle]).
-        m_handle->setPlaceholderText(tr("what he sends"));
-        m_handle->setToolTip(tr("The on-air name he gave you. [his handle] in a CW macro sends "
-                                "this;\n[his name] sends the callbook's Name above."));
-        add(tr("Name:"), m_name, 0);
-        add(tr("Handle:"), m_handle, 1);
-        ++row;
-        m_qth = new QLineEdit;
-        add(tr("QTH:"), m_qth, 0);
-        ++row;
-        m_grid = new QLineEdit;
-        m_pota = new QLineEdit;
-        m_pota->setPlaceholderText(tr("e.g. K-1234"));
-        add(tr("Grid:"), m_grid, 0);
-        add(tr("POTA:"), m_pota, 1);
-        ++row;
-        m_comment = new QLineEdit;
-        add(tr("Comment:"), m_comment, 0, 3);
-        // Named for the automation bridge and the tests: every box the
-        // operator fills is addressable.
-        m_freq->setObjectName(QStringLiteral("orionLogFreq"));
-        m_mode->setObjectName(QStringLiteral("orionLogMode"));
-        m_rstS->setObjectName(QStringLiteral("orionLogRstSent"));
-        m_rstR->setObjectName(QStringLiteral("orionLogRstRcvd"));
-        m_name->setObjectName(QStringLiteral("orionLogName"));
-        m_handle->setObjectName(QStringLiteral("orionLogHandle"));
-        m_qth->setObjectName(QStringLiteral("orionLogQth"));
-        m_grid->setObjectName(QStringLiteral("orionLogGrid"));
-        m_pota->setObjectName(QStringLiteral("orionLogPota"));
-        m_comment->setObjectName(QStringLiteral("orionLogComment"));
         m_country->setObjectName(QStringLiteral("orionLogCountry"));
+        m_country->setWordWrap(true);
+        callRow->addWidget(m_country, 1);
+        vbox->addLayout(callRow);
+
+        // ── Needed badges: country, band, mode ─────────────────────────────
+        auto* badges = new QHBoxLayout;
+        badges->setSpacing(8);
+        for (QLabel** b : {&m_bCountry, &m_bBand, &m_bMode}) {
+            *b = new QLabel;
+            badges->addWidget(*b);
+        }
+        m_bCountry->setObjectName(QStringLiteral("orionLogNeedCountry"));
+        m_bBand->setObjectName(QStringLiteral("orionLogNeedBand"));
+        m_bMode->setObjectName(QStringLiteral("orionLogNeedMode"));
+        badges->addStretch(1);
+        vbox->addLayout(badges);
+
+        // ── The fields, four across ────────────────────────────────────────
+        auto* form = new QGridLayout;
+        form->setHorizontalSpacing(8);
+        form->setVerticalSpacing(6);
+        const auto field = [&](int row, int col, const QString& label, QLineEdit*& e,
+                               int width, const char* name) {
+            auto* l = new QLabel(label);
+            l->setStyleSheet(QStringLiteral("QLabel { font-size: 11px; }"));
+            form->addWidget(l, row * 2, col);
+            e = new QLineEdit;
+            e->setObjectName(QLatin1String(name));
+            if (width > 0) e->setMaximumWidth(width);
+            form->addWidget(e, row * 2 + 1, col);
+        };
+        field(0, 0, tr("FREQ (MHz)"), m_freq, 130, "orionLogFreq");
+        field(0, 1, tr("MODE"), m_mode, 90, "orionLogMode");
+        field(0, 2, tr("RST SENT"), m_rstS, 80, "orionLogRstSent");
+        field(0, 3, tr("RST RCVD"), m_rstR, 80, "orionLogRstRcvd");
+        field(1, 2, tr("NAME"), m_name, 0, "orionLogName");
+        field(1, 3, tr("QTH"), m_qth, 0, "orionLogQth");
+        field(2, 0, tr("GRID"), m_grid, 130, "orionLogGrid");
+        field(2, 1, tr("POTA"), m_pota, 110, "orionLogPota");
+        // The name he gives ON THE AIR, routinely not the callbook's (QRZ
+        // says Robert, he sends BOB). [his handle] in a CW macro reads this
+        // one, and the callbook fill never touches it.
+        field(2, 2, tr("HANDLE"), m_handle, 110, "orionLogHandle");
+        field(2, 3, tr("COMMENT"), m_comment, 0, "orionLogComment");
+        m_pota->setPlaceholderText(tr("e.g. K-1234"));
+        m_handle->setPlaceholderText(tr("what he sends"));
+        m_handle->setToolTip(tr("The on-air name he gave you. [his handle] in a CW macro "
+                                "sends this;\n[his name] sends the callbook's Name."));
+
+        // Date and time keep the one editor the clock drives.
+        auto* timeLabel = new QLabel(tr("DATE / TIME (UTC)"));
+        timeLabel->setStyleSheet(QStringLiteral("QLabel { font-size: 11px; }"));
+        form->addWidget(timeLabel, 2, 0, 1, 2);
+        m_time = new QDateTimeEdit;
+        m_time->setObjectName(QStringLiteral("orionLogTime"));
+        m_time->setTimeZone(QTimeZone::utc());
+        m_time->setDisplayFormat(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+        form->addWidget(m_time, 3, 0, 1, 2);
         vbox->addLayout(form);
 
+        // ── Rotor bar: where he is, and the two bearings ───────────────────
+        auto* rotRow = new QHBoxLayout;
+        rotRow->setSpacing(6);
+        m_heading = new QLabel;
+        m_heading->setObjectName(QStringLiteral("orionLogHeading"));
+        rotRow->addWidget(m_heading, 1);
+        m_sp = new QPushButton;
+        m_sp->setObjectName(QStringLiteral("orionLogShortPath"));
+        m_sp->setFocusPolicy(Qt::NoFocus);
+        m_sp->setToolTip(tr("Turn the rotor to the short-path bearing."));
+        m_lp = new QPushButton;
+        m_lp->setObjectName(QStringLiteral("orionLogLongPath"));
+        m_lp->setFocusPolicy(Qt::NoFocus);
+        m_lp->setToolTip(tr("Turn the rotor to the long-path bearing."));
+        rotRow->addWidget(m_sp);
+        rotRow->addWidget(m_lp);
+        connect(m_sp, &QPushButton::clicked, this, [this] { turnRotor(m_spAz); });
+        connect(m_lp, &QPushButton::clicked, this, [this] { turnRotor(m_lpAz); });
+        vbox->addLayout(rotRow);
         m_status = new QLabel;
         m_status->setObjectName(QStringLiteral("orionLogStatus"));
         m_status->setWordWrap(true);
         vbox->addWidget(m_status);
 
         m_prev = new QTableWidget(0, 6);
-        m_prev->setHorizontalHeaderLabels({tr("Date (UTC)"), tr("Band"), tr("Mode"),
-                                           tr("Sent"), tr("Rcvd"), tr("Name")});
+        m_prev->setObjectName(QStringLiteral("orionLogPrevious"));
+        m_prev->setHorizontalHeaderLabels({tr("DATE"), tr("FREQ"), tr("MODE"),
+                                           tr("RST"), tr("QSL"), tr("NAME")});
         m_prev->horizontalHeader()->setStretchLastSection(true);
         m_prev->verticalHeader()->setVisible(false);
         m_prev->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -201,7 +291,11 @@ public:
         vbox->addWidget(m_prev);
 
         auto* buttons = new QDialogButtonBox;
-        auto* logBtn = buttons->addButton(tr("Log"), QDialogButtonBox::AcceptRole);
+        auto* logBtn = buttons->addButton(tr("LOG QSO"), QDialogButtonBox::AcceptRole);
+        logBtn->setObjectName(QStringLiteral("orionLogButton"));
+        logBtn->setStyleSheet(QStringLiteral(
+            "QPushButton { background: #2b62c9; border: 1px solid #4f86ef;"
+            " border-radius: 3px; padding: 6px 18px; font-weight: bold; }"));
         auto* clearBtn = buttons->addButton(tr("Clear"), QDialogButtonBox::ResetRole);
         buttons->addButton(QDialogButtonBox::Close);
         logBtn->setDefault(true);
@@ -219,6 +313,13 @@ public:
             m_call->setCursorPosition(pos);
             onCallChanged();
         });
+        // textChanged, not just textEdited: a call can arrive from a spot,
+        // from the CW window's DX box or from a paste, and the country line,
+        // the needed badges and the bearings have to follow it.
+        connect(m_call, &QLineEdit::textChanged, this, [this] { onCallChanged(); });
+        connect(m_freq, &QLineEdit::textChanged, this, [this] { updateBadges(); });
+        connect(m_mode, &QLineEdit::textChanged, this, [this] { updateBadges(); });
+        connect(m_grid, &QLineEdit::textChanged, this, [this] { updateRotorBar(); });
         connect(m_mode, &QLineEdit::textEdited, this, [this] { m_modeEdited = true; });
         connect(m_freq, &QLineEdit::textEdited, this, [this] { m_freqEdited = true; });
         // The clock runs until the operator sets a time by hand.
@@ -422,6 +523,149 @@ private:
         m_status->setText(tr("Callbook: %1").arg(info.displayName()));
     }
 
+    // Where he is: his own grid if he gave one, else his country's centre.
+    bool dxLatLon(double& lat, double& lon) const
+    {
+        if (MaidenheadLocator::toLatLon(m_grid->text().trimmed(), lat, lon)) {
+            return true;
+        }
+        const QString call = m_call->text().trimmed().toUpper();
+        if (call.isEmpty() || !m_book || !m_book->cty()) {
+            return false;
+        }
+        if (const DxccEntity* e = m_book->cty()->entityForCallsign(call)) {
+            if (e->hasLatLon) {
+                lat = e->latitude;
+                lon = e->longitude;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    [[nodiscard]] static bool myLatLon(double& lat, double& lon)
+    {
+        return MaidenheadLocator::toLatLon(
+            AppSettings::instance().value(QStringLiteral("OrionCw/myGrid")).toString().trimmed(),
+            lat, lon);
+    }
+
+    // The bearings and the distance. No rotor is required to show them —
+    // knowing where to point the beam is useful whether or not this program
+    // can turn it.
+    void updateRotorBar()
+    {
+        m_spAz = m_lpAz = -1.0;
+        double myLat = 0, myLon = 0, dxLat = 0, dxLon = 0;
+        const bool haveMe = myLatLon(myLat, myLon);
+        const bool haveDx = dxLatLon(dxLat, dxLon);
+        if (!haveMe || !haveDx) {
+            m_sp->setText(tr("SP \u2014"));
+            m_lp->setText(tr("LP \u2014"));
+            m_sp->setEnabled(false);
+            m_lp->setEnabled(false);
+            m_heading->setText(haveMe ? QString()
+                                      : tr("Set your grid in Radio Setup \u2192 Orion for "
+                                           "bearings."));
+            return;
+        }
+        m_spAz = MaidenheadLocator::bearingDeg(myLat, myLon, dxLat, dxLon);
+        m_lpAz = m_spAz >= 180.0 ? m_spAz - 180.0 : m_spAz + 180.0;
+        const double km = MaidenheadLocator::distanceKm(myLat, myLon, dxLat, dxLon);
+        m_sp->setText(tr("SP %1\u00b0").arg(qRound(m_spAz)));
+        m_lp->setText(tr("LP %1\u00b0").arg(qRound(m_lpAz)));
+        const bool rotor = m_model && m_model->isConnected()
+            && m_model->backendDeclaresExtension(QStringLiteral("orion"));
+        m_sp->setEnabled(rotor);
+        m_lp->setEnabled(rotor);
+        const bool miles = QLocale().measurementSystem() != QLocale::MetricSystem;
+        m_heading->setText(miles
+                               ? tr("%L1 mi").arg(qRound(km * 0.621371))
+                               : tr("%L1 km").arg(qRound(km)));
+    }
+
+    // The one call that can move the antenna from this window; it goes
+    // through the backend's rotor.turn, the same path the rotor tile uses.
+    void turnRotor(double degrees)
+    {
+        if (!(degrees >= 0.0 && degrees <= 360.0) || !m_model) {
+            return;
+        }
+        QVariantMap arg;
+        arg.insert(QStringLiteral("azimuth"), degrees);
+        m_model->invokeBackendExtension(QStringLiteral("orion"),
+                                        QStringLiteral("rotor.turn"), 0, arg);
+        m_status->setText(tr("Rotor: turning to %1\u00b0.").arg(qRound(degrees)));
+    }
+
+    // Him on AetherSDR's own map, with the path from home.
+    void showOnGlobe()
+    {
+        double myLat = 0, myLon = 0, dxLat = 0, dxLon = 0;
+        if (!dxLatLon(dxLat, dxLon)) {
+            m_status->setText(tr("No position for this station yet \u2014 a grid or a "
+                                 "country from cty.dat is needed."));
+            return;
+        }
+        const QString call = m_call->text().trimmed().toUpper();
+        if (myLatLon(myLat, myLon)) {
+            const double km = MaidenheadLocator::distanceKm(myLat, myLon, dxLat, dxLon);
+            const double az = MaidenheadLocator::bearingDeg(myLat, myLon, dxLat, dxLon);
+            m_status->setText(tr("%1: %2\u00b0, %L3 km \u2014 opening the map.")
+                                  .arg(call)
+                                  .arg(qRound(az))
+                                  .arg(qRound(km)));
+        } else {
+            m_status->setText(tr("%1 \u2014 opening the map.").arg(call));
+        }
+        emit mapRequested(dxLat, dxLon, call);
+    }
+
+    // The call to the cluster this station is connected to.
+    void spotCall()
+    {
+        const QString call = m_call->text().trimmed().toUpper();
+        const double mhz = m_freq->text().trimmed().toDouble();
+        if (call.isEmpty() || mhz <= 0.0) {
+            m_status->setText(tr("A callsign and a frequency are needed to spot."));
+            return;
+        }
+        emit spotRequested(call, mhz, m_comment->text().trimmed());
+    }
+
+    // The three "do I need him" badges, and the call in its worked colour.
+    void updateBadges()
+    {
+        const QString call = m_call->text().trimmed().toUpper();
+        const QString band =
+            orion::logbook::LogDb::bandForHz(
+                qint64(std::llround(m_freq->text().trimmed().toDouble() * 1e6)));
+        const QString mode = m_mode->text().trimmed().toUpper();
+        orion::logbook::LogbookIndex* idx = m_book ? m_book->index() : nullptr;
+
+        const QChar st = (idx && !call.isEmpty()) ? idx->status(call, band) : QChar('?');
+        m_call->setStyleSheet(QStringLiteral("QLineEdit { color: %1; }")
+                                  .arg(QLatin1String(workedColour(st))));
+
+        const orion::logbook::LogbookIndex::Need need =
+            (idx && !call.isEmpty()) ? idx->need(call, band, mode)
+                                     : orion::logbook::LogbookIndex::Need{};
+        const auto paint = [](QLabel* l, QChar s2, const QString& what) {
+            l->setVisible(!what.isEmpty());
+            l->setText(neededText(s2, what));
+            l->setStyleSheet(QStringLiteral(
+                                 "QLabel { border: 1px solid %1; border-radius: 3px;"
+                                 " padding: 3px 9px; font-size: 12px; font-weight: bold;"
+                                 " color: %1; }")
+                                 .arg(QLatin1String(workedColour(s2 == 'W' ? QChar('B') : s2))));
+        };
+        const QString country = m_country->text().section(QChar(0x00B7), 0, 0).trimmed();
+        paint(m_bCountry, need.country, country.isEmpty() ? tr("country") : country);
+        paint(m_bBand, need.band, band.isEmpty() ? tr("band") : band);
+        paint(m_bMode, need.mode, mode.isEmpty() ? tr("mode") : mode);
+        updateRotorBar();
+    }
+
     void onCallChanged()
     {
         const QString call = m_call->text().trimmed().toUpper();
@@ -433,6 +677,7 @@ private:
         const OrionLogbook::Country c = m_book->country(call);
         m_country->setText(c.known ? tr("%1  (CQ %2, ITU %3)").arg(c.name).arg(c.cqz).arg(c.ituz)
                                    : tr("Country not found in cty.dat"));
+        updateBadges();
         const QList<Qso> prev = m_book->db()->prevQsos(call, 8);
         m_prev->setRowCount(int(prev.size()));
         for (int i = 0; i < prev.size(); ++i) {
@@ -537,6 +782,16 @@ private:
     QLineEdit* m_pota = nullptr;
     QLineEdit* m_comment = nullptr;
     QPushButton* m_qrz = nullptr;
+    QPushButton* m_globe = nullptr;
+    QPushButton* m_spot = nullptr;
+    QLabel* m_bCountry = nullptr;
+    QLabel* m_bBand = nullptr;
+    QLabel* m_bMode = nullptr;
+    QLabel* m_heading = nullptr;
+    QPushButton* m_sp = nullptr;
+    QPushButton* m_lp = nullptr;
+    double m_spAz = -1.0;
+    double m_lpAz = -1.0;
     QString m_lookedUp;            // the call the callbook was last asked about
     QLabel* m_status = nullptr;
     QTableWidget* m_prev = nullptr;
@@ -982,7 +1237,9 @@ QColor orionWorkedSpotColour(const QString& call, double freqMhz)
 }
 
 void installOrionLogbook(QMainWindow* window, QMenuBar* bar, RadioModel* model,
-                         std::function<SliceModel*()> activeSlice)
+                         std::function<SliceModel*()> activeSlice,
+                         std::function<void(const QString&, double, const QString&)> spot,
+                         std::function<void(double, double, const QString&)> showOnMap)
 {
     auto* book = new OrionLogbook(window);
     g_book = book;
@@ -1108,6 +1365,12 @@ void installOrionLogbook(QMainWindow* window, QMenuBar* bar, RadioModel* model,
     QObject::connect(logAct, &QAction::triggered, window, [=] {
         if (!*dialog) {
             *dialog = new OrionQsoDialog(book, model, activeSlice, window);
+            if (spot) {
+                QObject::connect(*dialog, &OrionQsoDialog::spotRequested, window, spot);
+            }
+            if (showOnMap) {
+                QObject::connect(*dialog, &OrionQsoDialog::mapRequested, window, showOnMap);
+            }
         }
         (*dialog)->refreshFromRadio();
         (*dialog)->show();
@@ -1152,3 +1415,5 @@ void installOrionLogbook(QMainWindow* window, QMenuBar* bar, RadioModel* model,
 }
 
 }  // namespace AetherSDR
+
+#include "OrionLogbookUi.moc"

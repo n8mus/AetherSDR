@@ -1098,7 +1098,28 @@ void MainWindow::buildMenuBar()
 
 #ifdef AETHER_ORION_LOGBOOK
     // N8EM fork: the station logbook's menu (FORK-NOTES.md).
-    installOrionLogbook(this, menuBar(), &m_radioModel, [this] { return activeSlice(); });
+    installOrionLogbook(this, menuBar(), &m_radioModel, [this] { return activeSlice(); },
+        [this](const QString& call, double freqMhz, const QString& comment) {
+            // DX <kHz> <call> <comment>, the cluster's own spot form.
+            if (!m_dxCluster || !m_dxCluster->isConnected()) {
+                statusBar()->showMessage(
+                    tr("No DX cluster connected — Tools -> SpotHub."), 4000);
+                return;
+            }
+            m_dxCluster->sendCommand(QStringLiteral("DX %1 %2 %3")
+                                         .arg(freqMhz * 1000.0, 0, 'f', 1)
+                                         .arg(call, comment)
+                                         .trimmed());
+            statusBar()->showMessage(tr("Spotted %1 on %2 MHz.")
+                                         .arg(call)
+                                         .arg(freqMhz, 0, 'f', 6), 4000);
+        },
+        [this](double, double, const QString& call) {
+            // AetherSDR's own map. Centring it on the station needs a small
+            // addition to the map dialog; for now it opens where it was.
+            showPskReporterMapDialog();
+            statusBar()->showMessage(tr("Map opened for %1.").arg(call), 3000);
+        });
 #endif
 #ifdef AETHER_BACKEND_ORION
     // N8EM fork: the CW skimmer's band map and waterfall (FORK-NOTES.md).

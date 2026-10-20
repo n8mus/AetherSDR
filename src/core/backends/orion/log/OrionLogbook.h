@@ -76,6 +76,11 @@ public:
 
     [[nodiscard]] Country country(const QString& call) const;
 
+    // The loaded cty.dat itself, for callers that want more than the name
+    // and zones — the Log QSO window takes the entity's centre as a
+    // position for a station that has given no grid.
+    [[nodiscard]] const CtyDatParser* cty() const { return m_cty.get(); }
+
     int importAdif(const QString& file, QString* error = nullptr);
     bool exportAdif(const QString& file, QString* error = nullptr) const;
 

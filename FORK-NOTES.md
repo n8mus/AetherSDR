@@ -33,6 +33,7 @@ possible merge conflict when pulling from `upstream`.
 | `resources/shaders/panscope.frag` | The heat ramp's four stops come from the uniform block instead of being hardcoded | Same reason; the GPU path draws the trace |
 | `src/gui/SpectrumOverlayMenu.cpp/.h` | A "Match Scheme" toggle beside Heat Map / Grid / Wt Avg, which greys the two manual colour buttons while on | The operator's switch between the scheme's colours and their own |
 | `src/gui/MainWindow_Wiring.cpp` | `requestZeroBeatForSlice()` extracted from the VfoWidget lambda | The CW window's 0-BEAT button and the VFO box's run one implementation |
+| `src/gui/MainWindow_Menus.cpp` | Two callbacks passed to `installOrionLogbook()`: a DX-cluster spot through `m_dxCluster->sendCommand()`, and opening AetherMap | The Log QSO window's Spot and Globe buttons; both belong to the host, not the window |
 | `tests/tests.cmake` | `orion_cat_test`, `orion_spectrum_test`, `orion_rxaudio_test`, `orion_peripherals_test`, `orion_skimmer_test`, `orion_logbook_test`, `orion_upload_test` and `orion_backend_test` appended at the end | Upstream requires every test target to be declared there |
 | `tests/backend_seam_affinity_test.cpp` | `orion` added to the constructed-families list | The seam contract test covers the new backend too |
 
