@@ -1,6 +1,7 @@
 #include "gui/orion/OrionLogbookUi.h"
 
 #include "core/AppSettings.h"
+#include "core/ThemeManager.h"
 #include <QDesktopServices>
 #include <QUrl>
 #include <QLocale>
@@ -153,6 +154,22 @@ public:
         // window is this shape too. Squeezed into 320 px the names and
         // towns were clipped to a few characters.
         setMinimumWidth(720);
+        // Every box gets a surface and an edge of its own: on a dark theme
+        // an unstyled input is black on black, and the operator cannot see
+        // where the fields are — only where the text happens to be. Theme
+        // tokens, so it follows the app's theme rather than pinning colours.
+        AetherSDR::ThemeManager::instance().applyStyleSheet(this,
+            "QLineEdit, QDateTimeEdit {"
+            " background: {{color.background.0}};"
+            " color: {{color.text.primary}};"
+            " border: 1px solid {{color.border.strong}};"
+            " border-radius: 3px; padding: 3px 6px; }"
+            "QLineEdit:focus, QDateTimeEdit:focus {"
+            " border-color: {{color.accent}}; }"
+            "QLineEdit:disabled { color: {{color.text.secondary}}; }"
+            "QTableWidget { background: {{color.background.0}};"
+            " alternate-background-color: {{color.background.1}};"
+            " gridline-color: {{color.border.subtle}}; }");
         auto* vbox = new QVBoxLayout(this);
 
         // ── Call row: the call, the three things you do with it, country ──
