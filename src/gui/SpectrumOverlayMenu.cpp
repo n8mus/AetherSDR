@@ -2885,6 +2885,32 @@ void SpectrumOverlayMenu::syncNoiseFloorPosition(int pos)
     }
 }
 
+void SpectrumOverlayMenu::syncWfBlackLevel(int level)
+{
+    if (!m_blackSlider || m_autoBlackMode != 0) {
+        return;   // in an auto mode the slider is the offset, not the level
+    }
+    const QSignalBlocker block(m_blackSlider);
+    m_blackManualValue = level;
+    m_blackSlider->setValue(level);
+    if (m_blackLabel) {
+        m_blackLabel->setText(QString::number(level));
+    }
+}
+
+void SpectrumOverlayMenu::syncWfAutoBlackOffset(int offset)
+{
+    if (!m_blackSlider || m_autoBlackMode == 0) {
+        return;   // with auto-black off the slider is the level, not the offset
+    }
+    const QSignalBlocker block(m_blackSlider);
+    m_blackAutoOffsetValue = offset;
+    m_blackSlider->setValue(offset);
+    if (m_blackLabel) {
+        m_blackLabel->setText(QString::number(offset));
+    }
+}
+
 void SpectrumOverlayMenu::syncTraceFollowsScheme(bool on)
 {
     if (!m_matchSchemeBtn) {

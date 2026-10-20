@@ -79,6 +79,12 @@ public:
     // AetherSDR Orion fork: reflect the trace-follows-scheme state without
     // emitting, and grey the two manual colour buttons while it is on.
     void syncTraceFollowsScheme(bool on);
+    // AetherSDR Orion fork: reflect a Black Level set by the waterfall's
+    // left-edge drag strip, without emitting back at the widget.
+    void syncWfBlackLevel(int level);
+    // AetherSDR Orion fork: the same, for the auto-black offset the one
+    // slider shows while auto-black is on.
+    void syncWfAutoBlackOffset(int offset);
     // AetherSDR Orion fork: the WF AVG row, shown only on a backend that
     // averages its waterfall copy separately (backendPanWaterfallAveraging).
     void setWaterfallAverageAvailable(bool available);

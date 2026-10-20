@@ -3537,6 +3537,12 @@ endforeach()
 enable_testing()
 include(tests/tests.cmake)
 
+# N8EM fork: give every test target that builds RadioSetupDialog.cpp the Orion
+# setup page it calls (cmake/AetherOrion.cmake, FORK-NOTES.md).
+if(COMMAND aether_orion_patch_setup_page_targets)
+    aether_orion_patch_setup_page_targets()
+endif()
+
 
 # ── Install rules ────────────────────────────────────────────────────────────
 include(GNUInstallDirs)

@@ -74,6 +74,13 @@ enum class WfColorScheme : int {
     Plasma,        // black → purple → magenta → orange → yellow
     Purple,        // SmartSDR "Add Purple": black→blue→green→yellow→red→purple→white
     Glacier,       // deep blue → blue → ice blue → white (first preset not black at t=0)
+    // AetherSDR Orion fork: the Orion console's own three, which the
+    // operator knows by name. Appended, never inserted: the scheme is
+    // stored by index (DisplayWfColorScheme), so reordering would silently
+    // repaint every existing setup.
+    Enhanced,      // the console's default: black→violet→blue→cyan→green→yellow→orange→red→white
+    Classic,       // its older, shorter ramp
+    Thermal,       // black→dark red→orange→yellow→white
     Count          // sentinel — number of schemes
 };
 
@@ -89,6 +96,9 @@ const WfGradientStop* wfSchemeStops(WfColorScheme scheme, int& count);
 inline const char* wfSchemeName(WfColorScheme scheme)
 {
     switch (scheme) {
+    case WfColorScheme::Enhanced:  return "Enhanced";
+    case WfColorScheme::Classic:   return "Classic";
+    case WfColorScheme::Thermal:   return "Thermal";
     case WfColorScheme::Grayscale: return "Grayscale";
     case WfColorScheme::BlueGreen: return "Blue-Green";
     case WfColorScheme::Fire:      return "Fire";
@@ -694,6 +704,15 @@ public:
     void setFftFillAlpha(float a);
     void setFftFillColor(const QColor& c);
     // AetherSDR Orion fork: trace colours derived from the waterfall scheme.
+    // AetherSDR Orion fork: the console's left-edge drag strips (fork
+    // rule 2). A vertical drag in the left edge of the SPECTRUM slides the
+    // trace's reference level; the same gesture in the left edge of the
+    // WATERFALL sets the waterfall's own black level, independently. Width
+    // in device-independent pixels.
+    static constexpr int kLevelStripW = 18;
+    [[nodiscard]] bool inTraceLevelStrip(const QPoint& p) const;
+    [[nodiscard]] bool inWaterfallLevelStrip(const QPoint& p) const;
+
     void setTraceFollowsScheme(bool on);
     [[nodiscard]] bool traceFollowsScheme() const { return m_traceFollowsScheme; }
     void applySchemeToTrace();
@@ -1059,6 +1078,13 @@ signals:
     void dssFloorDepthResolved(int dB);
     // AetherSDR Orion fork: the trace-follows-scheme toggle settled.
     void traceFollowsSchemeResolved(bool on);
+    // AetherSDR Orion fork: the waterfall's level, dragged on its left-edge
+    // strip, so the Display panel's slider follows the gesture. Which number
+    // moved depends on the mode the waterfall is actually in: with auto-black
+    // on, the one live number is the noise-floor offset, so the strip drags
+    // that; with it off, the manual black level.
+    void wfBlackLevelEdited(int level);
+    void wfAutoBlackOffsetEdited(int offset);
     void waterfallLineDurationChangeRequested(int ms);
     void kiwiSdrDisplaySourceRequested(bool kiwi);
     // TNF signals
@@ -1768,6 +1794,12 @@ private:
     // ── FFT display controls (radio-side via "display pan set") ──────────
     int   m_panIndex{0};             // per-pan settings index (0, 1, 2, 3)
     bool  m_traceFollowsScheme{true};  // trace colours from the wf scheme
+    // The left-edge level strips: which one is being dragged, and what it
+    // held when the drag began.
+    enum class LevelStrip { None, Waterfall };
+    LevelStrip m_levelStrip{LevelStrip::None};
+    int   m_levelStripStartY{0};
+    int   m_levelStripStartBlack{0};
     int   m_fftAverage{0};           // 0=off, 1-10 frames
     bool  m_fftWeightedAvg{false};
     int   m_fftFps{25};

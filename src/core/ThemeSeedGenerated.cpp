@@ -237,6 +237,19 @@ void ThemeManager::seedGeneratedDefaults()
         g.type = ThemeGradient::Linear;
         g.angle = 180.0;
         g.stops.append({0.0, QColor("#000000")});
+        g.stops.append({0.2, QColor("#000078")});
+        g.stops.append({0.4, QColor("#00a0c8")});
+        g.stops.append({0.6, QColor("#00c850")});
+        g.stops.append({0.75, QColor("#e6dc28")});
+        g.stops.append({0.9, QColor("#f03c1e")});
+        g.stops.append({1.0, QColor("#ffffff")});
+        m_tokens.insert("color.waterfall.colormap.classic", QVariant::fromValue(g));
+    }
+    {
+        ThemeGradient g;
+        g.type = ThemeGradient::Linear;
+        g.angle = 180.0;
+        g.stops.append({0.0, QColor("#000000")});
         g.stops.append({0.15, QColor("#000080")});
         g.stops.append({0.3, QColor("#0040ff")});
         g.stops.append({0.45, QColor("#00c8ff")});
@@ -244,6 +257,22 @@ void ThemeManager::seedGeneratedDefaults()
         g.stops.append({0.8, QColor("#ffff00")});
         g.stops.append({1.0, QColor("#ff0000")});
         m_tokens.insert("color.waterfall.colormap.default", QVariant::fromValue(g));
+    }
+    {
+        ThemeGradient g;
+        g.type = ThemeGradient::Linear;
+        g.angle = 180.0;
+        g.stops.append({0.0, QColor("#000000")});
+        g.stops.append({0.12, QColor("#19003c")});
+        g.stops.append({0.25, QColor("#001ea0")});
+        g.stops.append({0.4, QColor("#0078e6")});
+        g.stops.append({0.52, QColor("#00c8b4")});
+        g.stops.append({0.62, QColor("#28d232")});
+        g.stops.append({0.72, QColor("#e6e628")});
+        g.stops.append({0.82, QColor("#ff8c14")});
+        g.stops.append({0.92, QColor("#ff281e")});
+        g.stops.append({1.0, QColor("#ffffff")});
+        m_tokens.insert("color.waterfall.colormap.enhanced", QVariant::fromValue(g));
     }
     {
         ThemeGradient g;
@@ -298,6 +327,18 @@ void ThemeManager::seedGeneratedDefaults()
         g.stops.append({0.75, QColor("#800080")});
         g.stops.append({1.0, QColor("#ffffff")});
         m_tokens.insert("color.waterfall.colormap.purple", QVariant::fromValue(g));
+    }
+    {
+        ThemeGradient g;
+        g.type = ThemeGradient::Linear;
+        g.angle = 180.0;
+        g.stops.append({0.0, QColor("#000000")});
+        g.stops.append({0.3, QColor("#5a000a")});
+        g.stops.append({0.55, QColor("#c82800")});
+        g.stops.append({0.75, QColor("#ff9600")});
+        g.stops.append({0.9, QColor("#ffe63c")});
+        g.stops.append({1.0, QColor("#ffffff")});
+        m_tokens.insert("color.waterfall.colormap.thermal", QVariant::fromValue(g));
     }
     m_tokens.insert("color.waterfall.history", QString("#506070"));
     m_tokens.insert("color.waterfall.live", QString("#ff4d4d"));

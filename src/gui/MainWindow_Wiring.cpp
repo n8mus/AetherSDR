@@ -4917,6 +4917,22 @@ void MainWindow::wirePanadapter(PanadapterApplet* applet)
             menu, &SpectrumOverlayMenu::syncTraceFollowsScheme,
             Qt::UniqueConnection);
     menu->syncTraceFollowsScheme(sw->traceFollowsScheme());
+    // The waterfall's left-edge strip and the Black Level slider are two
+    // views of one number: dragging the strip moves the slider AND stores the
+    // level, exactly as moving the slider does, so it comes back on restart.
+    // Qt cannot dedupe a functor connection, so drop any wiring from an
+    // earlier call on this pan before making this one.
+    disconnect(sw, &SpectrumWidget::wfBlackLevelEdited, this, nullptr);
+    connect(sw, &SpectrumWidget::wfBlackLevelEdited, this,
+            [this, applet, menu](int v) {
+        if (kiwiSdrPanDisplaysKiwi(applet->panId())) {
+            return;
+        }
+        menu->syncWfBlackLevel(v);
+        m_radioModel.setWaterfallBlackLevelFor(applet->panId(), v);
+    });
+    connect(sw, &SpectrumWidget::wfAutoBlackOffsetEdited, menu,
+            &SpectrumOverlayMenu::syncWfAutoBlackOffset, Qt::UniqueConnection);
     sw->applySchemeToTrace();
     connect(menu, &SpectrumOverlayMenu::spectrumRenderModeChanged,
             sw, &SpectrumWidget::setSpectrumRenderMode,

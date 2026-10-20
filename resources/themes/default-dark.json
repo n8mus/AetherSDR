@@ -284,6 +284,47 @@
                 { "at": 0.80, "color": "#a8dcff" },
                 { "at": 1.00, "color": "#ffffff" }
               ]
+            },
+            "enhanced": {
+              "type": "linear-gradient",
+              "angle": 180,
+              "stops": [
+                { "at": 0.00, "color": "#000000" },
+                { "at": 0.12, "color": "#19003c" },
+                { "at": 0.25, "color": "#001ea0" },
+                { "at": 0.40, "color": "#0078e6" },
+                { "at": 0.52, "color": "#00c8b4" },
+                { "at": 0.62, "color": "#28d232" },
+                { "at": 0.72, "color": "#e6e628" },
+                { "at": 0.82, "color": "#ff8c14" },
+                { "at": 0.92, "color": "#ff281e" },
+                { "at": 1.00, "color": "#ffffff" }
+              ]
+            },
+            "classic": {
+              "type": "linear-gradient",
+              "angle": 180,
+              "stops": [
+                { "at": 0.00, "color": "#000000" },
+                { "at": 0.20, "color": "#000078" },
+                { "at": 0.40, "color": "#00a0c8" },
+                { "at": 0.60, "color": "#00c850" },
+                { "at": 0.75, "color": "#e6dc28" },
+                { "at": 0.90, "color": "#f03c1e" },
+                { "at": 1.00, "color": "#ffffff" }
+              ]
+            },
+            "thermal": {
+              "type": "linear-gradient",
+              "angle": 180,
+              "stops": [
+                { "at": 0.00, "color": "#000000" },
+                { "at": 0.30, "color": "#5a000a" },
+                { "at": 0.55, "color": "#c82800" },
+                { "at": 0.75, "color": "#ff9600" },
+                { "at": 0.90, "color": "#ffe63c" },
+                { "at": 1.00, "color": "#ffffff" }
+              ]
             }
           },
           "slice": {

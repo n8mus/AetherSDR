@@ -806,6 +806,9 @@ const char* wfSchemeToken(WfColorScheme s)
     case WfColorScheme::Plasma:    return "color.waterfall.colormap.plasma";
     case WfColorScheme::Purple:    return "color.waterfall.colormap.purple";
     case WfColorScheme::Glacier:   return "color.waterfall.colormap.glacier";
+    case WfColorScheme::Enhanced:  return "color.waterfall.colormap.enhanced";
+    case WfColorScheme::Classic:   return "color.waterfall.colormap.classic";
+    case WfColorScheme::Thermal:   return "color.waterfall.colormap.thermal";
     default:                       return "color.waterfall.colormap.default";
     }
 }
@@ -8069,6 +8072,31 @@ void SpectrumWidget::setSpectrumFrac(float f)
     markOverlayDirty();
 }
 
+// AetherSDR Orion fork: the console's two left-edge level strips. The
+// spectrum's slides the trace's reference; the waterfall's sets its own
+// black level, so the two halves are adjusted where you are looking
+// rather than through a panel.
+bool SpectrumWidget::inTraceLevelStrip(const QPoint& p) const
+{
+    if (p.x() < 0 || p.x() >= kLevelStripW) {
+        return false;
+    }
+    const int contentH = height() - (freqScaleH() + DIVIDER_H);
+    const int specH = static_cast<int>(contentH * m_spectrumFrac);
+    return p.y() >= 0 && p.y() < specH - 2;
+}
+
+bool SpectrumWidget::inWaterfallLevelStrip(const QPoint& p) const
+{
+    if (p.x() < 0 || p.x() >= kLevelStripW) {
+        return false;
+    }
+    const int contentH = height() - (freqScaleH() + DIVIDER_H);
+    const int specH = static_cast<int>(contentH * m_spectrumFrac);
+    const int wfTop = specH + freqScaleH() + DIVIDER_H;
+    return p.y() > wfTop + 2 && p.y() < height();
+}
+
 void SpectrumWidget::setDbmRange(float minDbm, float maxDbm)
 {
     if (m_transmitting && txWaterfallAffectsThisPan()) {
@@ -10002,6 +10030,33 @@ void SpectrumWidget::mousePressEvent(QMouseEvent* ev)
     const int specH = static_cast<int>(contentH * m_spectrumFrac);
     const int y = static_cast<int>(ev->position().y());
 
+    // AetherSDR Orion fork: the left-edge level strips, tested before any
+    // other gesture — they sit outside the trace and the passband, so
+    // nothing else wants that sliver.
+    if (ev->button() == Qt::LeftButton) {
+        const QPoint at = ev->position().toPoint();
+        if (inTraceLevelStrip(at)) {
+            // The spectrum half's strip IS Aether's reference-level drag, just
+            // reachable at the left edge the way the console has it: hand the
+            // gesture to m_draggingDbm so the clamping, the AppSettings write
+            // and the range command to the radio all stay upstream's.
+            m_draggingDbm = true;
+            m_dbmDragStartY = at.y();
+            m_dbmDragStartRef = m_refLevel;
+            setSpectrumCursor(Qt::SizeVerCursor);
+            ev->accept();
+            return;
+        }
+        if (inWaterfallLevelStrip(at)) {
+            m_levelStrip = LevelStrip::Waterfall;
+            m_levelStripStartY = at.y();
+            m_levelStripStartBlack =
+                m_wfAutoBlack ? m_wfAutoBlackOffset : m_wfBlackLevel;
+            setCursor(Qt::SizeVerCursor);
+            return;
+        }
+    }
+
     // Save press position for single-click-to-tune drag threshold
     if (ev->button() == Qt::LeftButton)
         m_clickPressPos = ev->position().toPoint();
@@ -11094,6 +11149,28 @@ void SpectrumWidget::applyPanDragCenter(double newCenterMhz, bool force)
 void SpectrumWidget::mouseMoveEvent(QMouseEvent* ev)
 {
     PerfInputScope perfScope("mouseMove");
+    // AetherSDR Orion fork: a level strip in progress owns the gesture.
+    // Dragging DOWN raises the reference, as the console has it: the scale
+    // slides down under your hand and the signals follow.
+    if (m_levelStrip == LevelStrip::Waterfall) {
+        // The waterfall half has no upstream drag of its own, so this one is
+        // the fork's: its black point, which is what "intensity" means there.
+        const int dy = static_cast<int>(ev->position().y()) - m_levelStripStartY;
+        const int contentH = height() - (freqScaleH() + DIVIDER_H);
+        const int specH = std::max(1, static_cast<int>(contentH * m_spectrumFrac));
+        const int wfH = std::max(1, height() - (specH + freqScaleH() + DIVIDER_H));
+        const int d = static_cast<int>(std::lround(
+            static_cast<double>(-dy) * 100.0 / wfH));
+        const int level = std::clamp(m_levelStripStartBlack + d, 0, 100);
+        if (m_wfAutoBlack) {
+            setWfAutoBlackOffset(level);
+            emit wfAutoBlackOffsetEdited(m_wfAutoBlackOffset);
+        } else {
+            setWfBlackLevel(level);
+            emit wfBlackLevelEdited(m_wfBlackLevel);
+        }
+        return;
+    }
     if (PerfTelemetry::instance().enabled()) {
         const qint64 nowNs = PerfTelemetry::nowNs();
         if (m_lastMouseMoveNs > 0) {
@@ -11596,6 +11673,11 @@ void SpectrumWidget::mouseMoveEvent(QMouseEvent* ev)
 
 void SpectrumWidget::mouseReleaseEvent(QMouseEvent* ev)
 {
+    if (m_levelStrip == LevelStrip::Waterfall) {
+        m_levelStrip = LevelStrip::None;
+        setSpectrumCursor(Qt::CrossCursor);
+        return;
+    }
     PerfInputScope perfScope("mouseRelease");
     const auto dragStatePublisher = makeScopeExit([this] { publishPerfDragState(); });
     (void)dragStatePublisher;

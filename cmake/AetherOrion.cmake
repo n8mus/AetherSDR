@@ -153,3 +153,41 @@ else()
             src/core/backends/orion/skimmer/SkimStft.h)
     endif()
 endif()
+
+# N8EM fork: RadioSetupDialog.cpp calls buildOrionSetupPage() behind
+# AETHER_BACKEND_ORION, so every target that compiles that dialog needs the
+# page's definition — the app does, and so do the dozen-odd test targets in
+# tests/tests.cmake that build the dialog directly. Rather than touch each of
+# them (fork rule 8: the fewest hook-up points), add the source to whichever
+# targets already compile the dialog. Called from CMakeLists.txt AFTER the test
+# targets exist; see FORK-NOTES.md.
+function(aether_orion_patch_setup_page_targets)
+    if(NOT AETHER_BACKEND_ORION)
+        return()
+    endif()
+    get_property(targets DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                 PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(tgt IN LISTS targets)
+        get_target_property(type ${tgt} TYPE)
+        if(NOT type STREQUAL "EXECUTABLE" AND NOT type STREQUAL "STATIC_LIBRARY")
+            continue()
+        endif()
+        get_target_property(srcs ${tgt} SOURCES)
+        if(NOT srcs)
+            continue()
+        endif()
+        set(has_dialog OFF)
+        set(has_page OFF)
+        foreach(src IN LISTS srcs)
+            if(src MATCHES "RadioSetupDialog\\.cpp$")
+                set(has_dialog ON)
+            elseif(src MATCHES "OrionSetupPage\\.cpp$")
+                set(has_page ON)
+            endif()
+        endforeach()
+        if(has_dialog AND NOT has_page)
+            target_sources(${tgt} PRIVATE
+                ${CMAKE_SOURCE_DIR}/src/gui/orion/OrionSetupPage.cpp)
+        endif()
+    endforeach()
+endfunction()
