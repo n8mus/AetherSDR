@@ -27,13 +27,16 @@
 #include "core/backends/orion/CwMacros.h"
 #include <QString>
 #include <QStringList>
+#include <QVariantMap>
 
 class QCheckBox;
 class QComboBox;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
+class QGroupBox;
 class QPushButton;
+class QSlider;
 class QSpinBox;
 
 namespace AetherSDR {
@@ -71,6 +74,14 @@ public:
     // with the chosen key; the window remembers it across restarts.
     void setDecoders(const QStringList& keys, const QString& current,
                      std::function<void(const QString&)> choose);
+
+    // The radio's own CW settings (sidetone volume and pitch, QSK delay,
+    // envelope attack/decay) and its internal keyer, read-only. `apply` is
+    // called with the fields the operator changed; `showRigCw` puts the
+    // radio's answers back on the controls without echoing a set down the
+    // CAT link. Hidden until a host installs the handler.
+    void setRigCwHandler(std::function<void(const QVariantMap&)> apply);
+    void showRigCw(const QVariantMap& state);
 
 public slots:
     void appendRx(const QString& text);   // decoded CW from AetherSDR's reader
@@ -124,6 +135,17 @@ private:
     QCheckBox* m_live = nullptr;         // stream keystrokes as typed
     QCheckBox* m_word = nullptr;         // space bar releases each word
     QCheckBox* m_rxOn = nullptr;
+    QGroupBox* m_rigBox = nullptr;
+    QSlider* m_rigVol = nullptr;
+    QSlider* m_rigPitch = nullptr;
+    QSlider* m_rigQsk = nullptr;
+    QSlider* m_rigAttack = nullptr;
+    QLabel* m_rigVolVal = nullptr;
+    QLabel* m_rigPitchVal = nullptr;
+    QLabel* m_rigQskVal = nullptr;
+    QLabel* m_rigAttackVal = nullptr;
+    QLabel* m_rigKeyer = nullptr;
+    std::function<void(const QVariantMap&)> m_rigCw;
     QComboBox* m_decoder = nullptr;
     std::function<void(const QString&)> m_chooseDecoder;
     QLabel* m_rxInfo = nullptr;

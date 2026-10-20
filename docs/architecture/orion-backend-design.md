@@ -775,6 +775,17 @@ bench-tested against the fake radio and the real RSP2, receive only):**
   correctly: flat floor, carriers on their right frequencies, the waterfall
   tracking them.
 
+**Open: the radio's CW settings do not read back (2026-10-19).** The
+Orion takes `*CT` (sidetone pitch), `*CQ` (QSK delay) and `*CD`
+(attack/decay) — the same commands the console sends — but on the bench
+no `@CT` / `@CQ` / `@CD` / `@CK` / `@CS` / `@CW` reply was ever seen
+coming back, while `@CV` (sidetone volume) does arrive. The decoder reads
+the leading field of a line only (replies glued on the wire are a known
+shape here), and the startup burst is the likely place they are being
+lost. Until that is chased, the CW window's rig controls are seeded from
+the operator's own last values and send on release; a reply still wins
+whenever one arrives.
+
 **PAUSED 2026-10-17 (operator decision).** The fork runs the whole station
 on air (CAT, RSP2 pan and both receivers, split, TX on both paths, TUNE,
 ATU, WinKeyer CW, sidetone). Open when it resumes: the 2D panadapter (the

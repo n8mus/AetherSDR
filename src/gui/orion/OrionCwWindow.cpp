@@ -5,6 +5,9 @@
 
 #include <QCheckBox>
 #include <QComboBox>
+#include <QFormLayout>
+#include <QGroupBox>
+#include <QSlider>
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QGridLayout>
@@ -333,6 +336,95 @@ OrionCwWindow::OrionCwWindow(CwxModel* cwx, orion::logbook::QsoContext* ctx, QWi
     g->addWidget(m_rx, 5, 0, 1, 6);
     g->setRowStretch(5, 1);
 
+    // ── The RADIO's own CW settings, over CAT ──────────────────────────
+    // Rig-side: the Orion makes the sidetone and shapes the CW envelope
+    // whenever it transmits CW, whatever did the keying, so these work
+    // with the WinKeyer sending and belong beside it. The internal keyer's
+    // own controls are deliberately NOT here — enabling that keyer re-reads
+    // the key jack as a paddle and would fight the WinKeyer wired into it,
+    // so it is shown read-only instead.
+    m_rigBox = new QGroupBox(tr("RADIO \u2014 CW (over CAT)"), this);
+    m_rigBox->setObjectName(QStringLiteral("orionCwRigBox"));
+    auto* rig = new QFormLayout(m_rigBox);
+    rig->setContentsMargins(8, 6, 8, 6);
+    rig->setSpacing(4);
+    const auto rigRow = [&](const QString& label, QSlider*& slider, QLabel*& value, int lo,
+                            int hi, const char* name, const QString& suffix) {
+        auto* row = new QWidget(m_rigBox);
+        auto* lay = new QHBoxLayout(row);
+        lay->setContentsMargins(0, 0, 0, 0);
+        lay->setSpacing(6);
+        slider = new QSlider(Qt::Horizontal, row);
+        slider->setObjectName(QLatin1String(name));
+        slider->setRange(lo, hi);
+        lay->addWidget(slider, 1);
+        value = new QLabel(row);
+        value->setMinimumWidth(52);
+        value->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        value->setProperty("suffix", suffix);
+        lay->addWidget(value);
+        rig->addRow(label, row);
+    };
+    rigRow(tr("Sidetone"), m_rigVol, m_rigVolVal, 0, 100, "orionCwRigVolume", QString());
+    rigRow(tr("Pitch"), m_rigPitch, m_rigPitchVal, 300, 1200, "orionCwRigPitch",
+           QStringLiteral(" Hz"));
+    rigRow(tr("QSK delay"), m_rigQsk, m_rigQskVal, 0, 100, "orionCwRigQsk", QString());
+    rigRow(tr("Rise/fall"), m_rigAttack, m_rigAttackVal, 3, 10, "orionCwRigAttack",
+           QStringLiteral(" ms"));
+    m_rigPitch->setSingleStep(10);
+    m_rigPitch->setToolTip(tr("The RADIO's sidetone pitch (*CT). Separate from AetherSDR's\n"
+                              "own sidetone, which is what the computer plays."));
+    m_rigQsk->setToolTip(tr("How long the radio holds the transmitter up between elements."));
+    m_rigAttack->setToolTip(tr("The CW envelope's rise and fall time. Shorter is harder;\n"
+                               "the Orion's range is 3 to 10 ms."));
+    m_rigKeyer = new QLabel(m_rigBox);
+    m_rigKeyer->setObjectName(QStringLiteral("orionCwRigKeyer"));
+    m_rigKeyer->setToolTip(tr("The RADIO's internal keyer, read-only: turning it on would\n"
+                              "re-read the key jack as a paddle and fight the WinKeyer."));
+    rig->addRow(tr("Rig keyer"), m_rigKeyer);
+    m_rigBox->setVisible(false);   // until a host installs the handler
+    g->addWidget(m_rigBox, 6, 0, 1, 6);
+
+    // A drag must not flood the CAT link, which is shared with the poll
+    // rotation: send on release, and while dragging only move the number.
+    const auto wire = [this](QSlider* s, QLabel* v, const char* key) {
+        connect(s, &QSlider::valueChanged, this, [v](int n) {
+            v->setText(QString::number(n) + v->property("suffix").toString());
+        });
+        connect(s, &QSlider::sliderReleased, this, [this, s, key] {
+            saveSetting(QStringLiteral("OrionCw/rig/") + QLatin1String(key), s->value());
+            if (m_rigCw) {
+                QVariantMap m;
+                m.insert(QLatin1String(key), s->value());
+                m_rigCw(m);
+            }
+        });
+    };
+    wire(m_rigVol, m_rigVolVal, "volume");
+    wire(m_rigPitch, m_rigPitchVal, "pitch");
+    wire(m_rigQsk, m_rigQskVal, "qsk");
+    wire(m_rigAttack, m_rigAttackVal, "attack");
+
+    // Seeded from what the operator last set, because this radio does not
+    // reliably answer the ?CT / ?CQ / ?CD queries — it takes the commands
+    // but its replies have not been seen coming back (the decoder reads the
+    // leading field only, and the startup burst can glue replies together).
+    // A control at a value the operator chose beats one pinned at its
+    // minimum; the radio's own answer still wins whenever one arrives.
+    const auto seed = [](QSlider* s, QLabel* v, const char* key, int fallback) {
+        const int n = AppSettings::instance()
+                          .value(QStringLiteral("OrionCw/rig/") + QLatin1String(key), fallback)
+                          .toInt();
+        const QSignalBlocker block(s);
+        s->setValue(n);
+        v->setText(QString::number(s->value()) + v->property("suffix").toString());
+    };
+    seed(m_rigVol, m_rigVolVal, "volume", 30);
+    seed(m_rigPitch, m_rigPitchVal, "pitch", 550);
+    seed(m_rigQsk, m_rigQskVal, "qsk", 30);
+    seed(m_rigAttack, m_rigAttackVal, "attack", 5);
+    m_rigKeyer->setText(tr("\u2014"));
+
     connect(m_rxOn, &QCheckBox::toggled, this, [this](bool on) {
         saveSetting(QStringLiteral("OrionCw/rxDecode"), on);
         emit rxDecodeWanted(on && isVisible());
@@ -488,6 +580,51 @@ void OrionCwWindow::setDecoders(const QStringList& keys, const QString& current,
     }
     m_decoder->setVisible(keys.size() > 1);
     m_chooseDecoder = std::move(choose);
+}
+
+void OrionCwWindow::setRigCwHandler(std::function<void(const QVariantMap&)> apply)
+{
+    m_rigCw = std::move(apply);
+    if (m_rigBox) {
+        m_rigBox->setVisible(static_cast<bool>(m_rigCw));
+    }
+}
+
+// The radio's answers, put on the controls without echoing a set back down
+// the CAT link — and without fighting a drag in progress.
+void OrionCwWindow::showRigCw(const QVariantMap& state)
+{
+    const auto put = [](QSlider* s, QLabel* v, const QVariant& value) {
+        if (!s || !value.isValid()) {
+            return;
+        }
+        const int n = value.toInt();
+        if (n < 0 || s->isSliderDown()) {
+            return;   // not reported yet, or the operator is dragging it
+        }
+        const QSignalBlocker block(s);
+        s->setValue(n);
+        v->setText(QString::number(n) + v->property("suffix").toString());
+    };
+    put(m_rigVol, m_rigVolVal, state.value(QStringLiteral("volume")));
+    put(m_rigPitch, m_rigPitchVal, state.value(QStringLiteral("pitch")));
+    put(m_rigQsk, m_rigQskVal, state.value(QStringLiteral("qsk")));
+    put(m_rigAttack, m_rigAttackVal, state.value(QStringLiteral("attack")));
+
+    const int on = state.value(QStringLiteral("keyerOn"), -1).toInt();
+    const int wpm = state.value(QStringLiteral("keyerWpm"), -1).toInt();
+    const int weight = state.value(QStringLiteral("keyerWeight"), -1).toInt();
+    QStringList parts;
+    if (on >= 0) {
+        parts << (on ? tr("on") : tr("off"));
+    }
+    if (wpm > 0) {
+        parts << tr("%1 wpm").arg(wpm);
+    }
+    if (weight > 0) {
+        parts << tr("wt %1").arg(weight);
+    }
+    m_rigKeyer->setText(parts.isEmpty() ? tr("\u2014") : parts.join(QStringLiteral(" \u00b7 ")));
 }
 
 void OrionCwWindow::setStationFields(const QString& call, const QString& name, const QString& qth,

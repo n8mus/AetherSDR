@@ -96,6 +96,43 @@ static void testReplies()
     check(!decodeReply("@CV101"), "sidetone out of range");
     check(setCwSidetoneVolume(55) == "*CV55" && queryCwSidetoneVolume() == "?CV",
           "sidetone commands as the reference program sends them");
+
+    // The radio's other CW settings, in the ranges the Orion documents.
+    check(setCwSidetonePitch(550) == "*CT550" && setCwSidetonePitch(50) == "*CT300"
+              && setCwSidetonePitch(5000) == "*CT1200" && queryCwSidetonePitch() == "?CT",
+          "sidetone pitch, clamped to 300-1200");
+    check(setCwQskDelay(30) == "*CQ30" && setCwQskDelay(-5) == "*CQ0"
+              && queryCwQskDelay() == "?CQ",
+          "QSK delay, clamped to 0-100");
+    check(setCwAttackDecay(5) == "*CD5" && setCwAttackDecay(99) == "*CD10"
+              && setCwAttackDecay(1) == "*CD3" && queryCwAttackDecay() == "?CD",
+          "attack/decay, clamped to 3-10 ms");
+    {
+        using What = CwRigReply::What;
+        const auto pitch = decodeReply("@CT550");
+        check(as<CwRigReply>(pitch) && as<CwRigReply>(pitch)->what == What::Pitch
+                  && as<CwRigReply>(pitch)->value == 550,
+              "@CT550 = the radio's sidetone pitch");
+        const auto qsk = decodeReply("@CQ25");
+        check(as<CwRigReply>(qsk) && as<CwRigReply>(qsk)->what == What::QskDelay
+                  && as<CwRigReply>(qsk)->value == 25,
+              "@CQ25 = QSK delay");
+        const auto rise = decodeReply("@CD7");
+        check(as<CwRigReply>(rise) && as<CwRigReply>(rise)->what == What::AttackDecay
+                  && as<CwRigReply>(rise)->value == 7,
+              "@CD7 = 7 ms rise and fall");
+        const auto keyer = decodeReply("@CK1");
+        check(as<CwRigReply>(keyer) && as<CwRigReply>(keyer)->what == What::KeyerEnabled
+                  && as<CwRigReply>(keyer)->value == 1,
+              "@CK1 = the rig keyer is on (read-only here)");
+        const auto wpm = decodeReply("@CS29");
+        check(as<CwRigReply>(wpm) && as<CwRigReply>(wpm)->what == What::KeyerSpeed
+                  && as<CwRigReply>(wpm)->value == 29,
+              "@CS29 = the rig keyer's own speed");
+        // Out of range is not a reading: better no value than a wrong one.
+        check(!decodeReply("@CT100") && !decodeReply("@CD99") && !decodeReply("@CS5"),
+              "out-of-range CW settings decode to nothing");
+    }
     check(setAfVolume(Rx::Main, 40) == "*UM102" && setAfVolume(Rx::Sub, 100) == "*US255"
               && setAfVolume(Rx::Main, 150) == "*UM255",
           "AF volume: percent to the radio's byte scale, clamped");

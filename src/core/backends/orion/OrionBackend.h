@@ -234,6 +234,7 @@ private:
     void startSkimmer(const QVariantMap& params);
     void updateSkimmerGate();
     [[nodiscard]] QVariantMap rotorState() const;
+    [[nodiscard]] QVariantMap cwRigState() const;
     [[nodiscard]] QVariantMap skimmerState() const;
     void openTxAudio(const QVariantMap& params);
 
@@ -325,6 +326,13 @@ private:
     spectrum::View m_view;
     int m_waterfallHoldMs = 0;   // the waterfall's row interval, see setPanWaterfallRate
     int m_waterfallAverage = 0;  // the waterfall's own WF AVG (0 = off)
+    // The radio's own CW settings, as it last reported them (-1 = unasked).
+    int m_cwRigPitchHz = -1;
+    int m_cwRigQsk = -1;
+    int m_cwRigAttackMs = -1;
+    int m_cwRigKeyerOn = -1;
+    int m_cwRigKeyerWpm = -1;
+    int m_cwRigKeyerWeight = -1;
     int m_panAverage = 0;        // FFT AVG, held until the RSP2 starts
     int m_panFps = 25;           // FFT FPS, likewise
     bool m_panWeightedAverage = false;

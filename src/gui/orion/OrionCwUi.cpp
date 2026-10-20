@@ -6,6 +6,8 @@
 #include <QMenu>
 #include <QPointer>
 
+#include "core/backends/IRadioBackend.h"
+
 #include <functional>
 
 #include "core/AppSettings.h"
@@ -62,6 +64,45 @@ void installOrionCwWindow(QMainWindow* window, QMenu* menu, RadioModel* model,
                                 s.value(QStringLiteral("OrionCw/myQth")).toString(),
                                 s.value(QStringLiteral("OrionCw/myGrid")).toString());
 
+            // The radio's own CW settings, both ways: the window sends what
+            // the operator changed, and the backend's reports put the
+            // radio's answers back on the controls. Aether's side panel is
+            // untouched and keeps working — both are views of one radio.
+            if (model->backendDeclaresExtension(QStringLiteral("orion"))) {
+                w->setRigCwHandler([model](const QVariantMap& fields) {
+                    model->invokeBackendExtension(QStringLiteral("orion"),
+                                                  QStringLiteral("cw.rig.set"), 0, fields);
+                });
+            }
+            {
+                // Re-armed on each connect, so a reconnect does not leave a
+                // dead listener behind.
+                auto guard = std::make_shared<QPointer<QObject>>();
+                const auto arm = [model, w, guard] {
+                    delete guard->data();
+                    *guard = nullptr;
+                    if (!model->isConnected() || !model->backend()
+                        || !model->backendDeclaresExtension(QStringLiteral("orion"))) {
+                        return;
+                    }
+                    *guard = new QObject(w);
+                    QObject::connect(model->backend(), &IRadioBackend::extensionStatus,
+                                     guard->data(),
+                                     [w](const QString& ns, const QString& kind,
+                                         const QVariantMap& f) {
+                                         if (ns == QLatin1String("orion")
+                                             && kind == QLatin1String("cw.rig")) {
+                                             w->showRigCw(f);
+                                         }
+                                     });
+                    // And ask once, so the window opens showing the radio.
+                    model->invokeBackendExtension(QStringLiteral("orion"),
+                                                  QStringLiteral("cw.rig.get"), 0);
+                };
+                QObject::connect(model, &RadioModel::connectionStateChanged, w,
+                                 [arm](bool) { arm(); });
+                arm();
+            }
             if (zeroBeat) {
                 w->setZeroBeatHandler(zeroBeat);
             }

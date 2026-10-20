@@ -411,6 +411,24 @@ QByteArray setCwSidetoneVolume(int percent)
     return "*CV" + QByteArray::number(std::clamp(percent, 0, 100));
 }
 QByteArray queryCwSidetoneVolume() { return QByteArrayLiteral("?CV"); }
+QByteArray setCwSidetonePitch(int hz)
+{
+    return "*CT" + QByteArray::number(std::clamp(hz, 300, 1200));
+}
+QByteArray queryCwSidetonePitch() { return QByteArrayLiteral("?CT"); }
+QByteArray setCwQskDelay(int value)
+{
+    return "*CQ" + QByteArray::number(std::clamp(value, 0, 100));
+}
+QByteArray queryCwQskDelay() { return QByteArrayLiteral("?CQ"); }
+QByteArray setCwAttackDecay(int ms)
+{
+    return "*CD" + QByteArray::number(std::clamp(ms, 3, 10));
+}
+QByteArray queryCwAttackDecay() { return QByteArrayLiteral("?CD"); }
+QByteArray queryCwKeyerEnabled() { return QByteArrayLiteral("?CK"); }
+QByteArray queryCwKeyerSpeed() { return QByteArrayLiteral("?CS"); }
+QByteArray queryCwKeyerWeight() { return QByteArrayLiteral("?CW"); }
 QByteArray setAfVolume(Rx rx, int percent)
 {
     return QByteArray(rx == Rx::Main ? "*UM" : "*US")
@@ -487,6 +505,32 @@ std::optional<Reply> decodeReply(const QByteArray& line)
         if (line[2] == 'V' && line.size() >= 4 && parseLeadingInt(line.mid(3), v) && v >= 0
             && v <= 100) {
             return SidetoneReply{static_cast<int>(v)};
+        }
+        // The radio's other CW settings, each in its own documented range.
+        if (line.size() >= 4 && parseLeadingInt(line.mid(3), v)) {
+            using What = CwRigReply::What;
+            switch (line[2]) {
+            case 'T':
+                if (v >= 300 && v <= 1200) return CwRigReply{What::Pitch, int(v)};
+                break;
+            case 'Q':
+                if (v >= 0 && v <= 100) return CwRigReply{What::QskDelay, int(v)};
+                break;
+            case 'D':
+                if (v >= 3 && v <= 10) return CwRigReply{What::AttackDecay, int(v)};
+                break;
+            case 'K':
+                if (v == 0 || v == 1) return CwRigReply{What::KeyerEnabled, int(v)};
+                break;
+            case 'S':
+                if (v >= 10 && v <= 60) return CwRigReply{What::KeyerSpeed, int(v)};
+                break;
+            case 'W':
+                if (v >= 0 && v <= 200) return CwRigReply{What::KeyerWeight, int(v)};
+                break;
+            default:
+                break;
+            }
         }
         return std::nullopt;
     case 'A':

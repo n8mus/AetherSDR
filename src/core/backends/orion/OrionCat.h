@@ -130,6 +130,27 @@ inline constexpr double kS9Dbm = -73.0;
 [[nodiscard]] QByteArray setCwSidetoneVolume(int percent);
 [[nodiscard]] QByteArray queryCwSidetoneVolume();
 
+// The rest of the radio's own CW settings, as the reference program sets
+// them. These are RIG-side: the Orion makes the sidetone and shapes the CW
+// envelope whenever it transmits CW, whatever did the keying, so they
+// apply with the WinKeyer sending.
+//   *CT<300-1200> sidetone pitch in Hz   (?CT -> @CT<hz>)
+//   *CQ<0-100>    QSK delay              (?CQ -> @CQ<n>)
+//   *CD<3-10>     attack/decay in ms     (?CD -> @CD<ms>)
+// The internal keyer's own controls (*CK on/off, *CS speed, *CW weight)
+// are deliberately NOT offered: enabling that keyer re-reads the key jack
+// as a paddle and would fight the WinKeyer wired into it. They are only
+// READ, so the operator can see what the rig thinks.
+[[nodiscard]] QByteArray setCwSidetonePitch(int hz);
+[[nodiscard]] QByteArray queryCwSidetonePitch();
+[[nodiscard]] QByteArray setCwQskDelay(int value);
+[[nodiscard]] QByteArray queryCwQskDelay();
+[[nodiscard]] QByteArray setCwAttackDecay(int ms);
+[[nodiscard]] QByteArray queryCwAttackDecay();
+[[nodiscard]] QByteArray queryCwKeyerEnabled();
+[[nodiscard]] QByteArray queryCwKeyerSpeed();
+[[nodiscard]] QByteArray queryCwKeyerWeight();
+
 // The internal antenna tuner: *TT1 in, *TT0 out (bypass), *TTT runs a tune
 // cycle (the radio keys its own carrier and drops it when matched). ?TT
 // answers @TT1 / @TT0.
@@ -170,6 +191,12 @@ struct TxLevelReply {
 struct TunerReply { bool in; };
 // @CV<0..100>: CW sidetone volume.
 struct SidetoneReply { int volume; };
+// The radio's other CW settings. `what` says which one answered.
+struct CwRigReply {
+    enum class What { Pitch, QskDelay, AttackDecay, KeyerEnabled, KeyerSpeed, KeyerWeight };
+    What what;
+    int value;
+};
 // @UM / @US / @UB / @UM<m>S<s>: AF volume in percent, per receiver present.
 struct AfVolumeReply { std::optional<int> mainPercent; std::optional<int> subPercent; };
 // @UC<l><r><s>: audio routing, each 'M', 'S' or 'B'.
@@ -178,8 +205,8 @@ struct AudioRoutingReply { char left; char right; char speaker; };
 using Reply = std::variant<FrequencyReply, ModeReply, BandwidthReply, PbtReply,
                            AgcReply, RfGainReply, AttenuatorReply, PreampReply,
                            SMeterReply, TxMeterReply, VfoAssignmentReply, VfoLockReply,
-                           TxLevelReply, TunerReply, SidetoneReply, AfVolumeReply,
-                           AudioRoutingReply>;
+                           TxLevelReply, TunerReply, SidetoneReply, CwRigReply,
+                           AfVolumeReply, AudioRoutingReply>;
 
 // Decode one line (CR already stripped). nullopt for anything that is not a
 // well-formed, in-range reply this decoder knows; replies glued together on

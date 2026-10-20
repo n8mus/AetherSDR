@@ -649,6 +649,18 @@ void OrionBackend::onLine(const QByteArray& line)
                     publishSliceAudio(rx);   // the radio's own knob moved
                 }
             }
+        } else if constexpr (std::is_same_v<T, orion::CwRigReply>) {
+            using What = orion::CwRigReply::What;
+            switch (r.what) {
+            case What::Pitch: m_cwRigPitchHz = r.value; break;
+            case What::QskDelay: m_cwRigQsk = r.value; break;
+            case What::AttackDecay: m_cwRigAttackMs = r.value; break;
+            case What::KeyerEnabled: m_cwRigKeyerOn = r.value; break;
+            case What::KeyerSpeed: m_cwRigKeyerWpm = r.value; break;
+            case What::KeyerWeight: m_cwRigKeyerWeight = r.value; break;
+            }
+            emit extensionStatus(QStringLiteral("orion"), QStringLiteral("cw.rig"),
+                                 cwRigState());
         } else if constexpr (std::is_same_v<T, SidetoneReply>) {
             // One knob on the radio: 0 is sidetone off, and the level is kept.
             TransmitDelta d;
@@ -855,6 +867,14 @@ void OrionBackend::startupQueries()
     send(queryTuner());
     send(queryMonitor());
     send(queryCwSidetoneVolume());
+    // The radio's other CW settings, so the CW window opens showing what
+    // the rig actually has rather than blanks.
+    send(queryCwSidetonePitch());
+    send(queryCwQskDelay());
+    send(queryCwAttackDecay());
+    send(queryCwKeyerEnabled());
+    send(queryCwKeyerSpeed());
+    send(queryCwKeyerWeight());
     send(queryAfVolume(Rx::Main));
     send(queryAfVolume(Rx::Sub));
     send(queryAudioRouting());
@@ -1545,6 +1565,21 @@ void OrionBackend::skimmerTuning(qint64& dialHz, qint64& loHz) const
 // What the rotor is doing, for rotor.get and for every rotor.* answer:
 // whether it is there, where it says it is pointing, and where it was last
 // asked to go. Azimuth is -1 when it has not reported yet.
+// What the radio says its own CW settings are. -1 where it has not
+// answered yet, so a UI can tell "not known" from a real value.
+QVariantMap OrionBackend::cwRigState() const
+{
+    QVariantMap m;
+    m.insert(QStringLiteral("volume"), m_cwSidetoneLevel);
+    m.insert(QStringLiteral("pitch"), m_cwRigPitchHz);
+    m.insert(QStringLiteral("qsk"), m_cwRigQsk);
+    m.insert(QStringLiteral("attack"), m_cwRigAttackMs);
+    m.insert(QStringLiteral("keyerOn"), m_cwRigKeyerOn);
+    m.insert(QStringLiteral("keyerWpm"), m_cwRigKeyerWpm);
+    m.insert(QStringLiteral("keyerWeight"), m_cwRigKeyerWeight);
+    return m;
+}
+
 QVariantMap OrionBackend::rotorState() const
 {
     QVariantMap m;
@@ -2735,6 +2770,44 @@ void OrionBackend::invokeExtension(const QString& ns, const QString& verb,
         }
         return;
     }
+    // The radio's own CW settings (*CT pitch, *CQ QSK delay, *CD attack and
+    // decay), plus its internal keyer read-only. These are rig-side: the
+    // Orion makes the sidetone and shapes the CW envelope whenever it
+    // transmits CW, whatever did the keying, so they apply with the
+    // WinKeyer sending. cw.rig.get answers the lot; cw.rig.set takes any of
+    // pitch / qsk / attack and asks the radio back.
+    if (ns == QLatin1String("orion") && verb == QLatin1String("cw.rig.get")) {
+        // Also as a status event, so a caller that asked without a request
+        // id still hears the answer — the CW window opens long after the
+        // connect-time queries have been answered, and would otherwise show
+        // blanks until the operator touched something.
+        emit extensionStatus(QStringLiteral("orion"), QStringLiteral("cw.rig"), cwRigState());
+        if (requestId != 0) {
+            emit extensionResult(requestId, cwRigState());
+        }
+        return;
+    }
+    if (ns == QLatin1String("orion") && verb == QLatin1String("cw.rig.set")) {
+        const QVariantMap m = arg.toMap();
+        if (m.contains(QStringLiteral("pitch"))) {
+            send(orion::setCwSidetonePitch(m.value(QStringLiteral("pitch")).toInt()));
+            send(orion::queryCwSidetonePitch());
+        }
+        if (m.contains(QStringLiteral("qsk"))) {
+            send(orion::setCwQskDelay(m.value(QStringLiteral("qsk")).toInt()));
+            send(orion::queryCwQskDelay());
+        }
+        if (m.contains(QStringLiteral("attack"))) {
+            send(orion::setCwAttackDecay(m.value(QStringLiteral("attack")).toInt()));
+            send(orion::queryCwAttackDecay());
+        }
+        emit extensionStatus(QStringLiteral("orion"), QStringLiteral("cw.rig"), cwRigState());
+        if (requestId != 0) {
+            emit extensionResult(requestId, cwRigState());
+        }
+        return;
+    }
+
     // The DCU-3 rotor. rotor.get answers the state; rotor.turn takes a
     // bearing in degrees and rotor.stop halts it where it is. Choosing a
     // bearing and sending it are separate gestures in every UI that uses
