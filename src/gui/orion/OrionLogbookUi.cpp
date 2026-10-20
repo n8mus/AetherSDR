@@ -42,6 +42,7 @@
 #include <QMessageBox>
 #include <QPointer>
 #include <QPushButton>
+#include <QSet>
 #include <QSortFilterProxyModel>
 #include <QSqlTableModel>
 #include <QStatusBar>
@@ -92,6 +93,18 @@ QString defaultRst(const QString& adif)
 {
     return adif == QLatin1String("CW") || adif == QLatin1String("DATA") ? QStringLiteral("599")
                                                                         : QStringLiteral("59");
+}
+
+// Callsign shape, incl. portable forms. A partial call typed on the way to
+// a whole one must not go to the callbook: it costs a round trip, it
+// answers "not found", and its late reply has to be thrown away.
+const QRegularExpression& callShape()
+{
+    static const QRegularExpression re(QStringLiteral("^(?:[A-Z0-9]{1,3}/)?"
+                                                      "(?:[A-Z]{1,2}|[0-9][A-Z]|[A-Z][0-9])"
+                                                      "[0-9]{1,2}[A-Z]{1,4}"
+                                                      "(?:/[A-Z0-9]{1,4})?$"));
+    return re;
 }
 
 // The worked-before ramp, the same colours the spot markers use.
@@ -313,6 +326,17 @@ public:
             m_call->setCursorPosition(pos);
             onCallChanged();
         });
+        // Finished typing: leaving the box (Tab, or a click elsewhere) is
+        // when the callbook is asked.
+        connect(m_call, &QLineEdit::editingFinished, this, [this] { lookupCall(false); });
+        // Enter in the callsign moves on rather than logging: LOG QSO is the
+        // dialog's default button, so Enter here would otherwise file the
+        // QSO while the operator was still filling it in.
+        connect(m_call, &QLineEdit::returnPressed, this, [this] {
+            lookupCall(false);
+            m_rstS->setFocus();
+            m_rstS->selectAll();
+        });
         // textChanged, not just textEdited: a call can arrive from a spot,
         // from the CW window's DX box or from a paste, and the country line,
         // the needed badges and the bearings have to follow it.
@@ -377,6 +401,7 @@ public:
             if (!best.isEmpty()) {
                 m_call->setText(best.toUpper());
                 onCallChanged();
+                lookupCall(false);   // a spot's call arrives whole
             }
         }
     }
@@ -389,6 +414,7 @@ public:
             return;
         }
         m_call->setText(call.toUpper());
+        lookupCall(false);   // likewise whole
         if (m_grid->text().isEmpty()) m_grid->setText(grid.toUpper());
         if (!mode.isEmpty() && !m_modeEdited) {
             m_mode->setText(mode.toUpper());
@@ -408,6 +434,11 @@ private:
         if (!g_qsoContext) return;
         for (QLineEdit* e : {m_call, m_handle, m_name, m_qth, m_grid, m_rstS, m_rstR}) {
             connect(e, &QLineEdit::textEdited, this, [this] { pushContext(); });
+        }
+        // Typing in a box the callbook filled makes it the operator's.
+        for (QLineEdit* e : {m_name, m_qth, m_grid}) {
+            connect(e, &QLineEdit::textEdited, this,
+                    [this, e] { m_fromCallbook.remove(e); });
         }
         // The form's own fills count too: the reports this window puts up by
         // default (599 on CW) are what [rst sent] has to send, without the
@@ -453,6 +484,7 @@ private:
             if (!call.isEmpty() && call != m_call->text()) {
                 m_call->setText(call);
                 onCallChanged();
+                lookupCall(false);   // it arrived whole
             }
             const auto fill = [](QLineEdit* e, const QString& v) {
                 if (!v.isEmpty() && e->text().isEmpty()) e->setText(v);
@@ -491,11 +523,21 @@ private:
             }
             return;
         }
-        if (!manual && call == m_lookedUp) {
-            return;   // one lookup per call, however the call got here
+        if (!manual) {
+            if (call == m_lookedUp) {
+                return;   // one lookup per call, however the call got here
+            }
+            // Half a call on the way to a whole one is not a question worth
+            // asking: wait until it looks like a callsign.
+            if (!callShape().match(call).hasMatch()) {
+                return;
+            }
         }
         m_lookedUp = call;
-        if (manual) m_status->setText(tr("Asking the callbook about %1...").arg(call));
+        // Say so on BOTH paths. The first lookup of a session also fetches a
+        // session key, so an answer can be seconds away, and silence while
+        // that happens reads as "it does not work".
+        m_status->setText(tr("Asking the callbook about %1...").arg(call));
         svc.lookup(call);
     }
 
@@ -509,8 +551,17 @@ private:
         if (info.prefixOnly) {
             return;   // country-level only; cty.dat already filled that line
         }
-        const auto fill = [](QLineEdit* e, const QString& v) {
-            if (!v.isEmpty() && e->text().trimmed().isEmpty()) e->setText(v);
+        // A box the operator filled is theirs and is never overwritten; one
+        // the callbook filled for a DIFFERENT call is stale and must be.
+        const auto fill = [this](QLineEdit* e, const QString& v) {
+            if (v.isEmpty()) {
+                return;
+            }
+            if (!e->text().trimmed().isEmpty() && !m_fromCallbook.contains(e)) {
+                return;   // the operator's own copy wins
+            }
+            e->setText(v);
+            m_fromCallbook.insert(e);
         };
         QString qth = info.city;
         if (!info.state.isEmpty()) {
@@ -669,6 +720,15 @@ private:
     void onCallChanged()
     {
         const QString call = m_call->text().trimmed().toUpper();
+        // Moving to a different callsign retires the last one's callbook
+        // details, so a half-typed call's answer cannot survive into the
+        // whole one. What the operator typed themselves stays.
+        if (call != m_lookedUp && !m_fromCallbook.isEmpty()) {
+            for (QLineEdit* e : m_fromCallbook) {
+                e->clear();
+            }
+            m_fromCallbook.clear();
+        }
         m_prev->setRowCount(0);
         if (call.size() < 3) {
             m_country->clear();
@@ -678,6 +738,11 @@ private:
         m_country->setText(c.known ? tr("%1  (CQ %2, ITU %3)").arg(c.name).arg(c.cqz).arg(c.ituz)
                                    : tr("Country not found in cty.dat"));
         updateBadges();
+        // NOT the callbook: that waits until the call is finished (Tab or
+        // Enter, or a call that arrives whole from a spot). Asking on every
+        // keystroke spends a round trip per character and, worse, answers
+        // for the real callsigns you pass through on the way — DL1A is a
+        // station in its own right on the way to DL1AB.
         const QList<Qso> prev = m_book->db()->prevQsos(call, 8);
         m_prev->setRowCount(int(prev.size()));
         for (int i = 0; i < prev.size(); ++i) {
@@ -755,6 +820,7 @@ private:
         m_country->clear();
         m_prev->setRowCount(0);
         m_lookedUp.clear();
+        m_fromCallbook.clear();
         m_timeEdited = false;
         m_freqEdited = false;
         m_modeEdited = false;
@@ -793,6 +859,12 @@ private:
     double m_spAz = -1.0;
     double m_lpAz = -1.0;
     QString m_lookedUp;            // the call the callbook was last asked about
+    // Boxes whose contents came from the CALLBOOK, not from the operator.
+    // Typing through one real call on the way to another (DL1A on the way to
+    // DL1AB) filled these with the wrong station's details, and "fill only
+    // empty boxes" then refused to correct them — the operator was left
+    // looking at DL1A's name under DL1AB's callsign.
+    QSet<QLineEdit*> m_fromCallbook;
     QLabel* m_status = nullptr;
     QTableWidget* m_prev = nullptr;
     QTimer* m_clock = nullptr;
