@@ -35,6 +35,8 @@ possible merge conflict when pulling from `upstream`.
 | `src/gui/MainWindow_Wiring.cpp` | `requestZeroBeatForSlice()` extracted from the VfoWidget lambda | The CW window's 0-BEAT button and the VFO box's run one implementation |
 | `src/gui/MainWindow_Menus.cpp` | Two callbacks passed to `installOrionLogbook()`: a DX-cluster spot through `m_dxCluster->sendCommand()`, and opening AetherMap | The Log QSO window's Spot and Globe buttons; both belong to the host, not the window |
 | `src/core/backends/orion/OrionCat.*` | `*CT` / `*CQ` / `*CD` and the `?CT ?CQ ?CD ?CK ?CS ?CW` queries, with a `CwRigReply` | The radio's own CW settings, which apply whatever does the keying |
+| `src/core/backends/RadioCapabilities.h` | `defaultMinDbm` / `defaultMaxDbm` on `PanAmplitudeModel` | The vertical window a receiver should open on; a span far wider than its signals crushes the trace into the bottom of the colour ramp |
+| `src/gui/MainWindow_Wiring.cpp` | `restoreClientOwnedDbmRange()` falls back to that declared window when nothing is saved | Same reason; absent, the pan opens on the widget's generic span |
 | `tests/tests.cmake` | `orion_cat_test`, `orion_spectrum_test`, `orion_rxaudio_test`, `orion_peripherals_test`, `orion_skimmer_test`, `orion_logbook_test`, `orion_upload_test` and `orion_backend_test` appended at the end | Upstream requires every test target to be declared there |
 | `tests/backend_seam_affinity_test.cpp` | `orion` added to the constructed-families list | The seam contract test covers the new backend too |
 

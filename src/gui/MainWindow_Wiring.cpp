@@ -3274,6 +3274,16 @@ void MainWindow::restoreClientOwnedDbmRange(PanadapterModel* pan, int panIndex)
     if (const auto savedRange = ClientDisplaySettings::dbmRange(
             m_radioModel.settingsScope(), panIndex, true)) {
         pan->setRange(savedRange->minDbm, savedRange->maxDbm);
+        return;
+    }
+    // AetherSDR Orion fork: nothing saved, so take the window the backend
+    // suggests for itself (FORK-NOTES.md). Without this the pan opens on
+    // the widget's generic span, which on this receiver is far wider than
+    // anything it hears — and a trace confined to the bottom of the axis is
+    // also confined to the bottom of the colour ramp.
+    const auto amplitude = m_radioModel.backendCapabilities().panAmplitude;
+    if (amplitude && amplitude->defaultMinDbm && amplitude->defaultMaxDbm) {
+        pan->setRange(*amplitude->defaultMinDbm, *amplitude->defaultMaxDbm);
     }
 }
 

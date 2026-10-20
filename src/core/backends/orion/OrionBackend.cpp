@@ -282,6 +282,13 @@ RadioCapabilities OrionBackend::capabilities() const
     // The operator's dB range is remembered here, per radio and pan: the radio
     // echoes none of it.
     amplitude.clientPersistsDbmRange = true;
+    // The window this receiver should open on: about 60 dB, the noise floor
+    // sitting near its bottom. Measured on the air at this station, a 160 m
+    // or 40 m band fills it — strong signals reach the top of the colour
+    // ramp instead of everything crowding into its dark end, which is what
+    // made the panadapter look flat and lifeless against the console's.
+    amplitude.defaultMinDbm = -118.0f;
+    amplitude.defaultMaxDbm = -58.0f;
     c.panAmplitude = amplitude;
     c.hasDaxStreams = false;
     c.hasDdcPanEdgeRolloff = false;
