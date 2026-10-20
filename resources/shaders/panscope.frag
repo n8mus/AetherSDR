@@ -103,8 +103,11 @@ void main()
             // its own peak instead, as this did, gives a per-column vertical
             // gradient: the same ramp, a completely different picture.
             float yT = clamp(1.0 - py / max(hPx, 1.0), 0.0, 1.0);
-            float yTc = (floorT > 0.0) ? clamp((yT - floorT) / (1.0 - floorT), 0.0, 1.0) : yT;
-            rgb = heatColor(yTc);
+            // Gamma-compressed, the Orion console's kFillGamma: without it
+            // the warm end of the ramp arrives only at the very top of the
+            // axis, and a band of ordinary signals draws entirely in the
+            // ramp's dark third. 0.6 pulls the warm colours partway down.
+            rgb = heatColor(pow(yT, 0.6));
             a = mix(fa * 0.3, fa, g);
         } else {
             // Solid: bright at the line, darker + fainter toward the base,

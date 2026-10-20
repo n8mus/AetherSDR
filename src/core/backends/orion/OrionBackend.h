@@ -234,6 +234,7 @@ private:
     void startSkimmer(const QVariantMap& params);
     void updateSkimmerGate();
     [[nodiscard]] QVariantMap rotorState() const;
+    [[nodiscard]] QVariantMap sdrGainState() const;
     [[nodiscard]] QVariantMap cwRigState() const;
     [[nodiscard]] QVariantMap skimmerState() const;
     void openTxAudio(const QVariantMap& params);
@@ -333,6 +334,8 @@ private:
     int m_cwRigKeyerOn = -1;
     int m_cwRigKeyerWpm = -1;
     int m_cwRigKeyerWeight = -1;
+    int m_sdrGainReductionDb = 40;   // the RSP2's own gRdB (20..59)
+    int m_sdrLnaState = 6;           // and its LNA step (0..8)
     int m_panAverage = 0;        // FFT AVG, held until the RSP2 starts
     int m_panFps = 25;           // FFT FPS, likewise
     bool m_panWeightedAverage = false;

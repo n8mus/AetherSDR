@@ -208,6 +208,35 @@ void Rsp2Receiver::setTxGuard(bool on)
     }
 }
 
+void Rsp2Receiver::setGain(int gainReductionDb, int lnaState)
+{
+    const int gr = std::clamp(gainReductionDb, 20, 59);
+    const int lna = std::clamp(lnaState, 0, 8);
+    if (gr == m_settings.gainReductionDb && lna == m_settings.lnaState) {
+        return;
+    }
+    m_settings.gainReductionDb = gr;
+    m_settings.lnaState = lna;
+    if (!m_running || !m_params) {
+        return;   // applied when the stream starts
+    }
+    if (m_txGuard) {
+        return;   // the guard owns the gain while the radio transmits
+    }
+    auto& gain = m_params->rxChannelA->tunerParams.gain;
+    gain.gRdB = gr;
+    gain.LNAstate = static_cast<unsigned char>(lna);
+    const sdrplay_api_ErrT e = m_api->update(m_device.dev, m_device.tuner,
+                                             sdrplay_api_Update_Tuner_Gr,
+                                             sdrplay_api_Update_Ext1_None);
+    if (e != sdrplay_api_Success) {
+        qCWarning(lcOrion) << "RSP2: gain" << gr << "/" << lna
+                           << "failed:" << m_api->errorText(e);
+        return;
+    }
+    qCInfo(lcOrion) << "RSP2: gain reduction" << gr << "dB, LNA state" << lna;
+}
+
 void Rsp2Receiver::setView(const spectrum::View& view, int points)
 {
     std::lock_guard lock(m_viewLock);

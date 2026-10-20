@@ -105,6 +105,37 @@ QWidget* buildOrionSetupPage(RadioModel* model)
     audioLay->addLayout(audioForm);
     vbox->addWidget(audioBox);
 
+    // ---- The RSP2's own gain ---------------------------------------------------
+    // The gain the PANADAPTER sees. The pan's RFG control drives the
+    // RADIO's receiver, which is a different thing entirely, so until now
+    // nothing in the UI could change what the SDR itself was doing.
+    auto* gainBox = new QGroupBox(QObject::tr("Panadapter receiver gain (RSP2)"));
+    auto* gainLay = new QVBoxLayout(gainBox);
+    auto* gainIntro = new QLabel(QObject::tr(
+        "What the SDRplay's own front end does, which is what the panadapter and the "
+        "skimmer see. The RFG control above the panadapter drives the RADIO's receiver "
+        "instead. Lower gain reduction means more gain; if strong broadcast stations "
+        "lift the whole noise floor, raise it."));
+    gainIntro->setWordWrap(true);
+    gainLay->addWidget(gainIntro);
+    auto* gainForm = new QFormLayout;
+    auto* grSpin = new QSpinBox;
+    grSpin->setObjectName(QStringLiteral("orionSdrGainReduction"));
+    grSpin->setRange(20, 59);
+    grSpin->setSuffix(QObject::tr(" dB"));
+    grSpin->setToolTip(QObject::tr("Tuner gain REDUCTION: higher is less gain."));
+    auto* lnaSpin = new QSpinBox;
+    lnaSpin->setObjectName(QStringLiteral("orionSdrLnaState"));
+    lnaSpin->setRange(0, 8);
+    lnaSpin->setToolTip(QObject::tr("LNA step: higher is more attenuation ahead of the mixer."));
+    gainForm->addRow(QObject::tr("Gain reduction:"), grSpin);
+    gainForm->addRow(QObject::tr("LNA state:"), lnaSpin);
+    gainLay->addLayout(gainForm);
+    auto* gainNote = new QLabel;
+    gainNote->setWordWrap(true);
+    gainLay->addWidget(gainNote);
+    vbox->addWidget(gainBox);
+
     // ---- CW skimmer -----------------------------------------------------------
     auto* skimBox = new QGroupBox(QObject::tr("CW skimmer"));
     auto* skimLay = new QVBoxLayout(skimBox);
@@ -179,6 +210,28 @@ QWidget* buildOrionSetupPage(RadioModel* model)
 
     QPointer<QWidget> pagePtr(page);
 
+    const auto fillGain = [=](const QVariantMap& m) {
+        {
+            const QSignalBlocker b1(grSpin), b2(lnaSpin);
+            grSpin->setValue(m.value(QStringLiteral("gainReductionDb"), 40).toInt());
+            lnaSpin->setValue(m.value(QStringLiteral("lnaState"), 6).toInt());
+        }
+        gainNote->setText(m.value(QStringLiteral("available")).toBool()
+                              ? QObject::tr("Applied to the receiver as you change it.")
+                              : QObject::tr("Stored; it reaches the receiver at the next "
+                                            "connect."));
+    };
+    const auto sendGain = [=] {
+        if (!orionConnected(model)) return;
+        QVariantMap fields;
+        fields.insert(QStringLiteral("gainReductionDb"), grSpin->value());
+        fields.insert(QStringLiteral("lnaState"), lnaSpin->value());
+        model->invokeBackendExtension(QStringLiteral("orion"),
+                                      QStringLiteral("sdr.gain.set"), 0, fields);
+    };
+    QObject::connect(grSpin, &QSpinBox::valueChanged, page, [=](int) { sendGain(); });
+    QObject::connect(lnaSpin, &QSpinBox::valueChanged, page, [=](int) { sendGain(); });
+
     const auto fillSkimmer = [=](const QVariantMap& m) {
         {
             const QSignalBlocker b1(skimEnabled), b2(skimCwOnly), b3(skimBayes),
@@ -209,6 +262,7 @@ QWidget* buildOrionSetupPage(RadioModel* model)
         notConnected->setVisible(!on);
         audioBox->setEnabled(on);
         skimBox->setEnabled(on);
+        gainBox->setEnabled(on);
         if (!on || !pagePtr) {
             return;
         }
@@ -222,6 +276,7 @@ QWidget* buildOrionSetupPage(RadioModel* model)
             }
         });
         askOrion(model, page, QStringLiteral("skimmer.get"), fillSkimmer);
+        askOrion(model, page, QStringLiteral("sdr.gain.get"), fillGain);
     };
 
     for (std::size_t i = 0; i < keys.size(); ++i) {

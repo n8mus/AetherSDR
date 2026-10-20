@@ -1157,9 +1157,19 @@ void OrionBackend::startSdr(const QVariantMap& params)
         return;
     }
     Rsp2Receiver::Settings settings;
+    // The operator's own gain, remembered between sessions, unless the
+    // connection explicitly asks for one.
+    m_sdrGainReductionDb = AppSettings::instance()
+                               .value(QStringLiteral("Orion/sdr/gRdB"), m_sdrGainReductionDb)
+                               .toInt();
+    m_sdrLnaState = AppSettings::instance()
+                        .value(QStringLiteral("Orion/sdr/lna"), m_sdrLnaState)
+                        .toInt();
     settings.gainReductionDb = params.value(QStringLiteral("orion.sdr.gRdB"),
-                                            settings.gainReductionDb).toInt();
-    settings.lnaState = params.value(QStringLiteral("orion.sdr.lna"), settings.lnaState).toInt();
+                                            m_sdrGainReductionDb).toInt();
+    settings.lnaState = params.value(QStringLiteral("orion.sdr.lna"), m_sdrLnaState).toInt();
+    m_sdrGainReductionDb = settings.gainReductionDb;
+    m_sdrLnaState = settings.lnaState;
     settings.antennaB = params.value(QStringLiteral("orion.sdr.antenna")).toString()
                         == QLatin1String("B");
 
@@ -1584,6 +1594,20 @@ QVariantMap OrionBackend::cwRigState() const
     m.insert(QStringLiteral("keyerOn"), m_cwRigKeyerOn);
     m.insert(QStringLiteral("keyerWpm"), m_cwRigKeyerWpm);
     m.insert(QStringLiteral("keyerWeight"), m_cwRigKeyerWeight);
+    return m;
+}
+
+// The RSP2's front-end gain, and whether a receiver is there to take it.
+QVariantMap OrionBackend::sdrGainState() const
+{
+    QVariantMap m;
+    m.insert(QStringLiteral("gainReductionDb"), m_sdrGainReductionDb);
+    m.insert(QStringLiteral("lnaState"), m_sdrLnaState);
+#ifdef AETHER_ORION_SDRPLAY
+    m.insert(QStringLiteral("available"), m_sdr != nullptr);
+#else
+    m.insert(QStringLiteral("available"), false);
+#endif
     return m;
 }
 
@@ -2811,6 +2835,42 @@ void OrionBackend::invokeExtension(const QString& ns, const QString& verb,
         emit extensionStatus(QStringLiteral("orion"), QStringLiteral("cw.rig"), cwRigState());
         if (requestId != 0) {
             emit extensionResult(requestId, cwRigState());
+        }
+        return;
+    }
+
+    // The RSP2's own front-end gain — the gain the PANADAPTER sees. The
+    // pan's RFG control drives the RADIO's receiver, which is a different
+    // thing, so until now nothing in the UI could change what the SDR
+    // itself was doing. Persisted, so it survives the next connect.
+    if (ns == QLatin1String("orion") && verb == QLatin1String("sdr.gain.get")) {
+        emit extensionStatus(QStringLiteral("orion"), QStringLiteral("sdr.gain"), sdrGainState());
+        if (requestId != 0) {
+            emit extensionResult(requestId, sdrGainState());
+        }
+        return;
+    }
+    if (ns == QLatin1String("orion") && verb == QLatin1String("sdr.gain.set")) {
+        const QVariantMap m = arg.toMap();
+        auto& settings = AppSettings::instance();
+        if (m.contains(QStringLiteral("gainReductionDb"))) {
+            m_sdrGainReductionDb =
+                std::clamp(m.value(QStringLiteral("gainReductionDb")).toInt(), 20, 59);
+            settings.setValue(QStringLiteral("Orion/sdr/gRdB"), m_sdrGainReductionDb);
+        }
+        if (m.contains(QStringLiteral("lnaState"))) {
+            m_sdrLnaState = std::clamp(m.value(QStringLiteral("lnaState")).toInt(), 0, 8);
+            settings.setValue(QStringLiteral("Orion/sdr/lna"), m_sdrLnaState);
+        }
+        settings.save();
+#ifdef AETHER_ORION_SDRPLAY
+        if (m_sdr) {
+            m_sdr->setGain(m_sdrGainReductionDb, m_sdrLnaState);
+        }
+#endif
+        emit extensionStatus(QStringLiteral("orion"), QStringLiteral("sdr.gain"), sdrGainState());
+        if (requestId != 0) {
+            emit extensionResult(requestId, sdrGainState());
         }
         return;
     }

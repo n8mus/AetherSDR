@@ -82,6 +82,14 @@ public:
     // so the RSP2's front end is not driven into overload by our own signal;
     // off restores the operator's gain. Owner thread.
     void setTxGuard(bool on);
+    // The receiver's own front-end gain, live. gRdB is the tuner's gain
+    // REDUCTION in dB (20..59: higher is less gain) and lnaState selects the
+    // LNA step (0..8). This is the gain the PANADAPTER sees; the pan's RFG
+    // control drives the radio's receiver, which is a different thing
+    // entirely. The level offset follows it, so the dBm scale stays honest.
+    void setGain(int gainReductionDb, int lnaState);
+    [[nodiscard]] int gainReductionDb() const { return m_settings.gainReductionDb; }
+    [[nodiscard]] int lnaState() const { return m_settings.lnaState; }
 
     void setLo(qint64 loHz);
     [[nodiscard]] qint64 lo() const { return m_requestedLo; }

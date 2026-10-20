@@ -16241,11 +16241,12 @@ void SpectrumWidget::drawSpectrum(QPainter& p, const QRect& r)
                 bot = heatColor(0.06f);
                 bot.setAlphaF(swFillAlpha);
             }
-            // Full-height gradient so every column shares the same bands.
+            // Full-height gradient so every column shares the same bands,
+            // gamma-compressed as the console does it (see the shader).
             QLinearGradient grad(0, r.top(), 0, bottom);
             for (int k = 0; k <= 8; ++k) {
                 const float f = static_cast<float>(k) / 8.0f;
-                QColor c = heatColor(1.0f - f);
+                QColor c = heatColor(std::pow(1.0f - f, 0.6f));
                 c.setAlphaF(swFillAlpha * (k == 0
                                                ? AetherSDR::FftHeatMap::kTopAlphaScale
                                                : 1.0f));
