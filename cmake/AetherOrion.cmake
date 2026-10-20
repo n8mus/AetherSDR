@@ -111,7 +111,14 @@ else()
         src/gui/orion/OrionCwWindow.cpp
         src/gui/orion/OrionCwWindow.h
         src/gui/orion/OrionRotorApplet.cpp
-        src/gui/orion/OrionRotorApplet.h)
+        src/gui/orion/OrionRotorApplet.h
+        src/gui/orion/OrionBrowserGlobe.cpp
+        src/gui/orion/OrionBrowserGlobe.h)
+    # The globe's own assets (globe.gl, the NASA blue-marble texture and the
+    # country outlines), so the page works with no network at all. Only
+    # compiled into the fork's build; see THIRD_PARTY_LICENSES.
+    qt_add_resources(ORION_GLOBE_RESOURCES resources/orion-globe.qrc)
+    target_sources(AetherSDR PRIVATE ${ORION_GLOBE_RESOURCES})
 
     # RSP2 panadapter and receive audio (steps 2-3). Needs the SDRplay API HEADERS from the
     # operator's install and fftw3f. The library itself is dlopen()ed at run

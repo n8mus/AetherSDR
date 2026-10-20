@@ -6,6 +6,7 @@
 #include <QUrl>
 #include <QLocale>
 #include "core/MaidenheadLocator.h"
+#include "gui/orion/OrionBrowserGlobe.h"
 #include "core/CtyDatParser.h"
 #include "core/backends/orion/log/LogbookIndex.h"
 #include "core/CallsignInfo.h"
@@ -666,7 +667,10 @@ private:
         m_status->setText(tr("Rotor: turning to %1\u00b0.").arg(qRound(degrees)));
     }
 
-    // Him on AetherSDR's own map, with the path from home.
+    // The console's browser globe, ported whole: both stations, the
+    // country outlines and the great-circle path between them, in the
+    // operator's own browser. The page carries its own assets, so it works
+    // with no network at all.
     void showOnGlobe()
     {
         double myLat = 0, myLon = 0, dxLat = 0, dxLon = 0;
@@ -675,18 +679,30 @@ private:
                                  "country from cty.dat is needed."));
             return;
         }
-        const QString call = m_call->text().trimmed().toUpper();
-        if (myLatLon(myLat, myLon)) {
-            const double km = MaidenheadLocator::distanceKm(myLat, myLon, dxLat, dxLon);
-            const double az = MaidenheadLocator::bearingDeg(myLat, myLon, dxLat, dxLon);
-            m_status->setText(tr("%1: %2\u00b0, %L3 km \u2014 opening the map.")
-                                  .arg(call)
-                                  .arg(qRound(az))
-                                  .arg(qRound(km)));
-        } else {
-            m_status->setText(tr("%1 \u2014 opening the map.").arg(call));
+        if (!myLatLon(myLat, myLon)) {
+            m_status->setText(tr("Set your own grid in Radio Setup \u2192 Orion first \u2014 "
+                                 "the globe draws the path from it."));
+            return;
         }
-        emit mapRequested(dxLat, dxLon, call);
+        const QString call = m_call->text().trimmed().toUpper();
+        const double km = MaidenheadLocator::distanceKm(myLat, myLon, dxLat, dxLon);
+        const double az = MaidenheadLocator::bearingDeg(myLat, myLon, dxLat, dxLon);
+        // Miles where the operator's locale measures in miles, as the
+        // console does it.
+        const bool miles = QLocale().measurementSystem() != QLocale::MetricSystem;
+        const QString dist = miles ? tr("%L1 mi").arg(qRound(km * 0.621371))
+                                   : tr("%L1 km").arg(qRound(km));
+        auto& settings = AppSettings::instance();
+        orion::BrowserGlobe::show(
+            myLat, myLon,
+            settings.value(QStringLiteral("StationCallsign")).toString().trimmed().toUpper(),
+            settings.value(QStringLiteral("OrionCw/myGrid")).toString().trimmed().toUpper(),
+            dxLat, dxLon, call, m_grid->text().trimmed().toUpper(), dist,
+            static_cast<int>(std::lround(az)), m_country->text());
+        m_status->setText(tr("%1: %2\u00b0, %3 \u2014 globe opened in your browser.")
+                              .arg(call)
+                              .arg(qRound(az))
+                              .arg(dist));
     }
 
     // The call to the cluster this station is connected to.

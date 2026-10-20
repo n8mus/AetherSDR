@@ -61,6 +61,9 @@ New files that upstream does not have (no merge risk):
 - `src/core/backends/orion/OrionCwRxBackend.cpp/.h` (the console's CW
   readers as AetherSDR `CwRxBackend`s, over the skimmer's `skim::CwDecoder`)
 - `src/gui/orion/OrionRotorApplet.cpp/.h` (the DCU-3 rotor tile)
+- `src/gui/orion/OrionBrowserGlobe.cpp/.h` and `resources/orion-globe/`
+  (the console's browser globe, ported whole, with its own assets so the
+  page needs no network; see THIRD_PARTY_LICENSES 32 and 33)
 - `src/core/backends/orion/CwMacros.cpp/.h` (the console's plain-language CW
   macro vocabulary, ported: namespace and include paths only)
 - `src/core/backends/orion/log/QsoContext.h` (the console's shared

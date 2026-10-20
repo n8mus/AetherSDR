@@ -1,0 +1,5 @@
+<RCC><qresource prefix="/orion-globe">
+<file alias="globe.gl.min.js">orion-globe/globe.gl.min.js</file>
+<file alias="countries.json">orion-globe/countries.json</file>
+<file alias="earth-blue-marble.jpg">orion-globe/earth-blue-marble.jpg</file>
+</qresource></RCC>

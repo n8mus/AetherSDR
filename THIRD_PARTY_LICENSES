@@ -766,3 +766,28 @@ license text is in third_party/littlefs/LICENSE.md.
              Copyright (c) 2017, Arm Limited.
   License:   BSD-3-Clause
   Source:    https://github.com/littlefs-project/littlefs
+
+
+32. globe.gl — the Orion fork's "show this station on a globe" page
+-------------------------------------------------------------------------------
+Bundled at resources/orion-globe/globe.gl.min.js (v2.46.2, three.js inside).
+Compiled into the N8EM Orion fork only (cmake/AetherOrion.cmake), and used
+only by the Log QSO window's Globe button, which writes a local page and
+hands it to the operator's browser. Carrying it means the globe works with
+no network access at all.
+
+  Copyright: Copyright (c) 2018 Vasco Asturiano
+  License:   MIT
+  Source:    https://github.com/vasturiano/globe.gl
+
+
+33. NASA Blue Marble surface texture — the same globe page
+-------------------------------------------------------------------------------
+Bundled at resources/orion-globe/earth-blue-marble.jpg (4096x2048), as
+shipped in the three-globe example assets, and embedded in the generated
+page as a data: URI. Country outlines in resources/orion-globe/
+countries.json come from the same place.
+
+  Copyright: NASA imagery, not subject to copyright in the United States
+  License:   Public domain (NASA media usage guidelines)
+  Source:    https://github.com/vasturiano/three-globe (example assets)
