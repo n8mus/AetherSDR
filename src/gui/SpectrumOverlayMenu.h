@@ -76,15 +76,6 @@ public:
     void setTopLimit(int px) { m_topLimit = px; }
 
     void syncPanProcessingSettings(int avg, int fps, bool weightedAvg);
-    // AetherSDR Orion fork: reflect the trace-follows-scheme state without
-    // emitting, and grey the two manual colour buttons while it is on.
-    void syncTraceFollowsScheme(bool on);
-    // AetherSDR Orion fork: reflect a Black Level set by the waterfall's
-    // left-edge drag strip, without emitting back at the widget.
-    void syncWfBlackLevel(int level);
-    // AetherSDR Orion fork: the same, for the auto-black offset the one
-    // slider shows while auto-black is on.
-    void syncWfAutoBlackOffset(int offset);
     // AetherSDR Orion fork: the WF AVG row, shown only on a backend that
     // averages its waterfall copy separately (backendPanWaterfallAveraging).
     void setWaterfallAverageAvailable(bool available);
@@ -193,6 +184,9 @@ public:
     void setLoopState(bool loopA, bool loopB);
     void syncNoiseFloorPosition(int pos);
     void syncDssFloorDepth(int dB);
+    // AetherSDR Orion fork: put the three 3D sliders on given values without
+    // emitting (picking 3D starts it from its defaults).
+    void syncDisplay3D(int dssFloorDepth, int dssGain, int dssRowSpan);
 
     // Populate XVTR band sub-panel
     struct XvtrBand { QString name; double rfFreqMhz; QString stackKey; };
@@ -250,8 +244,6 @@ signals:
     // *RightClicked) were removed with the overlay's DSP panel.
     // Display sub-panel signals
     void fftAverageChanged(int frames);
-    // AetherSDR Orion fork: trace colours follow the waterfall scheme.
-    void traceFollowsSchemeChanged(bool on);
     // AetherSDR Orion fork: the waterfall's own average (WF AVG row).
     void wfAverageChanged(int average);
     void fftFpsChanged(int fps);
@@ -505,7 +497,6 @@ private:
     QSlider*     m_lineWidthSlider{nullptr};
     QLabel*      m_lineWidthLabel{nullptr};
     QPushButton* m_weightedAvgBtn{nullptr};
-    QPushButton* m_matchSchemeBtn{nullptr};
     QSlider*     m_gainSlider{nullptr};
     QLabel*      m_gainTitleLabel{nullptr};
     QLabel*      m_gainLabel{nullptr};

@@ -24,20 +24,10 @@ layout(binding = 1) uniform sampler2D columns;
 layout(std140, binding = 0) uniform U {
     vec4 plot;       // wPx, hPx, columnCount, hasData
     vec4 stroke;     // coreHalfWidthPx, featherPx, coreAlpha, featherAlpha
-    vec4 fillP;      // fillAlpha, heatMap (0/1), colourFloor, pad
+    vec4 fillP;      // fillAlpha, heatMap (0/1), pad, pad
     vec4 fillColor;  // straight rgb, a unused
     vec4 darkColor;  // straight rgb (solid-mode base blend), a unused
     vec4 lineColor;  // straight rgb — trace stroke, independent of fill (#4239); a unused
-    // AetherSDR Orion fork: the heat ramp, sampled from the operator's
-    // waterfall colour scheme at t = 0, 1/3, 2/3, 1. The ramp used to be
-    // hardcoded here, so picking a scheme recoloured the waterfall and left
-    // the trace blue-green. With "Match Scheme" off these carry the legacy
-    // blue → cyan → green → red stops, so nothing changes for anyone who
-    // wants that.
-    vec4 ramp0;
-    vec4 ramp1;
-    vec4 ramp2;
-    vec4 ramp3;
 };
 
 // Straight color + coverage → premultiplied.
@@ -53,16 +43,17 @@ vec4 over(vec4 dst, vec4 src)
     return src + dst * (1.0 - src.a);
 }
 
-// Four-stop heat ramp, its stops supplied by the CPU (see the U block).
+// Same 4-stop heat ramp the vertex bake used (blue → cyan → green → red).
 vec3 heatColor(float t)
 {
-    t = clamp(t, 0.0, 1.0);
-    if (t < 0.3333333) {
-        return mix(ramp0.rgb, ramp1.rgb, t * 3.0);
-    } else if (t < 0.6666667) {
-        return mix(ramp1.rgb, ramp2.rgb, (t - 0.3333333) * 3.0);
+    if (t < 0.25) {
+        return vec3(0.0, t / 0.25, 1.0);
+    } else if (t < 0.5) {
+        return vec3(0.0, 1.0, 1.0 - (t - 0.25) / 0.25);
+    } else if (t < 0.75) {
+        return vec3((t - 0.5) / 0.25, 1.0, 0.0);
     }
-    return mix(ramp2.rgb, ramp3.rgb, (t - 0.6666667) * 3.0);
+    return vec3(1.0, 1.0 - (t - 0.75) / 0.25, 0.0);
 }
 
 void main()
@@ -82,13 +73,6 @@ void main()
     bool heat = fillP.y > 0.5;
     float fa = fillP.x;
 
-    // AetherSDR Orion fork: the colour ramp is spent on the range that holds
-    // signals. The noise floor usually sits in the bottom tenth of the
-    // window, so colouring across the whole window left every ordinary
-    // signal in the ramp's first third. fillP.z is where the floor sits.
-    float floorT = clamp(fillP.z, 0.0, 0.98);
-    float tc = (floorT > 0.0) ? clamp((t - floorT) / (1.0 - floorT), 0.0, 1.0) : t;
-
     // ── Fill under the trace ────────────────────────────────────────────
     if (fa > 0.0 && py >= yTrace) {
         float g = (hPx > yTrace)
@@ -96,18 +80,8 @@ void main()
         vec3 rgb;
         float a;
         if (heat) {
-            // AetherSDR Orion fork: the fill is keyed to the dB AXIS, so the
-            // colour bands run HORIZONTALLY and every signal climbs through
-            // the same ramp as it rises — the Orion console's panadapter
-            // (fork rule 2 allows its look here). Colouring each column by
-            // its own peak instead, as this did, gives a per-column vertical
-            // gradient: the same ramp, a completely different picture.
-            float yT = clamp(1.0 - py / max(hPx, 1.0), 0.0, 1.0);
-            // Gamma-compressed, the Orion console's kFillGamma: without it
-            // the warm end of the ramp arrives only at the very top of the
-            // axis, and a band of ordinary signals draws entirely in the
-            // ramp's dark third. 0.6 pulls the warm colours partway down.
-            rgb = heatColor(pow(yT, 0.6));
+            // Heat: trace color at the line fading to dark blue at the base.
+            rgb = mix(heatColor(t), vec3(0.0, 0.0, 0.3), g);
             a = mix(fa * 0.3, fa, g);
         } else {
             // Solid: bright at the line, darker + fainter toward the base,
@@ -155,7 +129,7 @@ void main()
         // out to halfWidth-1, a 1 px fade to halfWidth; the feather adds one
         // more 1 px annulus at low alpha. The first cut's fixed ±0.75 px
         // smoothstep band read as a soft "blurred" stroke at 1x DPI.
-        vec3 lineRgb = heat ? heatColor(tc) : lineColor.rgb;
+        vec3 lineRgb = heat ? heatColor(t) : lineColor.rgb;
         float featherHalf = coreHalf + stroke.y;
         float covF = 1.0 - smoothstep(coreHalf, featherHalf, d);
         outc = over(outc, pm(lineRgb, stroke.w, covF));

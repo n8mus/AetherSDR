@@ -881,6 +881,9 @@ private:
     // Client-side CW zero-beat for one slice; the VFO box's button and the
     // fork's CW window both call it.
     void requestZeroBeatForSlice(int sliceId);
+    // AetherSDR Orion fork: what a self-averaging backend is asked for in
+    // each display mode (RadioModel::setPanBackendAverageOverride).
+    void syncBackendAverageToRenderMode(const QString& panId, const SpectrumWidget* sw);
     void wirePanDisplayStatus(PanadapterApplet* applet, PanadapterModel* pan);
     void reassertUnmutedSliceAudioForPan(const QString& panId);
     void onMuteAllSlicesToggle();

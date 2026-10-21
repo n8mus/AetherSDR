@@ -3274,16 +3274,6 @@ void MainWindow::restoreClientOwnedDbmRange(PanadapterModel* pan, int panIndex)
     if (const auto savedRange = ClientDisplaySettings::dbmRange(
             m_radioModel.settingsScope(), panIndex, true)) {
         pan->setRange(savedRange->minDbm, savedRange->maxDbm);
-        return;
-    }
-    // AetherSDR Orion fork: nothing saved, so take the window the backend
-    // suggests for itself (FORK-NOTES.md). Without this the pan opens on
-    // the widget's generic span, which on this receiver is far wider than
-    // anything it hears — and a trace confined to the bottom of the axis is
-    // also confined to the bottom of the colour ramp.
-    const auto amplitude = m_radioModel.backendCapabilities().panAmplitude;
-    if (amplitude && amplitude->defaultMinDbm && amplitude->defaultMaxDbm) {
-        pan->setRange(*amplitude->defaultMinDbm, *amplitude->defaultMaxDbm);
     }
 }
 
@@ -3340,6 +3330,19 @@ void MainWindow::requestZeroBeatForSlice(int sliceId)
         double offsetMhz = sign * (detected - configured) / 1.0e6;
         applyTuneRequest(slice, slice->frequency() + offsetMhz,
                          TuneIntent::IncrementalTune, "zero-beat");
+}
+
+void MainWindow::syncBackendAverageToRenderMode(const QString& panId,
+                                                const SpectrumWidget* sw)
+{
+    if (!sw) {
+        return;
+    }
+    // Only the Orion Console mode wants anything but the operator's FFT AVG:
+    // it averages its own trace, so the backend hands it raw frames. 2D and
+    // 3D are fed exactly as upstream feeds them.
+    const bool orion = sw->spectrumRenderMode() == static_cast<int>(SpectrumRenderMode::ModeOrion);
+    m_radioModel.setPanBackendAverageOverride(panId, orion ? std::optional<int>(0) : std::nullopt);
 }
 
 void MainWindow::wirePanDisplayStatus(PanadapterApplet* applet,
@@ -3461,6 +3464,7 @@ void MainWindow::wirePanDisplayStatus(PanadapterApplet* applet,
         // Same for the averaging controls: without these the backend runs at
         // its built-in averaging until the operator touches a slider, whatever
         // the saved setting says.
+        syncBackendAverageToRenderMode(panId, sw);
         m_radioModel.requestPanAverage(panId, sw->fftAverage());
         m_radioModel.requestLocalPanWeightedAverage(panId, sw->fftWeightedAvg());
     }
@@ -3578,6 +3582,7 @@ int MainWindow::cloneDisplaySettingsToAllPans(PanadapterApplet* source)
         // requestPanAverage()/requestPanDisplayRates() reject an empty id;
         // weighted-average still needs this guard on its raw command path.
         if (!targetPanId.isEmpty()) {
+            syncBackendAverageToRenderMode(targetPanId, dst);
             if (m_radioModel.requestPanAverage(targetPanId, src->fftAverage())) {
                 scheduleClientFftAverageSave(dst->panIndex(), src->fftAverage(), src->fftWeightedAvg());
             }
@@ -4907,36 +4912,32 @@ void MainWindow::wirePanadapter(PanadapterApplet* applet)
     connect(menu, &SpectrumOverlayMenu::wfColorSchemeChanged,
             sw, &SpectrumWidget::setWfColorScheme,
             Qt::UniqueConnection);
-    // AetherSDR Orion fork: the trace in the waterfall's own colours
-    // (FORK-NOTES.md). Seeded from the widget, which decides the default
-    // from whether the operator ever picked trace colours by hand.
-    connect(menu, &SpectrumOverlayMenu::traceFollowsSchemeChanged,
-            sw, &SpectrumWidget::setTraceFollowsScheme,
-            Qt::UniqueConnection);
-    connect(sw, &SpectrumWidget::traceFollowsSchemeResolved,
-            menu, &SpectrumOverlayMenu::syncTraceFollowsScheme,
-            Qt::UniqueConnection);
-    menu->syncTraceFollowsScheme(sw->traceFollowsScheme());
-    // The waterfall's left-edge strip and the Black Level slider are two
-    // views of one number: dragging the strip moves the slider AND stores the
-    // level, exactly as moving the slider does, so it comes back on restart.
-    // Qt cannot dedupe a functor connection, so drop any wiring from an
-    // earlier call on this pan before making this one.
-    disconnect(sw, &SpectrumWidget::wfBlackLevelEdited, this, nullptr);
-    connect(sw, &SpectrumWidget::wfBlackLevelEdited, this,
-            [this, applet, menu](int v) {
-        if (kiwiSdrPanDisplaysKiwi(applet->panId())) {
-            return;
-        }
-        menu->syncWfBlackLevel(v);
-        m_radioModel.setWaterfallBlackLevelFor(applet->panId(), v);
-    });
-    connect(sw, &SpectrumWidget::wfAutoBlackOffsetEdited, menu,
-            &SpectrumOverlayMenu::syncWfAutoBlackOffset, Qt::UniqueConnection);
-    sw->applySchemeToTrace();
     connect(menu, &SpectrumOverlayMenu::spectrumRenderModeChanged,
             sw, &SpectrumWidget::setSpectrumRenderMode,
             Qt::UniqueConnection);
+    // AetherSDR Orion fork: 3D gets raw frames from a self-averaging backend
+    // (FORK-NOTES.md). Connected after the widget's own slot, so it reads the
+    // mode the widget settled on.
+    disconnect(menu, &SpectrumOverlayMenu::spectrumRenderModeChanged, this, nullptr);
+    connect(menu, &SpectrumOverlayMenu::spectrumRenderModeChanged, this,
+            [this, applet, sw, menu](int mode) {
+        syncBackendAverageToRenderMode(applet->panId(), sw);
+        // Picking 3D starts it as a fresh install would, the operator's ask:
+        // upstream's 3D defaults (floor 6, gain 70, span 100) and FFT AVG at
+        // 0, through the same controls, so whatever the sliders drifted to
+        // while 3D was out of sight is not what 3D opens on. FFT AVG stays
+        // the operator's to raise afterwards.
+        if (mode == static_cast<int>(SpectrumRenderMode::Mode3D)) {
+            sw->setDssFloorDepth(6);
+            sw->resetDisplay3DSettings();
+            menu->syncDisplay3D(6, 70, 100);
+            sw->setFftAverage(0);
+            if (m_radioModel.requestPanAverage(applet->panId(), 0)) {
+                scheduleClientFftAverageSave(sw->panIndex(), 0, sw->fftWeightedAvg());
+            }
+            menu->syncPanProcessingSettings(0, sw->fftFps(), sw->fftWeightedAvg());
+        }
+    });
     connect(menu, &SpectrumOverlayMenu::dssFloorDepthChanged,
             sw, &SpectrumWidget::setDssFloorDepth,
             Qt::UniqueConnection);

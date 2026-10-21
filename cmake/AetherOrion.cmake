@@ -113,7 +113,9 @@ else()
         src/gui/orion/OrionRotorApplet.cpp
         src/gui/orion/OrionRotorApplet.h
         src/gui/orion/OrionBrowserGlobe.cpp
-        src/gui/orion/OrionBrowserGlobe.h)
+        src/gui/orion/OrionBrowserGlobe.h
+        src/gui/orion/OrionPanRenderer.cpp
+        src/gui/orion/OrionPanRenderer.h)
     # The globe's own assets (globe.gl, the NASA blue-marble texture and the
     # country outlines), so the page works with no network at all. Only
     # compiled into the fork's build; see THIRD_PARTY_LICENSES.

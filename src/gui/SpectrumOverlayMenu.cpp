@@ -1794,17 +1794,9 @@ void SpectrumOverlayMenu::buildDisplayPanel()
         makeToggle("Heat Map", m_heatMapBtn);
         makeToggle("Grid", m_showGridBtn, true);
         makeToggle("Wt Avg", m_weightedAvgBtn);
-        // The trace in the waterfall's own colours: picking a scheme used to
-        // recolour the waterfall and leave the trace cyan.
-        makeToggle("Match Scheme", m_matchSchemeBtn, true);
         m_heatMapBtn->setObjectName("displayHeatMapBtn");
         m_showGridBtn->setObjectName("displayShowGridBtn");
         m_weightedAvgBtn->setObjectName("displayWeightedAvgBtn");
-        m_matchSchemeBtn->setObjectName("displayMatchSchemeBtn");
-        m_matchSchemeBtn->setToolTip(
-            tr("Take the trace's line and fill colours from the waterfall's colour\n"
-               "scheme, so both halves of the panadapter match. Turn it off to\n"
-               "choose the two colours yourself."));
 
         grid->addWidget(toggleRow, row, 0, 1, 4);
         ++row;
@@ -1817,11 +1809,6 @@ void SpectrumOverlayMenu::buildDisplayPanel()
         });
         connect(m_weightedAvgBtn, &QPushButton::toggled, this, [this](bool on) {
             emit fftWeightedAverageChanged(on);
-        });
-        connect(m_matchSchemeBtn, &QPushButton::toggled, this, [this](bool on) {
-            if (m_lineColorBtn) m_lineColorBtn->setEnabled(!on);
-            if (m_fillColorBtn) m_fillColorBtn->setEnabled(!on);
-            emit traceFollowsSchemeChanged(on);
         });
     }
 
@@ -2317,9 +2304,15 @@ void SpectrumOverlayMenu::buildDisplayPanel()
         applyComboStyle(m_renderModeCmb);
         m_renderModeCmb->addItem("2D Waterfall");       // SpectrumRenderMode::Mode2D
         m_renderModeCmb->addItem("3D Stacked Trace");   // SpectrumRenderMode::Mode3D
+        // AetherSDR Orion fork: the Orion console's panadapter (fork rule 2).
+        m_renderModeCmb->addItem("Orion Console");      // SpectrumRenderMode::ModeOrion
         m_renderModeCmb->setToolTip(
             "2D: FFT trace + waterfall.\n"
-            "3D: perspective stacked-trace spectrum stream.");
+            "3D: perspective stacked-trace spectrum stream.\n"
+            "Orion Console: the Orion console's trace, fill, dB scale and\n"
+            "waterfall, in the Color Scheme chosen below. Drag the left edge of\n"
+            "the spectrum to move its reference, the left edge of the waterfall\n"
+            "to move the waterfall's own.");
         grid->addWidget(m_renderModeCmb, row, 1, 1, 3);
         connect(m_renderModeCmb, QOverload<int>::of(&QComboBox::currentIndexChanged),
                 this, [this](int idx) { emit spectrumRenderModeChanged(idx); });
@@ -2885,43 +2878,6 @@ void SpectrumOverlayMenu::syncNoiseFloorPosition(int pos)
     }
 }
 
-void SpectrumOverlayMenu::syncWfBlackLevel(int level)
-{
-    if (!m_blackSlider || m_autoBlackMode != 0) {
-        return;   // in an auto mode the slider is the offset, not the level
-    }
-    const QSignalBlocker block(m_blackSlider);
-    m_blackManualValue = level;
-    m_blackSlider->setValue(level);
-    if (m_blackLabel) {
-        m_blackLabel->setText(QString::number(level));
-    }
-}
-
-void SpectrumOverlayMenu::syncWfAutoBlackOffset(int offset)
-{
-    if (!m_blackSlider || m_autoBlackMode == 0) {
-        return;   // with auto-black off the slider is the level, not the offset
-    }
-    const QSignalBlocker block(m_blackSlider);
-    m_blackAutoOffsetValue = offset;
-    m_blackSlider->setValue(offset);
-    if (m_blackLabel) {
-        m_blackLabel->setText(QString::number(offset));
-    }
-}
-
-void SpectrumOverlayMenu::syncTraceFollowsScheme(bool on)
-{
-    if (!m_matchSchemeBtn) {
-        return;
-    }
-    const QSignalBlocker block(m_matchSchemeBtn);
-    m_matchSchemeBtn->setChecked(on);
-    if (m_lineColorBtn) m_lineColorBtn->setEnabled(!on);
-    if (m_fillColorBtn) m_fillColorBtn->setEnabled(!on);
-}
-
 void SpectrumOverlayMenu::setWaterfallAverageAvailable(bool available)
 {
     for (QWidget* w : {static_cast<QWidget*>(m_wfAvgSlider),
@@ -2963,6 +2919,23 @@ void SpectrumOverlayMenu::syncPanProcessingSettings(int avg, int fps,
     m_fpsSlider->setValue(fps);
     m_fpsLabel->setText(QString::number(fps));
     m_weightedAvgBtn->setChecked(weightedAvg);
+}
+
+void SpectrumOverlayMenu::syncDisplay3D(int dssFloorDepth, int dssGain, int dssRowSpan)
+{
+    syncDssFloorDepth(dssFloorDepth);
+    if (m_dssGainSlider) {
+        const int v = std::clamp(dssGain, 0, 100);
+        QSignalBlocker b(m_dssGainSlider);
+        m_dssGainSlider->setValue(v);
+        if (m_dssGainLabel) m_dssGainLabel->setText(QString::number(v));
+    }
+    if (m_dssRowSpanSlider) {
+        const int v = std::clamp(dssRowSpan, 0, 100);
+        QSignalBlocker b(m_dssRowSpanSlider);
+        m_dssRowSpanSlider->setValue(v);
+        if (m_dssRowSpanLabel) m_dssRowSpanLabel->setText(QString::number(v));
+    }
 }
 
 void SpectrumOverlayMenu::syncDssFloorDepth(int dB)

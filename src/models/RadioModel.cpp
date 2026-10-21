@@ -6012,6 +6012,22 @@ bool RadioModel::requestPanWaterfallAverage(const QString& panId, int average)
     return true;
 }
 
+void RadioModel::setPanBackendAverageOverride(const QString& panId, std::optional<int> average)
+{
+    if (panId.isEmpty() || !shapesDisplayRatesLocally()) {
+        return;
+    }
+    if (average) {
+        m_panBackendAverageOverride.insert(panId, std::clamp(*average, 0, 100));
+    } else {
+        m_panBackendAverageOverride.remove(panId);
+    }
+    const PanadapterModel* pan = panadapter(panId);
+    const int operators = pan ? std::max(0, pan->average()) : 0;
+    m_backend->setPanAverage(backendPanIdFor(panId),
+                             m_panBackendAverageOverride.value(panId, operators));
+}
+
 bool RadioModel::requestPanAverage(const QString& panId, int average)
 {
     if (panId.isEmpty() || average < 0 || average > 100) {
@@ -6033,7 +6049,8 @@ bool RadioModel::requestPanAverage(const QString& panId, int average)
         pan->setLocalAverage(average);
         // And down to the backend, which may average its own spectrum -- the
         // same path setPanFrameRate() takes in requestPanDisplayRates().
-        m_backend->setPanAverage(backendPanIdFor(panId), average);
+        m_backend->setPanAverage(backendPanIdFor(panId),
+                                 m_panBackendAverageOverride.value(panId, average));
         return true;
     }
 

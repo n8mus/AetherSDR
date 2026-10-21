@@ -986,6 +986,12 @@ public:
     // for a backend declaring backendPanWaterfallAveraging. Local-shaping
     // backends only; nothing is sent to a command-plane radio.
     bool requestPanWaterfallAverage(const QString& panId, int average);
+    // AetherSDR Orion fork: the Orion Console display mode averages its own
+    // trace, so while a pan shows it a self-averaging backend is asked for
+    // raw frames instead of the operator's FFT AVG. The pan model keeps the
+    // operator's FFT AVG, which goes back down the moment the override is
+    // cleared. Local-shaping backends only.
+    void setPanBackendAverageOverride(const QString& panId, std::optional<int> average);
     // Weighted-average toggle for a backend that shapes its own spectrum:
     // straight down to that backend. Returns false on Flex, where the caller
     // sends the weighted_average= wire command itself.
@@ -2519,6 +2525,8 @@ private:
     PcmFrameGate m_backendPcmGate;
     PcmFrameGate m_slicePcmGate;
     PcmFrameGate m_demodPcmGate;
+    // AetherSDR Orion fork: pans whose backend averaging is overridden.
+    QHash<QString, int> m_panBackendAverageOverride;
 };
 
 } // namespace AetherSDR

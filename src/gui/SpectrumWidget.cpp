@@ -1,4 +1,5 @@
 #include "SpectrumWidget.h"
+#include "gui/orion/OrionPanRenderer.h"   // AetherSDR Orion fork (FORK-NOTES.md)
 #include "SpectrumChromeGeometry.h"
 #include "SpectrumSquelchLogic.h"
 #include "ScopedChildWidget.h"
@@ -2528,14 +2529,6 @@ void SpectrumWidget::loadSettings()
         m_fftFillColor = parsed;
     // Trace line color is independent of the fill (#4239). Default matches the
     // legacy look where the line was drawn in the fill color (cyan).
-    // Default the trace to the waterfall's scheme for anyone who never
-    // picked trace colours by hand; an operator who did keeps theirs.
-    const bool customTrace =
-        s.value(settingsKey("DisplayFftFillColor"), "#00e5ff").toString() != "#00e5ff"
-        || s.value(settingsKey("DisplayFftLineColor"), "#00e5ff").toString() != "#00e5ff";
-    m_traceFollowsScheme =
-        s.value(settingsKey("DisplayFftTraceFollowsScheme"), customTrace ? "False" : "True")
-            .toString() == "True";
     const QString lineColorStr = s.value(settingsKey("DisplayFftLineColor"), "#00e5ff").toString();
     QColor parsedLine(lineColorStr);
     if (parsedLine.isValid())
@@ -4473,61 +4466,6 @@ void SpectrumWidget::setFftLineColor(const QColor& c) {
     s.save();
     markOverlayDirty();
 }
-// AetherSDR Orion fork: the trace taking its colours from the waterfall's
-// own scheme. Picking "Purple" used to recolour the waterfall and leave the
-// trace on its factory cyan, so the two halves of one panadapter disagreed.
-// The line is sampled near the hot end of the ramp and the fill from its
-// middle, which is what makes a scheme look like itself.
-// Where the measured noise floor sits as a fraction of the display window
-// (0 = bottom, 1 = top). Both trace paths anchor the colour ramp there.
-float SpectrumWidget::traceColourFloorFraction() const
-{
-    if (m_dynamicRange <= 1.0f || m_measuredNoiseFloorDbm <= -500.0f) {
-        return 0.0f;
-    }
-    const float norm = (m_refLevel - m_measuredNoiseFloorDbm) / m_dynamicRange;
-    return qBound(0.0f, 1.0f - norm, 1.0f);
-}
-
-void SpectrumWidget::applySchemeToTrace()
-{
-    if (!m_traceFollowsScheme) {
-        return;
-    }
-    int n = 0;
-    const auto* stops = wfSchemeStops(m_wfColorScheme, n);
-    if (!stops || n < 2) {
-        return;
-    }
-    m_fftLineColor = QColor::fromRgb(interpolateGradient(0.88f, stops, n));
-    m_fftFillColor = QColor::fromRgb(interpolateGradient(0.55f, stops, n));
-    markOverlayDirty();
-    update();
-}
-
-void SpectrumWidget::setTraceFollowsScheme(bool on)
-{
-    if (m_traceFollowsScheme == on) {
-        return;
-    }
-    m_traceFollowsScheme = on;
-    auto& s = AppSettings::instance();
-    s.setValue(settingsKey("DisplayFftTraceFollowsScheme"), on ? "True" : "False");
-    if (on) {
-        applySchemeToTrace();
-    } else {
-        // Back to whatever the operator picked by hand.
-        const QColor fill(s.value(settingsKey("DisplayFftFillColor"), "#00e5ff").toString());
-        const QColor line(s.value(settingsKey("DisplayFftLineColor"), "#00e5ff").toString());
-        if (fill.isValid()) m_fftFillColor = fill;
-        if (line.isValid()) m_fftLineColor = line;
-        markOverlayDirty();
-        update();
-    }
-    s.save();
-    emit traceFollowsSchemeResolved(on);
-}
-
 void SpectrumWidget::setWfColorGain(int gain) {
     int clamped = std::clamp(gain, 0, 100);
     if (clamped != m_wfColorGain) {
@@ -4927,7 +4865,6 @@ void SpectrumWidget::setWfColorScheme(int scheme) {
         s.setValue(settingsKey("DisplayWfColorScheme"), QString::number(static_cast<int>(m_wfColorScheme)));
         s.save();
         recolorWaterfallViewport();
-        applySchemeToTrace();   // the trace is part of the same picture
     }
     update();
 }
@@ -5015,12 +4952,55 @@ void SpectrumWidget::setDssRowSpan(int pct) {
     update();
 }
 
+// AetherSDR Orion fork (FORK-NOTES.md).
+orion::OrionPanRenderer& SpectrumWidget::orionPan()
+{
+    if (!m_orionPan) {
+        m_orionPan = std::make_unique<orion::OrionPanRenderer>();
+        const auto& s = AppSettings::instance();
+        m_orionWfRefCustom = s.contains(settingsKey("OrionPanWfRefDb"));
+        m_orionPan->setWaterfallRefDb(
+            m_orionWfRefCustom ? s.value(settingsKey("OrionPanWfRefDb")).toFloat() : m_refLevel);
+        syncOrionPanSettings();
+    }
+    return *m_orionPan;
+}
+
+void SpectrumWidget::syncOrionPanSettings()
+{
+    if (!m_orionPan) {
+        return;
+    }
+    int n = 0;
+    const auto* stops = wfSchemeStops(m_wfColorScheme, n);
+    m_orionPan->setPalette(stops, n);
+    m_orionPan->setTraceWindow(m_refLevel, m_dynamicRange);
+    if (!m_orionWfRefCustom) {
+        m_orionPan->setWaterfallRefDb(m_refLevel);
+    }
+    // Paced as the time tape on the right is drawn, so its seconds are true.
+    m_orionPan->setRowPeriodMs(static_cast<int>(std::lround(waterfallTimeScaleMsPerRow())));
+    // FFT AVG is 10 ms per step; the console's avgFrames is 50 ms per frame.
+    m_orionPan->setAvgFrames(1 + m_fftAverage / 5);
+    m_orionPan->setFillTrace(true);   // the console's fill is always on
+    m_orionPan->setLineWidth(std::max(1, static_cast<int>(std::lround(m_fftLineWidth))));
+    m_orionPan->setShowGrid(m_showGrid);
+    m_orionPan->setSmoothPx(m_fftSmoothing);
+    m_orionPan->setDecombHz(m_fftDecombHz);
+    if (m_bins.size() >= 2 && m_bandwidthMhz > 0.0) {
+        m_orionPan->setBinHz(m_bandwidthMhz * 1.0e6 / m_bins.size());
+    }
+}
+
 void SpectrumWidget::setSpectrumRenderMode(int mode) {
     auto clamped = static_cast<SpectrumRenderMode>(
         std::clamp(mode, 0, static_cast<int>(SpectrumRenderMode::Count) - 1));
     if (clamped != m_spectrumRenderMode) {
         commitFrequencyPreview();
         m_spectrumRenderMode = clamped;
+        if (clamped == SpectrumRenderMode::ModeOrion) {
+            orionPan();   // AetherSDR Orion fork: build it on first pick
+        }
         auto& s = AppSettings::instance();
         s.setValue(settingsKey("DisplaySpectrumRenderMode"),
                    QString::number(static_cast<int>(m_spectrumRenderMode)));
@@ -8072,31 +8052,6 @@ void SpectrumWidget::setSpectrumFrac(float f)
     markOverlayDirty();
 }
 
-// AetherSDR Orion fork: the console's two left-edge level strips. The
-// spectrum's slides the trace's reference; the waterfall's sets its own
-// black level, so the two halves are adjusted where you are looking
-// rather than through a panel.
-bool SpectrumWidget::inTraceLevelStrip(const QPoint& p) const
-{
-    if (p.x() < 0 || p.x() >= kLevelStripW) {
-        return false;
-    }
-    const int contentH = height() - (freqScaleH() + DIVIDER_H);
-    const int specH = static_cast<int>(contentH * m_spectrumFrac);
-    return p.y() >= 0 && p.y() < specH - 2;
-}
-
-bool SpectrumWidget::inWaterfallLevelStrip(const QPoint& p) const
-{
-    if (p.x() < 0 || p.x() >= kLevelStripW) {
-        return false;
-    }
-    const int contentH = height() - (freqScaleH() + DIVIDER_H);
-    const int specH = static_cast<int>(contentH * m_spectrumFrac);
-    const int wfTop = specH + freqScaleH() + DIVIDER_H;
-    return p.y() > wfTop + 2 && p.y() < height();
-}
-
 void SpectrumWidget::setDbmRange(float minDbm, float maxDbm)
 {
     if (m_transmitting && txWaterfallAffectsThisPan()) {
@@ -8757,6 +8712,11 @@ void SpectrumWidget::updateSpectrum(const QVector<float>& binsDbm, const Spectru
         m_fftFallbackSeedMask.clear();
     }
     m_bins = *spectrumBins;
+    // AetherSDR Orion fork: the console renderer sees every frame, in every
+    // mode, so its waterfall has history the moment the mode is picked.
+    if (m_orionPan) {
+        m_orionPan->ingest(*spectrumBins, QDateTime::currentMSecsSinceEpoch());
+    }
     // Decoder floor clipping affects the shared FLEX FFT input, not only the
     // 3D renderer. Recover the radio encoder aperture for 2D as well, even when
     // client-side automatic floor placement is disabled.
@@ -10030,29 +9990,26 @@ void SpectrumWidget::mousePressEvent(QMouseEvent* ev)
     const int specH = static_cast<int>(contentH * m_spectrumFrac);
     const int y = static_cast<int>(ev->position().y());
 
-    // AetherSDR Orion fork: the left-edge level strips, tested before any
-    // other gesture — they sit outside the trace and the passband, so
-    // nothing else wants that sliver.
-    if (ev->button() == Qt::LeftButton) {
-        const QPoint at = ev->position().toPoint();
-        if (inTraceLevelStrip(at)) {
-            // The spectrum half's strip IS Aether's reference-level drag, just
-            // reachable at the left edge the way the console has it: hand the
-            // gesture to m_draggingDbm so the clamping, the AppSettings write
-            // and the range command to the radio all stay upstream's.
+    // AetherSDR Orion fork: the console's left-edge strips, Orion mode only
+    // (FORK-NOTES.md). Spectrum strip: upstream's own reference-level drag,
+    // reached at the left edge. Waterfall strip: the waterfall's own
+    // reference, the one number the console renderer keeps for itself.
+    if (isOrionMode() && ev->button() == Qt::LeftButton
+        && ev->position().x() < orion::OrionPanRenderer::kDbAxisW) {
+        if (y < specH - 2) {
             m_draggingDbm = true;
-            m_dbmDragStartY = at.y();
+            m_dbmDragStartY = y;
             m_dbmDragStartRef = m_refLevel;
             setSpectrumCursor(Qt::SizeVerCursor);
             ev->accept();
             return;
         }
-        if (inWaterfallLevelStrip(at)) {
-            m_levelStrip = LevelStrip::Waterfall;
-            m_levelStripStartY = at.y();
-            m_levelStripStartBlack =
-                m_wfAutoBlack ? m_wfAutoBlackOffset : m_wfBlackLevel;
+        if (y > specH + chromeH + 2) {
+            m_orionWfRefDrag = true;
+            m_orionWfRefDragStartY = y;
+            m_orionWfRefDragStart = orionPan().waterfallRefDb();
             setCursor(Qt::SizeVerCursor);
+            ev->accept();
             return;
         }
     }
@@ -11149,26 +11106,17 @@ void SpectrumWidget::applyPanDragCenter(double newCenterMhz, bool force)
 void SpectrumWidget::mouseMoveEvent(QMouseEvent* ev)
 {
     PerfInputScope perfScope("mouseMove");
-    // AetherSDR Orion fork: a level strip in progress owns the gesture.
-    // Dragging DOWN raises the reference, as the console has it: the scale
-    // slides down under your hand and the signals follow.
-    if (m_levelStrip == LevelStrip::Waterfall) {
-        // The waterfall half has no upstream drag of its own, so this one is
-        // the fork's: its black point, which is what "intensity" means there.
-        const int dy = static_cast<int>(ev->position().y()) - m_levelStripStartY;
+    // AetherSDR Orion fork: a waterfall-reference drag in progress owns the
+    // gesture. Dragging DOWN raises the reference, as the console has it.
+    if (m_orionWfRefDrag) {
         const int contentH = height() - (freqScaleH() + DIVIDER_H);
-        const int specH = std::max(1, static_cast<int>(contentH * m_spectrumFrac));
+        const int specH = static_cast<int>(contentH * m_spectrumFrac);
         const int wfH = std::max(1, height() - (specH + freqScaleH() + DIVIDER_H));
-        const int d = static_cast<int>(std::lround(
-            static_cast<double>(-dy) * 100.0 / wfH));
-        const int level = std::clamp(m_levelStripStartBlack + d, 0, 100);
-        if (m_wfAutoBlack) {
-            setWfAutoBlackOffset(level);
-            emit wfAutoBlackOffsetEdited(m_wfAutoBlackOffset);
-        } else {
-            setWfBlackLevel(level);
-            emit wfBlackLevelEdited(m_wfBlackLevel);
-        }
+        const float dy = static_cast<float>(ev->position().y() - m_orionWfRefDragStartY);
+        const float ref = std::clamp(m_orionWfRefDragStart + dy * m_dynamicRange / wfH,
+                                     -200.0f, 50.0f);
+        orionPan().setWaterfallRefDb(ref);
+        update();
         return;
     }
     if (PerfTelemetry::instance().enabled()) {
@@ -11673,12 +11621,16 @@ void SpectrumWidget::mouseMoveEvent(QMouseEvent* ev)
 
 void SpectrumWidget::mouseReleaseEvent(QMouseEvent* ev)
 {
-    if (m_levelStrip == LevelStrip::Waterfall) {
-        m_levelStrip = LevelStrip::None;
+    PerfInputScope perfScope("mouseRelease");
+    if (m_orionWfRefDrag) {   // AetherSDR Orion fork
+        m_orionWfRefDrag = false;
+        m_orionWfRefCustom = true;
+        auto& s = AppSettings::instance();
+        s.setValue(settingsKey("OrionPanWfRefDb"), QString::number(orionPan().waterfallRefDb()));
+        s.save();
         setSpectrumCursor(Qt::CrossCursor);
         return;
     }
-    PerfInputScope perfScope("mouseRelease");
     const auto dragStatePublisher = makeScopeExit([this] { publishPerfDragState(); });
     (void)dragStatePublisher;
     clearVfoCursorOverride();
@@ -13507,8 +13459,7 @@ void SpectrumWidget::initSpectrumPipeline()
     // (same conclusion as PR #3968). Use it unconditionally.
     m_fftColFormat = QRhiTexture::R16F;
     m_fftScopeUbo = r->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer,
-                                 10 * 4 * sizeof(float));  // 10 vec4 — see panscope.frag U block
-                                                           // (#4239, plus the fork's 4 ramp stops)
+                                 6 * 4 * sizeof(float));  // 6 vec4 — see panscope.frag U block (#4239)
     m_fftScopeUbo->create();
 
     // LINEAR column sampling interpolates the trace between device pixel
@@ -14157,6 +14108,7 @@ void SpectrumWidget::renderGpuFrame(QRhiCommandBuffer* cb,
     // positions. Everything below is identical to 2D except the FFT trace is
     // swapped for the 3DSS surface quad inside specRect.
     const bool is3D = (m_spectrumRenderMode == SpectrumRenderMode::Mode3D);
+    const bool isOrion = isOrionMode();   // AetherSDR Orion fork (FORK-NOTES.md)
     const float dssFrameFloorDbm = is3D
         ? dssFloorDbm()
         : m_lastDetectDssFloor;
@@ -14690,7 +14642,9 @@ void SpectrumWidget::renderGpuFrame(QRhiCommandBuffer* cb,
             // (1 - m_bgOpacity/100), and drawGrid sets its own pen but not
             // opacity, so the grid must not inherit the image opacity (review @NF0T).
             bp.setOpacity(1.0);
-            drawGrid(bp, specRect);
+            if (!isOrionMode()) {   // AetherSDR Orion fork: the console draws its own grid
+                drawGrid(bp, specRect);
+            }
             m_overlayBgNeedsUpload = true;
         }
 
@@ -15353,6 +15307,38 @@ void SpectrumWidget::renderGpuFrame(QRhiCommandBuffer* cb,
             }
         }
 
+        // AetherSDR Orion fork: the console renderer's spectrum and waterfall
+        // images, uploaded like the 3DSS fallback above (FORK-NOTES.md).
+        if (isOrion && m_ovSampler) {
+            syncOrionPanSettings();
+            auto& op = orionPan();
+            const float fbDpr = static_cast<float>(renderTarget()->pixelSize().width())
+                              / static_cast<float>(qMax(1, w));
+            const QSize specPx(qMax(2, qRound(specContentW * fbDpr)), qMax(2, qRound(specH * fbDpr)));
+            const QSize wfPx(qMax(2, qRound(wfContentW * fbDpr)), qMax(2, qRound(wfRect.height() * fbDpr)));
+            auto ensure = [&](QRhiTexture*& tex, QRhiShaderResourceBindings*& srb, QSize& have, const QSize& want) {
+                if (tex && srb && have == want) return;
+                delete srb; delete tex;
+                tex = rhi()->newTexture(QRhiTexture::RGBA8, want);
+                tex->create();
+                srb = rhi()->newShaderResourceBindings();
+                srb->setBindings({QRhiShaderResourceBinding::sampledTexture(
+                    1, QRhiShaderResourceBinding::FragmentStage, tex, m_ovSampler)});
+                srb->create();
+                have = want;
+                m_orionUploadedGen = ~0ull;
+            };
+            ensure(m_orionSpecTex, m_orionSpecSrb, m_orionSpecTexSize, specPx);
+            ensure(m_orionWfTex, m_orionWfSrb, m_orionWfTexSize, wfPx);
+            if (op.generation() != m_orionUploadedGen) {
+                const QImage spec = op.renderSpectrum(specPx).convertToFormat(QImage::Format_RGBA8888_Premultiplied);
+                const QImage wf = op.renderWaterfall(wfPx).convertToFormat(QImage::Format_RGBA8888_Premultiplied);
+                batch->uploadTexture(m_orionSpecTex, QRhiTextureUploadEntry(0, 0, QRhiTextureSubresourceUploadDescription(spec)));
+                batch->uploadTexture(m_orionWfTex, QRhiTextureUploadEntry(0, 0, QRhiTextureSubresourceUploadDescription(wf)));
+                m_orionUploadedGen = op.generation();
+            }
+        }
+
         if (!m_dssMeshReady) {
             // Lazily build the fallback pipeline/VBO on first use (runs before
             // beginPass, so resource creation is outside the render pass). Only
@@ -15377,7 +15363,7 @@ void SpectrumWidget::renderGpuFrame(QRhiCommandBuffer* cb,
         // bake and its ~1.4 MB/frame VBO uploads.
         QElapsedTimer panStatsFftTimer;
         panStatsFftTimer.start();
-        if (!is3D && m_fftScopePipeline && m_fftColTex) {
+        if (!is3D && !isOrion && m_fftScopePipeline && m_fftColTex) {
             const float fbDpr = static_cast<float>(renderTarget()->pixelSize().width())
                               / static_cast<float>(qMax(1, w));
             const int cols = std::clamp(
@@ -15434,24 +15420,7 @@ void SpectrumWidget::renderGpuFrame(QRhiCommandBuffer* cb,
                 // UBO — see panscope.frag's U block.
                 const QColor dk = m_fftFillColor.darker(300);
                 const float fa = m_fftFillAlpha;
-                // AetherSDR Orion fork: the heat ramp's four stops. With
-                // "Match Scheme" on they are sampled from the operator's
-                // waterfall scheme, so the trace is drawn in the same
-                // colours as the waterfall under it; otherwise they are the
-                // legacy blue → cyan → green → red the shader used to hold.
-                QColor ramp[4];
-                {
-                    int rampStops = 0;
-                    const WfGradientStop* st =
-                        m_traceFollowsScheme ? wfSchemeStops(m_wfColorScheme, rampStops) : nullptr;
-                    for (int i = 0; i < 4; ++i) {
-                        const float t = static_cast<float>(i) / 3.0f;
-                        ramp[i] = (st && rampStops >= 2)
-                                      ? QColor::fromRgb(interpolateGradient(t, st, rampStops))
-                                      : AetherSDR::FftHeatMap::heatColor(t);
-                    }
-                }
-                const float ubo[40] = {
+                const float ubo[24] = {
                     static_cast<float>(specContentW) * fbDpr,       // plot: wPx
                     static_cast<float>(specH) * fbDpr,              // hPx
                     static_cast<float>(n),                          // columnCount
@@ -15468,7 +15437,7 @@ void SpectrumWidget::renderGpuFrame(QRhiCommandBuffer* cb,
                     kFftLineFeatherAlpha,
                     fa,                                             // fillAlpha
                     m_fftHeatMap ? 1.0f : 0.0f,
-                    traceColourFloorFraction(),                     // fillP.z — colour floor
+                    0.0f,                                           // fillP.z — unused (pad)
                     0.0f,
                     static_cast<float>(m_fftFillColor.redF()),
                     static_cast<float>(m_fftFillColor.greenF()),
@@ -15482,23 +15451,6 @@ void SpectrumWidget::renderGpuFrame(QRhiCommandBuffer* cb,
                     static_cast<float>(m_fftLineColor.redF()),
                     static_cast<float>(m_fftLineColor.greenF()),
                     static_cast<float>(m_fftLineColor.blueF()),
-                    1.0f,
-                    // ramp0..ramp3
-                    static_cast<float>(ramp[0].redF()),
-                    static_cast<float>(ramp[0].greenF()),
-                    static_cast<float>(ramp[0].blueF()),
-                    1.0f,
-                    static_cast<float>(ramp[1].redF()),
-                    static_cast<float>(ramp[1].greenF()),
-                    static_cast<float>(ramp[1].blueF()),
-                    1.0f,
-                    static_cast<float>(ramp[2].redF()),
-                    static_cast<float>(ramp[2].greenF()),
-                    static_cast<float>(ramp[2].blueF()),
-                    1.0f,
-                    static_cast<float>(ramp[3].redF()),
-                    static_cast<float>(ramp[3].greenF()),
-                    static_cast<float>(ramp[3].blueF()),
                     1.0f,
                 };
                 batch->updateDynamicBuffer(m_fftScopeUbo, 0, sizeof(ubo), ubo);
@@ -15532,7 +15484,18 @@ void SpectrumWidget::renderGpuFrame(QRhiCommandBuffer* cb,
         ? m_wfFramePipeline : m_wfPipeline;
     QRhiShaderResourceBindings* waterfallSrb = useRowFrequencyPipeline
         ? m_wfFrameSrb : m_wfSrb;
-    if (waterfallPipeline && waterfallSrb) {
+    if (isOrion && m_ovPipeline && m_orionWfSrb) {
+        // AetherSDR Orion fork: the console's waterfall in place of Aether's.
+        cb->setGraphicsPipeline(m_ovPipeline);
+        cb->setShaderResources(m_orionWfSrb);
+        cb->setViewport({static_cast<float>(wfRect.x()) * dpr,
+                         static_cast<float>(h - wfRect.bottom() - 1) * dpr,
+                         static_cast<float>(wfContentW) * dpr,
+                         static_cast<float>(wfRect.height()) * dpr});
+        const QRhiCommandBuffer::VertexInput vbuf(m_ovVbo, 0);
+        cb->setVertexInput(0, 1, &vbuf);
+        cb->draw(4);
+    } else if (waterfallPipeline && waterfallSrb) {
         cb->setGraphicsPipeline(waterfallPipeline);
         cb->setShaderResources(waterfallSrb);
         // QRhiViewport: (x, y, width, height) — y is bottom-up in GL convention
@@ -15591,6 +15554,17 @@ void SpectrumWidget::renderGpuFrame(QRhiCommandBuffer* cb,
             dssMeshOutlineRows = drawnRows;
             dssMeshOutlineSkippedRows = skippedRows;
         }
+    } else if (isOrion && m_ovPipeline && m_orionSpecSrb) {
+        // AetherSDR Orion fork: the console's spectrum, fill and dB scale.
+        cb->setGraphicsPipeline(m_ovPipeline);
+        cb->setShaderResources(m_orionSpecSrb);
+        cb->setViewport({static_cast<float>(specRect.x()) * dpr,
+                         static_cast<float>(h - specRect.bottom() - 1) * dpr,
+                         static_cast<float>(specContentW) * dpr,
+                         static_cast<float>(specRect.height()) * dpr});
+        const QRhiCommandBuffer::VertexInput vbuf(m_ovVbo, 0);
+        cb->setVertexInput(0, 1, &vbuf);
+        cb->draw(4);
     } else if (is3D && m_ovPipeline && m_dssSrb && m_dssTexW > 0) {
         // Cached-image fallback quad, stretched to the specRect viewport.
         cb->setGraphicsPipeline(m_ovPipeline);
@@ -15649,7 +15623,7 @@ void SpectrumWidget::renderGpuFrame(QRhiCommandBuffer* cb,
     // Draw FFT spectrum — viewport restricted to spectrum rect (2D only).
     // One full-viewport quad; panscope.frag evaluates fill + feather + core
     // stroke per pixel from the column texture.
-    if (!is3D && m_fftScopePipeline && m_ovVbo && fftTracePointCount > 0) {
+    if (!is3D && !isOrion && m_fftScopePipeline && m_ovVbo && fftTracePointCount > 0) {
         float specVpX = static_cast<float>(specRect.x()) * dpr;
         float specVpY = static_cast<float>(h - specRect.bottom() - 1) * dpr;
         float specVpW = static_cast<float>(specContentW) * dpr;
@@ -15781,6 +15755,13 @@ void SpectrumWidget::releaseResources()
     // 3DSS surface layer — same lifecycle as the overlay scaffolding.
     delete m_dssSrb;         m_dssSrb = nullptr;
     delete m_dssGpuTex;      m_dssGpuTex = nullptr;
+    // AetherSDR Orion fork: the console renderer's textures.
+    delete m_orionSpecSrb;   m_orionSpecSrb = nullptr;
+    delete m_orionSpecTex;   m_orionSpecTex = nullptr;
+    delete m_orionWfSrb;     m_orionWfSrb = nullptr;
+    delete m_orionWfTex;     m_orionWfTex = nullptr;
+    m_orionSpecTexSize = m_orionWfTexSize = QSize();
+    m_orionUploadedGen = ~0ull;
     m_dssTexW = m_dssTexH = 0;
     m_dssTexNeedsUpload = true;
     m_dssLastUploadedGen = ~0ull;
@@ -15867,6 +15848,7 @@ void SpectrumWidget::paintEvent(QPaintEvent* ev)
     const QRect wfContentRect   = wfRect.adjusted(0, 0, -DBM_STRIP_W, 0);
 
     const bool is3D = (m_spectrumRenderMode == SpectrumRenderMode::Mode3D);
+    const bool isOrion = isOrionMode();   // AetherSDR Orion fork (FORK-NOTES.md)
     const float dssFrameFloorDbm = is3D
         ? dssFloorDbm()
         : m_lastDetectDssFloor;
@@ -15874,7 +15856,12 @@ void SpectrumWidget::paintEvent(QPaintEvent* ev)
     // Spectrum region: the 3DSS surface, or the classic bg + grid + FFT trace.
     // 3DSS replaces ONLY the spectrum trace — the divider, freq scale, waterfall,
     // overlays, and scales below run identically in both modes.
-    if (is3D) {
+    if (isOrion) {
+        // AetherSDR Orion fork: the console's spectrum (FORK-NOTES.md).
+        syncOrionPanSettings();
+        p.fillRect(specRect, m_bgFillColor);
+        p.drawImage(specContentRect, orionPan().renderSpectrum(specContentRect.size()));
+    } else if (is3D) {
         // Cap the software surface (like the GPU path) so a HiDPI/maximized
         // window doesn't rebuild a multi-megapixel QImage every frame; the
         // surface is intrinsically low-res, so stretch it on draw.
@@ -15917,7 +15904,11 @@ void SpectrumWidget::paintEvent(QPaintEvent* ev)
     // Glacier the gap would otherwise read as a pure-black seam beside the
     // #05183c noise floor on every repaint.
     p.fillRect(wfRect, QColor::fromRgb(waterfallFloorRgb()));
-    drawWaterfall(p, wfContentRect);
+    if (isOrion) {
+        p.drawImage(wfContentRect, orionPan().renderWaterfall(wfContentRect.size()));
+    } else {
+        drawWaterfall(p, wfContentRect);
+    }
 
     // Edge crop (panEdgeCropActive()) now happens upstream, at the bin/
     // coordinate level (croppedBinsForDisplay(), mhzToX()/xToMhz()'s
@@ -16241,24 +16232,8 @@ void SpectrumWidget::drawSpectrum(QPainter& p, const QRect& r)
     const int h = r.height();
     const int n = fftBins.size();
 
-    // Heat-map ramp. AetherSDR Orion fork: with "Match Scheme" on the trace
-    // is coloured from the waterfall's OWN scheme, so picking Purple turns
-    // the whole panadapter purple. FftHeatMap's ramp is a fixed
-    // blue-cyan-green-yellow-red that ignored the scheme entirely, which is
-    // why the waterfall changed and the trace stayed blue-green; it is still
-    // what you get with the toggle off (gui/FftHeatMap.h, shared with the
-    // mini-pan).
-    int schemeStopCount = 0;
-    const WfGradientStop* schemeStops =
-        m_traceFollowsScheme ? wfSchemeStops(m_wfColorScheme, schemeStopCount) : nullptr;
-    const bool useScheme = schemeStops && schemeStopCount >= 2;
-    const auto heatColor = [&](float t) -> QColor {
-        if (useScheme) {
-            return QColor::fromRgb(
-                interpolateGradient(std::clamp(t, 0.0f, 1.0f), schemeStops, schemeStopCount));
-        }
-        return AetherSDR::FftHeatMap::heatColor(t);
-    };
+    // Heat-map ramp shared with the mini-pan — see gui/FftHeatMap.h.
+    const auto heatColor = &AetherSDR::FftHeatMap::heatColor;
 
     // Pre-compute positions and normalized levels
     struct Pt { float x, y, t; };
@@ -16270,22 +16245,7 @@ void SpectrumWidget::drawSpectrum(QPainter& p, const QRect& r)
         pts[i].x = static_cast<float>(r.left()) + xFrac * static_cast<float>(w);
         pts[i].y = static_cast<float>(r.top())
             + qBound(0.0f, norm * static_cast<float>(h), static_cast<float>(h - 1));
-        pts[i].t = 1.0f - norm;  // 0=bottom of the window, 1=top
-    }
-
-    // AetherSDR Orion fork: colour the trace across the range that holds
-    // SIGNALS, not across the whole dB window. The floor usually sits in the
-    // bottom tenth of the axis, so mapping the ramp over the window left
-    // every ordinary signal in the ramp's first third — "Purple" reached
-    // purple only on the single tallest peak, and read as blue-green
-    // everywhere else. Anchoring 0 at the measured floor spends the whole
-    // ramp on what is above it.
-    const float traceFloorT = traceColourFloorFraction();
-    if (traceFloorT > 0.0f && traceFloorT < 0.98f) {
-        const float span = 1.0f - traceFloorT;
-        for (int i = 0; i < n; ++i) {
-            pts[i].t = qBound(0.0f, (pts[i].t - traceFloorT) / span, 1.0f);
-        }
+        pts[i].t = 1.0f - norm;  // 0=noise floor, 1=strong signal
     }
 
     p.setRenderHint(QPainter::Antialiasing, true);
@@ -16310,30 +16270,14 @@ void SpectrumWidget::drawSpectrum(QPainter& p, const QRect& r)
                       << QPointF(pts[i + 1].x, bottom)
                       << QPointF(pts[i].x, bottom);
 
-            // The fill is keyed to the dB AXIS (see the shader): a vertical
-            // gradient through the whole ramp, identical in every column, so
-            // the bands run horizontally and a signal climbs through them.
+            float avgT = (pts[i].t + pts[i + 1].t) * 0.5f;
+            QColor top = heatColor(avgT);
             const float swFillAlpha = m_fftFillAlpha;
-            QColor top = heatColor(1.0f);
             top.setAlphaF(swFillAlpha * AetherSDR::FftHeatMap::kTopAlphaScale);
-            QColor bot = AetherSDR::FftHeatMap::gradientBase(swFillAlpha);
-            if (useScheme) {
-                // The dark end of the operator's own ramp, so the fill fades
-                // into the scheme instead of into FftHeatMap's navy.
-                bot = heatColor(0.06f);
-                bot.setAlphaF(swFillAlpha);
-            }
-            // Full-height gradient so every column shares the same bands,
-            // gamma-compressed as the console does it (see the shader).
-            QLinearGradient grad(0, r.top(), 0, bottom);
-            for (int k = 0; k <= 8; ++k) {
-                const float f = static_cast<float>(k) / 8.0f;
-                QColor c = heatColor(std::pow(1.0f - f, 0.6f));
-                c.setAlphaF(swFillAlpha * (k == 0
-                                               ? AetherSDR::FftHeatMap::kTopAlphaScale
-                                               : 1.0f));
-                grad.setColorAt(f, c);
-            }
+            const QColor bot = AetherSDR::FftHeatMap::gradientBase(swFillAlpha);
+            QLinearGradient grad(0, std::min(pts[i].y, pts[i + 1].y), 0, bottom);
+            grad.setColorAt(0.0, top);
+            grad.setColorAt(1.0, bot);
             p.setPen(Qt::NoPen);
             p.setBrush(grad);
             p.drawPolygon(trapezoid);

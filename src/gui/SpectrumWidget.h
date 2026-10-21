@@ -52,6 +52,7 @@ namespace AetherSDR {
 class SpectrumOverlayMenu;
 class SpectralEnvelope;
 struct DecombScratch;
+namespace orion { class OrionPanRenderer; }
 class VfoWidget;
 class PanadapterRenderScheduler;
 struct PanadapterOverlayMessage;
@@ -113,6 +114,9 @@ inline const char* wfSchemeName(WfColorScheme scheme)
 enum class SpectrumRenderMode : int {
     Mode2D = 0,    // FFT trace + scrolling waterfall (classic)
     Mode3D,        // 3DSS perspective stacked-trace surface
+    // AetherSDR Orion fork: the Orion console's panadapter (fork rule 2),
+    // drawn by gui/orion/OrionPanRenderer. Appended: stored by index.
+    ModeOrion,
     Count          // sentinel
 };
 
@@ -703,20 +707,6 @@ public:
     void setFftFps(int fps);
     void setFftFillAlpha(float a);
     void setFftFillColor(const QColor& c);
-    // AetherSDR Orion fork: trace colours derived from the waterfall scheme.
-    // AetherSDR Orion fork: the console's left-edge drag strips (fork
-    // rule 2). A vertical drag in the left edge of the SPECTRUM slides the
-    // trace's reference level; the same gesture in the left edge of the
-    // WATERFALL sets the waterfall's own black level, independently. Width
-    // in device-independent pixels.
-    static constexpr int kLevelStripW = 18;
-    [[nodiscard]] bool inTraceLevelStrip(const QPoint& p) const;
-    [[nodiscard]] bool inWaterfallLevelStrip(const QPoint& p) const;
-
-    void setTraceFollowsScheme(bool on);
-    [[nodiscard]] bool traceFollowsScheme() const { return m_traceFollowsScheme; }
-    void applySchemeToTrace();
-    [[nodiscard]] float traceColourFloorFraction() const;
     void setFftLineColor(const QColor& c);
     void setFftHeatMap(bool on);
     void setShowGrid(bool on);
@@ -1076,15 +1066,6 @@ signals:
     void radioDbmHeadroomRecoveryRequested(float lowerHeadroomDb, float upperHeadroomDb);
     void noiseFloorPositionResolved(int pos);
     void dssFloorDepthResolved(int dB);
-    // AetherSDR Orion fork: the trace-follows-scheme toggle settled.
-    void traceFollowsSchemeResolved(bool on);
-    // AetherSDR Orion fork: the waterfall's level, dragged on its left-edge
-    // strip, so the Display panel's slider follows the gesture. Which number
-    // moved depends on the mode the waterfall is actually in: with auto-black
-    // on, the one live number is the noise-floor offset, so the strip drags
-    // that; with it off, the manual black level.
-    void wfBlackLevelEdited(int level);
-    void wfAutoBlackOffsetEdited(int offset);
     void waterfallLineDurationChangeRequested(int ms);
     void kiwiSdrDisplaySourceRequested(bool kiwi);
     // TNF signals
@@ -1793,13 +1774,6 @@ private:
 
     // ── FFT display controls (radio-side via "display pan set") ──────────
     int   m_panIndex{0};             // per-pan settings index (0, 1, 2, 3)
-    bool  m_traceFollowsScheme{true};  // trace colours from the wf scheme
-    // The left-edge level strips: which one is being dragged, and what it
-    // held when the drag began.
-    enum class LevelStrip { None, Waterfall };
-    LevelStrip m_levelStrip{LevelStrip::None};
-    int   m_levelStripStartY{0};
-    int   m_levelStripStartBlack{0};
     int   m_fftAverage{0};           // 0=off, 1-10 frames
     bool  m_fftWeightedAvg{false};
     int   m_fftFps{25};
@@ -1841,6 +1815,20 @@ private:
     // 3DSS — perspective stacked-trace render mode. m_dss owns the rolling
     // history + cached surface image; consumed by both the CPU and GPU paths.
     SpectrumRenderMode m_spectrumRenderMode{SpectrumRenderMode::Mode2D};
+    // AetherSDR Orion fork: the console's renderer, built on first use
+    // (FORK-NOTES.md). Its waterfall reference is the one setting that is the
+    // fork's own; everything else it draws from is this widget's state.
+    std::unique_ptr<orion::OrionPanRenderer> m_orionPan;
+    orion::OrionPanRenderer& orionPan();
+    void syncOrionPanSettings();
+    [[nodiscard]] bool isOrionMode() const
+    { return m_spectrumRenderMode == SpectrumRenderMode::ModeOrion; }
+    // The waterfall's reference follows the trace's until the operator
+    // drags the waterfall strip; from then on it is theirs (and saved).
+    bool  m_orionWfRefCustom{false};
+    bool  m_orionWfRefDrag{false};
+    int   m_orionWfRefDragStartY{0};
+    float m_orionWfRefDragStart{0.0f};
     // GUI-thread only: pushRow() (updateSpectrum / updateKiwiSdrWaterfallRow) and
     // the renderGpuFrame/paint reads all run on the GUI thread, so m_dss needs no
     // lock. Do NOT call pushRow() from a worker/audio thread without adding one.
@@ -2393,6 +2381,16 @@ private:
     quint64 m_dssLastUploadedGen{~0ull};  // DssRenderer generation last uploaded
     int m_dssTexW{0};
     int m_dssTexH{0};
+    // AetherSDR Orion fork: the console renderer's two images, uploaded the
+    // same way as the 3DSS fallback above and drawn in the spectrum and
+    // waterfall viewports.
+    QRhiShaderResourceBindings* m_orionSpecSrb{nullptr};
+    QRhiTexture* m_orionSpecTex{nullptr};
+    QRhiShaderResourceBindings* m_orionWfSrb{nullptr};
+    QRhiTexture* m_orionWfTex{nullptr};
+    QSize m_orionSpecTexSize;
+    QSize m_orionWfTexSize;
+    quint64 m_orionUploadedGen{~0ull};
 
     // 3DSS GPU height-map mesh (preferred path). The DssRenderer ring store
     // feeds a ring-buffered RGBA16F dBm + frequency-coverage texture; a static

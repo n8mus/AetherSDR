@@ -2077,6 +2077,10 @@ void MainWindow::wirePanLifecycle()
             // DisplaySourceTraceSettings; do not reapply legacy flat keys here.
             sw->setSpectrumRenderMode(
                 s.value(sw->settingsKey("DisplaySpectrumRenderMode"), "0").toInt());
+            // AetherSDR Orion fork: 3D gets raw frames (FORK-NOTES.md).
+            if (activePan) {
+                syncBackendAverageToRenderMode(activePan->panId(), sw);
+            }
             // Principle V: one owned object, re-applied as a unit. The legacy
             // flat gain key only seeds it when nothing has been written yet.
             sw->loadDisplay3DSettings(

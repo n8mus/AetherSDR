@@ -170,16 +170,6 @@ struct PanAmplitudeModel {
     // bins. Declare true only after reading the backend's bin path.
     bool binsAbsolute = false;
 
-    // AetherSDR Orion fork: the vertical window a radio should START with,
-    // in dBm, when the client has nothing saved for it. Absent keeps the
-    // widget's own default. A span is a display decision the BACKEND is
-    // best placed to make: it knows its own noise floor and headroom, and
-    // a window far wider than the signals crushes the whole trace into the
-    // bottom of the colour ramp — which is what the Orion's pan did, 90 dB
-    // of axis with every signal inside the lowest fifth of it.
-    std::optional<float> defaultMinDbm;
-    std::optional<float> defaultMaxDbm;
-
     // Explicit client persistence owner for the pan's dBm range (the axis
     // limits the operator sets). False preserves a family's existing settings
     // behavior. Read through RadioCapabilities::clientPersistsDbmRange().
